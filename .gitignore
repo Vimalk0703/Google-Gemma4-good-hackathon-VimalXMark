@@ -1,0 +1,8 @@
+geotab-hackathon/
+__pycache__/
+*.pyc
+.env
+models/
+*.wav
+*.mp4
+.DS_Store

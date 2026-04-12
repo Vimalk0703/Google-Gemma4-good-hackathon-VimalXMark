@@ -1,0 +1,634 @@
+# Malaika — Master Execution Plan v3
+
+> **Rule 1: EVERYTHING runs on the edge. No internet. No exceptions.**
+> **Rule 2: ALL intelligence comes from Gemma 4. It IS the solution, not a tool we use.**
+> **Rule 3: Every claim must be implementable. No hand-waving.**
+>
+> **Related files**:
+> - [MALAIKA_PROPOSAL.md](./MALAIKA_PROPOSAL.md) — Idea, video script, why-it-wins
+> - [DECISION_JOURNEY.md](./DECISION_JOURNEY.md) — How we arrived here
+> - [RESEARCH.md](./RESEARCH.md) — Full competition research
+
+---
+
+## 1. Hardware — What Does What
+
+Three distinct hardware roles. Do NOT confuse them.
+
+| Hardware | Role | What Runs On It |
+|----------|------|----------------|
+| **Mark's RTX 3060 (12GB)** | TRAINING ONLY | Unsloth QLoRA fine-tuning of Gemma 4 E4B. NOT used for demo inference. |
+| **Demo machine (laptop/desktop with GPU)** | LIVE DEMO | Fine-tuned Gemma 4 E4B via Transformers. Serves the Gradio web app judges interact with. |
+| **Android phone (flagship 2024+)** | VIDEO PROOF | Gemma 4 E2B via LiteRT-LM / AI Edge Gallery. Proves "it runs on a phone" in our 3-min video. |
+
+### Why Two Models (E2B + E4B)
+
+| Model | Where | Why |
+|-------|-------|-----|
+| **E4B** (4.5B active) | Demo machine (Transformers) | Better reasoning (+12 pts avg), better vision, better for medical assessment. Judges interact with this. |
+| **E2B** (2.3B active) | Phone (LiteRT-LM) | Proven on-phone: 50+ tok/s, 2.58GB, vision + audio + function calling. Shown in video to prove on-device. |
+
+Both are Gemma 4. Both are offline. Both are multimodal. The live demo uses the stronger model for accuracy. The video proves it also runs on a $200 phone. This is honest and impressive.
+
+### Confirmed Phone Performance (E2B via LiteRT-LM)
+
+| Device | Backend | Speed | RAM | Disk |
+|--------|---------|-------|-----|------|
+| Samsung S26 Ultra | GPU | 52.1 tok/s | 676 MB | 2.58 GB |
+| iPhone 17 Pro | GPU | 56.5 tok/s | 1,450 MB | 2.58 GB |
+| Samsung S26 Ultra | CPU | 46.9 tok/s | 1,733 MB | 2.58 GB |
+
+Source: [LiteRT-LM E2B benchmarks on HuggingFace](https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm)
+
+---
+
+## 2. How Gemma 4 IS the Solution
+
+### What Gemma 4 does that makes Malaika possible
+
+This is NOT "we used Gemma 4 as a chatbot." Gemma 4 enables capabilities that **did not exist before** on a phone:
+
+| Gemma 4 Capability | What It Enables in Malaika | Why Only Gemma 4 |
+|--------------------|-----------------------------|-----------------|
+| **Native vision on-device** | Camera sees chest indrawing, jaundice, wasting, dehydration signs | No other open model does multimodal vision on a phone at this quality |
+| **Native audio on-device** | Mic hears breath sounds (wheezing, stridor, grunting), understands speech in any language | E2B/E4B have built-in audio encoder — not a separate pipeline |
+| **Native function calling** | IMCI protocol steps as tool calls — model decides which assessment to run next | 1200% improvement over Gemma 3 in agentic tool use |
+| **140+ languages** | Caregiver speaks Swahili, Hausa, Hindi — AI understands and responds | Built into the model, not an add-on translation layer |
+| **Apache 2.0 license** | Free to deploy in any country, any clinic, any phone | Previous Gemma versions had restrictive license |
+| **Runs in <3GB on phone** | Works on phones already in pockets of billions | E2B Q4: 2.58GB disk, 676MB RAM on GPU |
+
+### What is NOT Gemma 4 (and why that's fine)
+
+| Component | What It Is | Why It's Not AI |
+|-----------|-----------|----------------|
+| IMCI State Machine | Python code: `if breathing_rate > 50: classify = "pneumonia"` | This is a calculator, not intelligence. Like `2+2=4`. |
+| TTS (Piper) | Plays audio of text Gemma generated | Like a speaker playing music. The intelligence is in the composition (Gemma). |
+| OpenCV frame extraction | Pulls frames from video to feed to Gemma 4 | Like opening a file to read it. The reading (analysis) is Gemma. |
+| Gradio UI | Displays results, captures camera/mic input | Like a window — what you see through it is Gemma's intelligence. |
+
+---
+
+## 3. Architecture — Clear and Implementable
+
+### The Complete Flow
+
+```
+PHONE (Video proof)                    DEMO MACHINE (Live demo)
+┌────────────────────┐                ┌─────────────────────────────┐
+│  Gemma 4 E2B       │                │  Gemma 4 E4B (fine-tuned)   │
+│  via LiteRT-LM     │                │  via Transformers           │
+│                    │                │                             │
+│  • 2.58 GB on disk │                │  • ~5-6 GB Q4 in VRAM      │
+│  • 50+ tok/s       │                │  • All modalities:          │
+│  • Vision ✓        │                │    text + image + audio     │
+│  • Audio ✓         │                │  • Fine-tuned LoRA adapters │
+│  • Function call ✓ │                │    for medical domain       │
+│  • Offline ✓       │                │  • Offline ✓                │
+│                    │                │                             │
+│  Shown in VIDEO    │                │  Served via Gradio          │
+│  to prove on-device│                │  (share=True for public URL)│
+└────────────────────┘                └──────────────┬──────────────┘
+                                                     │
+                                                     ▼
+                                      ┌──────────────────────────────┐
+                                      │  IMCI Protocol Engine         │
+                                      │  (Python state machine)       │
+                                      │                              │
+                                      │  Orchestrates assessment:     │
+                                      │  1. Danger signs (voice+vision│
+                                      │  2. Breathing (vision+audio) │
+                                      │  3. Diarrhea (voice+vision)  │
+                                      │  4. Fever (voice)            │
+                                      │  5. Nutrition (vision+voice) │
+                                      │  6. Heart rate [MEMS,optional│
+                                      │  7. Classification+Treatment │
+                                      │                              │
+                                      │  At each step, calls Gemma 4 │
+                                      │  for perception + reasoning.  │
+                                      │  Applies WHO thresholds in    │
+                                      │  deterministic code.          │
+                                      └──────────────┬──────────────┘
+                                                     │
+                                                     ▼
+                                      ┌──────────────────────────────┐
+                                      │  OUTPUT                       │
+                                      │  • Piper TTS speaks results  │
+                                      │  • Gradio UI shows assessment│
+                                      │  • 🔴🟡🟢 classification      │
+                                      └──────────────────────────────┘
+```
+
+### Single Inference Class (Transformers Only — No Ollama Complexity)
+
+```python
+# inference.py — ONE model, ONE runtime, ALL modalities
+
+from transformers import AutoProcessor, AutoModelForMultimodalLM
+import torch
+
+class MalaikaInference:
+    """Gemma 4 E4B loaded ONCE via Transformers.
+    Handles text, image, AND audio through the same model."""
+
+    def __init__(self, model_name="google/gemma-4-E4B-it", quantize_4bit=True):
+        self.processor = AutoProcessor.from_pretrained(model_name)
+
+        load_kwargs = {"device_map": "auto"}
+        if quantize_4bit:
+            from transformers import BitsAndBytesConfig
+            load_kwargs["quantization_config"] = BitsAndBytesConfig(
+                load_in_4bit=True,
+                bnb_4bit_compute_dtype=torch.float16
+            )
+
+        self.model = AutoModelForMultimodalLM.from_pretrained(
+            model_name, **load_kwargs
+        )
+
+    def _generate(self, messages: list, max_tokens=512) -> str:
+        inputs = self.processor.apply_chat_template(
+            messages, tokenize=True, return_dict=True,
+            return_tensors="pt", add_generation_prompt=True
+        ).to(self.model.device)
+        outputs = self.model.generate(**inputs, max_new_tokens=max_tokens)
+        return self.processor.decode(outputs[0], skip_special_tokens=True)
+
+    def analyze_image(self, image_path: str, prompt: str) -> str:
+        """Vision: chest indrawing, skin color, wasting, dehydration signs."""
+        return self._generate([{
+            "role": "user",
+            "content": [
+                {"type": "image", "image": image_path},
+                {"type": "text", "text": prompt}
+            ]
+        }])
+
+    def analyze_audio(self, audio_path: str, prompt: str) -> str:
+        """Audio: breath sounds, speech understanding, heart sounds."""
+        return self._generate([{
+            "role": "user",
+            "content": [
+                {"type": "audio", "audio": audio_path},
+                {"type": "text", "text": prompt}
+            ]
+        }])
+
+    def reason(self, prompt: str) -> str:
+        """Text reasoning: IMCI interpretation, treatment generation."""
+        return self._generate([{
+            "role": "system",
+            "content": "You are Malaika, a child health assessment assistant "
+                       "following the WHO IMCI protocol. Be precise and clear."
+        }, {
+            "role": "user",
+            "content": prompt
+        }])
+
+    def analyze_video(self, video_path: str, prompt: str) -> str:
+        """Video: breathing rate counting from chest movement."""
+        return self._generate([{
+            "role": "user",
+            "content": [
+                {"type": "video", "video": video_path},
+                {"type": "text", "text": prompt}
+            ]
+        }])
+```
+
+**One class. One model load. ~5-6GB VRAM in 4-bit. All modalities.**
+
+No Ollama. No dual runtime. No memory doubling.
+
+### Breathing Rate: How It Actually Works
+
+Two approaches — test both on Day 2, pick the one that works:
+
+**Approach A — Gemma 4 video input (preferred, keeps everything Gemma 4)**:
+```python
+# Record 15-second video of child's chest
+# Send directly to Gemma 4 (it accepts video input, processes at ~1 fps)
+result = inference.analyze_video(
+    "chest_recording_15s.mp4",
+    "Count the number of times the child's chest rises in this video. "
+    "Report the exact count. The video is 15 seconds long."
+)
+# Parse count, multiply by 4 = breaths per minute
+```
+
+**Approach B — Frame extraction + Gemma 4 vision (fallback)**:
+```python
+# Extract frames with OpenCV (NOT AI, just file reading)
+import cv2
+cap = cv2.VideoCapture("chest_recording_15s.mp4")
+frames = []
+while cap.isOpened():
+    ret, frame = cap.read()
+    if not ret: break
+    frames.append(frame)  # ~15 fps = ~225 frames
+
+# Send every 15th frame (1 per second) to Gemma 4
+# Ask: "Is the chest rising or falling compared to the previous frame?"
+# Count transitions from falling→rising = one breath
+```
+
+**Approach C — Simple motion detection (last resort, not AI)**:
+```python
+# OpenCV frame differencing to count chest movement peaks
+# This is signal processing (like a timer), not AI intelligence
+# Use ONLY if Gemma 4 video/vision approaches fail in testing
+```
+
+**Decision**: Test A on Day 2. If it works → use it. If not → test B. If neither → C as backup. We prefer A because it's pure Gemma 4.
+
+### Heart Rate MEMS (Pluggable)
+
+```python
+# config.py
+ENABLE_HEART_RATE = True  # False to disable cleanly
+
+class HeartRateModule:
+    def __init__(self, inference: MalaikaInference, enabled=True):
+        self.inference = inference  # Same Gemma 4 instance — no extra model
+        self.enabled = enabled
+
+    def assess(self, audio_path: str) -> dict:
+        if not self.enabled:
+            return {"available": False}
+
+        result = self.inference.analyze_audio(
+            audio_path,
+            "This is a phone microphone recording placed on a child's chest. "
+            "Analyze for: 1) Heart rate (beats per minute), "
+            "2) Any abnormal heart sounds. Report with confidence level."
+        )
+        return {"analysis": result, "available": True}
+```
+
+Disable: `ENABLE_HEART_RATE = False`. Zero code changes. IMCI continues without it.
+
+---
+
+## 4. Fine-Tuning Strategy
+
+### What Gets Fine-Tuned, On What, How
+
+| What | Hardware | Base Model | Method | Data | Time |
+|------|----------|-----------|--------|------|------|
+| Breath sound classification | Mark's RTX 3060 | Gemma 4 E4B | Unsloth QLoRA 4-bit | ICBHI 2017 (920 recordings) | ~3 hrs |
+| Skin color (jaundice/cyanosis) | Mark's RTX 3060 | Gemma 4 E4B | Unsloth QLoRA 4-bit | Mendeley (600) + NJN (670) images | ~3 hrs |
+| African language speech | Mark's RTX 3060 | Gemma 4 E4B | Unsloth QLoRA 4-bit | WAXAL subset (Swahili, Hausa, Yoruba) | ~3 hrs |
+| Heart sounds (MEMS) | Mark's RTX 3060 | Gemma 4 E4B | Unsloth QLoRA 4-bit | CirCor (5,272 recordings) | ~3 hrs |
+
+### Fine-Tuning → Deployment Flow
+
+```
+Mark's RTX 3060 (TRAINING)
+    │
+    │  1. Load Gemma 4 E4B in 4-bit via Unsloth
+    │  2. Train LoRA adapter (~150-300 instruction pairs)
+    │  3. Export merged model or adapter weights
+    │
+    ▼
+Exported Model / Adapters
+    │
+    │  4. Transfer to demo machine
+    │  5. Load fine-tuned model via Transformers
+    │
+    ▼
+Demo Machine (INFERENCE)
+    │
+    │  6. Serve via Gradio (share=True for public URL)
+    │  7. Judges interact with fine-tuned model
+    │
+    ▼
+Phone (VIDEO PROOF)
+    │
+    │  8. AI Edge Gallery with BASE E2B (not fine-tuned)
+    │  9. Proves on-device capability for the video
+    │
+    ▼
+Judges see: fine-tuned quality in live demo + on-device proof in video
+```
+
+**Note**: The phone runs BASE Gemma 4 E2B (fine-tuned models can't easily load into AI Edge Gallery). The live demo runs FINE-TUNED Gemma 4 E4B. This is honest — we show both, explain the difference in the writeup, and demonstrate that the architecture works end-to-end on-device.
+
+### Unsloth Training Code (Confirmed for RTX 3060 12GB)
+
+```python
+from unsloth import FastModel
+
+# Step 1: Load in 4-bit (fits 12GB VRAM)
+model, tokenizer = FastModel.from_pretrained(
+    model_name="unsloth/gemma-4-E4B-it",
+    max_seq_length=8192,
+    load_in_4bit=True,
+)
+
+# Step 2: Add LoRA adapter
+model = FastModel.get_peft_model(
+    model,
+    finetune_vision_layers=True,   # For jaundice adapter
+    finetune_language_layers=True,
+    finetune_attention_modules=True,
+    finetune_mlp_modules=True,
+    r=8, lora_alpha=8, lora_dropout=0, bias="none",
+)
+
+# Step 3: Train
+from trl import SFTTrainer, SFTConfig
+trainer = SFTTrainer(
+    model=model, tokenizer=tokenizer,
+    train_dataset=formatted_dataset,  # 150-300 instruction pairs
+    args=SFTConfig(
+        per_device_train_batch_size=1,
+        gradient_accumulation_steps=4,
+        max_steps=60,
+        learning_rate=2e-4,
+        optim="adamw_8bit",
+    ),
+)
+trainer.train()
+
+# Step 4: Save merged model
+model.save_pretrained_merged("malaika-e4b-finetuned", tokenizer)
+```
+
+**Open question**: Unsloth audio fine-tuning is not well-documented. Day 2 task: test if audio LoRA works. If not, rely on strong prompting for audio classification (base E4B may be sufficient with detailed prompts + few-shot examples in context).
+
+---
+
+## 5. Datasets — All Confirmed Available
+
+| # | Dataset | Size | License | Download | Purpose |
+|---|---------|------|---------|----------|---------|
+| 1 | **ICBHI 2017** | 920 recordings, 3.96 GB | Research use | [Kaggle](https://www.kaggle.com/datasets/vbookshelf/respiratory-sound-database) | Fine-tune breath sound classification |
+| 2 | **WAXAL** | 11,000+ hrs, 29 African languages | CC-BY-4.0 | [HuggingFace](https://huggingface.co/datasets/google/WaxalNLP) | Fine-tune African language speech |
+| 3 | **Neonatal Jaundice (Mendeley)** | 600 images + bilirubin levels | CC-BY-4.0 | [Mendeley](https://data.mendeley.com/datasets/yfsz6c36vc/1) | Fine-tune jaundice detection |
+| 4 | **Neonatal Jaundice (NJN)** | 670 images | CC-BY-4.0 | [Zenodo](https://zenodo.org/records/7825810) | Supplementary jaundice data |
+| 5 | **Pediatric Breathing Videos** | 332 videos (children 0-59mo) | Open access | [BMC 2026](https://link.springer.com/article/10.1186/s13104-026-07677-x) | Validate breathing rate from video |
+| 6 | **CirCor Heart Sounds** | 5,272 pediatric recordings | ODC-By 1.0 | [PhysioNet](https://physionet.org/content/circor-heart-sound/1.0.3/) | Fine-tune MEMS heart module |
+| 7 | **WHO IMCI Protocol** | Clinical decision tree | CC-BY-IGO 3.0 | [WHO EmCare GitHub](https://github.com/WorldHealthOrganization/smart-emcare) | Encode state machine |
+
+---
+
+## 6. IMCI Protocol Engine
+
+The state machine is deterministic code. Gemma 4 is called at each step for perception and reasoning. WHO thresholds are hardcoded.
+
+```
+START → DANGER SIGNS → BREATHING → DIARRHEA → FEVER → NUTRITION → [HEART MEMS] → CLASSIFY → TREAT
+```
+
+### At Each Step: What Gemma 4 Does vs. What Code Does
+
+| Step | Gemma 4 Does (AI) | Code Does (Logic) |
+|------|-------------------|-------------------|
+| **Danger signs** | Understands caregiver's voice in any language, assesses child's alertness from camera | Checks: any danger sign present? → 🔴 urgent |
+| **Breathing** | Counts breathing rate from video, classifies breath sounds from mic audio, detects chest indrawing from image | Compares rate to WHO thresholds (≥50 for 2-11mo, ≥40 for 12-59mo) |
+| **Diarrhea** | Understands duration/blood reports via voice, guides and observes skin pinch test via camera | Applies WHO dehydration classification matrix |
+| **Fever** | Conversational assessment via voice, contextual reasoning about malaria risk | Applies WHO fever classification rules |
+| **Nutrition** | Visual wasting assessment from camera, guides MUAC measurement | Compares MUAC to WHO thresholds (<115mm severe) |
+| **Heart (MEMS)** | Analyzes heart sounds from chest mic recording | Estimates BPM, flags abnormalities |
+| **Treatment** | Generates clear step-by-step instructions in caregiver's local language | Selects treatment template based on classification |
+
+---
+
+## 7. Sprint Plan — 36 Days
+
+```
+PHASE 1 (Apr 12-18): Foundation — Gemma 4 running, data downloaded, basic pipeline
+PHASE 2 (Apr 19-25): Core IMCI — Full assessment working with vision + audio
+PHASE 3 (Apr 26-May 2): Multilingual + Polish — Multiple languages, stability
+PHASE 4 (May 3-9): Fine-tuning + MEMS + Deploy — Adapters deployed, MEMS GO/NO-GO, live URL
+PHASE 5 (May 10-18): Video + Writeup + Submit
+```
+
+### PHASE 1: Foundation (April 12-18)
+
+| Day | Vimal | Mark |
+|-----|-------|------|
+| 1 | Git repo, project structure, download datasets | — |
+| 2 | Install Transformers, load E4B in 4-bit, **TEST**: image analysis + audio analysis + video analysis. Determine which modalities work reliably. | Install Unsloth, verify E4B QLoRA loads on RTX 3060 |
+| 3 | Build Gradio skeleton (camera, mic, voice tabs) | Explore ICBHI, prepare instruction pair format |
+| 4 | Connect Gemma 4 image analysis to UI | Prepare jaundice data for training |
+| 5 | Connect Gemma 4 audio (speech understanding) to UI | Begin breath sound LoRA training (if audio fine-tuning works) |
+| 6 | Connect Piper TTS output. Begin IMCI state machine. | Continue training |
+| 7 | **MILESTONE**: Speak → Gemma understands → show image → Gemma analyzes → spoken response | Training checkpoint |
+
+**Day 2 is CRITICAL**: Test these specific things and document results:
+- [ ] Can Gemma 4 E4B via Transformers analyze an image? (Expected: YES)
+- [ ] Can Gemma 4 E4B via Transformers understand speech audio? (Expected: YES but test quality)
+- [ ] Can Gemma 4 E4B count breathing rate from a video clip? (Unknown — must test)
+- [ ] Can Gemma 4 E4B classify breath sounds from ICBHI audio samples? (Unknown — test base model)
+- [ ] How much VRAM does E4B 4-bit use via Transformers? (Expected: ~5-6GB)
+- [ ] What is the latency for image analysis? Audio analysis? (Need numbers)
+
+Results from Day 2 determine our approach for breathing rate and audio classification.
+
+### PHASE 2: Core IMCI (April 19-25)
+
+| Day | Vimal | Mark |
+|-----|-------|------|
+| 8 | Complete IMCI state machine (all states + transitions) | Complete breath sound training, evaluate accuracy |
+| 9 | Integrate breathing assessment (video or image-based, per Day 2 results) | Begin jaundice LoRA training |
+| 10 | Integrate chest indrawing + skin color detection | Integrate trained breath sound adapter |
+| 11 | Build dehydration + fever assessment flows | Complete jaundice training, integrate |
+| 12 | Build nutrition assessment flow | Test all adapters end-to-end |
+| 13 | Build classification aggregator + treatment generator | Accuracy metrics |
+| 14 | **MILESTONE**: Complete IMCI assessment end-to-end | All core adapters trained and tested |
+
+### PHASE 3: Multilingual + Polish (April 26 - May 2)
+
+| Day | Vimal | Mark |
+|-----|-------|------|
+| 15-16 | Test multilingual responses (Swahili, Hindi, Hausa) | Train WAXAL language adapter |
+| 17-18 | Build assessment history (local storage), UI improvements | Deploy language adapter |
+| 19-20 | Stress test 20+ scenarios, fix bugs | Stress test, fix bugs |
+| 21 | **MILESTONE**: Multilingual assessment working, stable | All adapters deployed |
+
+### PHASE 4: MEMS + Deploy (May 3-9)
+
+| Day | Vimal | Mark |
+|-----|-------|------|
+| 22-23 | UI polish, mobile-responsive | Train heart sound adapter (CirCor), test MEMS |
+| 24 | — | **MEMS GO/NO-GO** (May 6) |
+| 25-26 | Set up live demo (Gradio share=True or cloud GPU) | If GO: integrate MEMS. If NO-GO: disable. |
+| 27 | Test live demo URL end-to-end | Set up AI Edge Gallery on phone with E2B |
+| 28 | **MILESTONE**: Live demo URL working + phone demo recorded | Phone video footage captured |
+
+### PHASE 5: Video + Submit (May 10-18)
+
+| Day | Vimal | Mark |
+|-----|-------|------|
+| 29-30 | Finalize video script, record demo footage | Record phone demo, source B-roll |
+| 31-32 | Video editing, narration | Music, review |
+| 33-34 | Video polish, upload YouTube | GitHub cleanup, README |
+| 35 | Kaggle writeup (1,500 words) | Review writeup |
+| 36 | Final review all materials | Final review |
+| 37 (May 18) | **SUBMIT** | — |
+
+---
+
+## 8. How We Differentiate from Every Other Submission
+
+### What most teams will do
+- Use Gemma 4 as a text chatbot ("ask health questions")
+- Run it on a laptop, claim it "could" run on a phone
+- Use off-the-shelf model, no fine-tuning
+- Single modality (text only)
+- Generic health/education/agriculture chatbot
+
+### What we do differently
+
+| Dimension | Most Teams | Malaika |
+|-----------|-----------|---------|
+| **Modalities** | Text only | Vision + Audio + Voice + Video — ALL through Gemma 4 |
+| **On-device proof** | "It could run on a phone" | VIDEO of it running on a phone (AI Edge Gallery + E2B) |
+| **Fine-tuning** | Off-the-shelf prompting | Unsloth QLoRA: breath sounds, skin color, African languages |
+| **Medical validity** | AI opinion | WHO IMCI protocol — validated across 100+ countries |
+| **Problem scale** | Vague "helps people" | 4.9 million children die/year (WHO, March 2026) |
+| **Agentic** | Simple Q&A | Multi-step protocol with function calling across modalities |
+| **Languages** | English | 140+ languages, fine-tuned for African languages via WAXAL |
+| **Technical depth** | Prompt engineering | 14+ tools, LoRA adapters, multimodal fusion, state machine |
+| **Emotional video** | Screen recording | Narrative: mother saving child at 2am, no internet, no clinic |
+
+### Competition Alignment Scorecard
+
+| Judging Criterion | Points | How We Score Maximum |
+|-------------------|--------|---------------------|
+| **Impact & Vision (40 pts)** | 4.9M children/year. WHO data from 3 weeks ago. Video shows specific human story. | 38-40 |
+| **Video Pitch (30 pts)** | Emotional narrative, live demo, on-phone proof, compelling music/pacing | 26-30 |
+| **Technical Depth (30 pts)** | 4 LoRA fine-tuned adapters, all Gemma 4 modalities used, WHO protocol engine, on-device deployment | 26-30 |
+
+---
+
+## 9. Testing Strategy
+
+### Day 2 Feasibility Tests (MUST PASS)
+
+| Test | Pass Criteria | If Fails |
+|------|--------------|----------|
+| E4B 4-bit loads via Transformers | Uses <8GB VRAM | Use E2B instead |
+| Image analysis (skin photo) | Identifies jaundice/cyanosis | Increase prompt detail, fine-tune priority |
+| Audio speech understanding | Understands English speech from WAV | Test different audio formats/durations |
+| Audio breath classification | Distinguishes wheeze from normal (base model) | Fine-tuning becomes higher priority |
+| Video breathing rate | Counts chest rises from 15s video | Fall back to frame-by-frame approach |
+
+### Test Scenarios (20+)
+
+| # | Scenario | Expected | Key Gemma 4 Feature Tested |
+|---|----------|----------|---------------------------|
+| 1 | Fast breathing, no other signs | 🟡 Pneumonia | Video analysis (breathing rate) |
+| 2 | Chest indrawing + stridor | 🔴 Severe pneumonia | Vision + audio |
+| 3 | Watery diarrhea, slow skin pinch | 🟡 Some dehydration | Vision (skin pinch) + voice |
+| 4 | Unable to drink, lethargic | 🔴 Urgent referral | Voice + vision (alertness) |
+| 5 | Fever 3 days, malaria area | 🟡 Malaria | Voice (reasoning) |
+| 6 | Cough, normal breathing rate | 🟢 Cough/cold | Video (rate counting) |
+| 7 | Vomiting everything | 🔴 Urgent referral | Voice understanding |
+| 8 | Jaundiced skin | 🟡 Jaundice | Vision (fine-tuned) |
+| 9 | Severe wasting visible | 🔴 Severe malnutrition | Vision |
+| 10 | Wheezing, no fast breathing | 🟢 Wheeze, no pneumonia | Audio (fine-tuned) |
+| 11-20 | Combinations, edge cases, multilingual | Various | All modalities |
+
+### Accuracy Targets
+
+| Component | Target | How Measured |
+|-----------|--------|-------------|
+| Breathing rate (video) | ±5 breaths/min | Compare vs expert count |
+| Breath sounds | >80% accuracy | ICBHI test split |
+| Jaundice detection | >75% sensitivity | Mendeley test split |
+| Speech understanding (English) | >90% | Manual evaluation |
+| Speech understanding (Swahili) | >70% | Manual evaluation |
+| IMCI classification | 100% on test scenarios | Deterministic code |
+| Heart rate MEMS (if GO) | ±10 BPM | CirCor annotations |
+
+---
+
+## 10. Risk Register
+
+| Risk | Impact | Mitigation |
+|------|--------|------------|
+| E4B 4-bit too large for demo machine | HIGH | Use E2B for demo (still multimodal, still impressive) |
+| Gemma 4 can't count breathing rate from video | HIGH | Frame-by-frame vision analysis, or OpenCV motion + Gemma 4 for other visual signs |
+| Audio fine-tuning not supported by Unsloth | Medium | Use strong prompting + few-shot examples in context for audio tasks |
+| Base model breath sound classification too poor | Medium | Fine-tuning is Plan A. If fine-tuning fails, use detailed prompts describing what wheeze/stridor sounds like |
+| MEMS heart rate doesn't work | Low | Pluggable — disable, IMCI continues with visual circulation assessment |
+| Audio latency too slow (>30s per clip) | Medium | Shorten clips to 10-15s. Frame as "Malaika is listening carefully..." |
+| Judges question medical validity | Medium | "WHO IMCI decision SUPPORT, not diagnosis. Protocol validated across 100+ countries." |
+| Scope creep | HIGH | Core IMCI first. MEMS second. NO new features after Phase 4. |
+| Model crashes during live demo | HIGH | Pre-recorded backup video. Test stability extensively in Phase 4. |
+
+---
+
+## 11. Submission Checklist
+
+### Mandatory (May 18)
+
+- [ ] **Kaggle Writeup** — 1,500 words max, Track: Health & Sciences
+- [ ] **YouTube Video** — 3 min, public, emotional narrative + technical demo
+- [ ] **Public GitHub Repo** — documented, reproducible, no secrets
+- [ ] **Live Demo URL** — Gradio (share=True), no login, mobile-friendly
+- [ ] **Media Gallery** — cover image, screenshots, architecture diagram
+- [ ] **Writeup SUBMITTED** (not just draft)
+
+### Bonus (Winning Edge)
+
+- [ ] Fine-tuned LoRA adapters (Unsloth) → targets Unsloth $10K prize
+- [ ] Heart rate MEMS module working
+- [ ] 3+ languages demonstrated
+- [ ] Phone demo in video (AI Edge Gallery + E2B) → proves on-device
+- [ ] 20+ validated test scenarios with accuracy metrics
+- [ ] Kaggle notebook showing fine-tuning process
+
+---
+
+## 12. Definition of Done
+
+### Must Ship (Minimum Viable)
+1. Full IMCI: danger signs → breathing → diarrhea → fever → nutrition → classify → treat
+2. Gemma 4 vision: chest indrawing + skin color + wasting
+3. Gemma 4 audio: breath sounds + speech understanding
+4. Gemma 4 language: treatment in English + 1 other language
+5. TTS spoken output (Piper)
+6. ALL offline, ALL Gemma 4
+7. Video, repo, demo, writeup submitted
+
+### Must Ship to Win
+All above PLUS:
+1. Fine-tuned LoRA adapters deployed (Unsloth)
+2. 3+ languages working (including African via WAXAL)
+3. Phone demo in video (E2B on AI Edge Gallery)
+4. Professional video with emotional story
+5. Heart rate MEMS working (or cleanly disabled with explanation)
+6. 20+ test scenarios with accuracy data in writeup
+
+---
+
+## 13. Task Ownership
+
+### Vimal
+- Architecture, project setup, CLAUDE.md
+- Gradio UI
+- IMCI protocol engine
+- Gemma 4 integration (Transformers)
+- Live demo deployment
+- Video production
+- Kaggle writeup + submission
+
+### Mark
+- ALL fine-tuning (Unsloth on RTX 3060)
+  - Breath sounds (ICBHI) — CORE
+  - Skin color (jaundice) — CORE
+  - African languages (WAXAL) — HIGH
+  - Heart sounds (CirCor) — PLUGGABLE
+- Dataset preparation and formatting
+- Phone demo setup (AI Edge Gallery)
+- Testing and validation
+- Video production support
+
+---
+
+*Plan v3: April 12, 2026*
+*Core change: Clear hardware separation (training vs demo vs phone), Transformers-only inference, implementable with fallbacks at every step.*
+*Deadline: May 18, 2026 (36 days)*
+*Team: Vimal Kumar + Mark D. Hei Long*

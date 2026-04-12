@@ -1,8 +1,54 @@
+# Previous project
 geotab-hackathon/
+
+# Python
 __pycache__/
 *.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+
+# Environment and secrets
 .env
+.env.*
+*.pem
+*.key
+credentials*
+secrets*
+
+# Large files (models, datasets, adapters)
 models/
+data/
+adapters/
+
+# Media files (session temp files — never commit patient data)
 *.wav
+*.mp3
 *.mp4
+*.avi
+*.webm
+
+# OS
 .DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Testing and coverage
+.coverage
+htmlcov/
+.pytest_cache/
+reports/
+
+# mypy
+.mypy_cache/
+
+# ruff
+.ruff_cache/

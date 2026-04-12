@@ -83,7 +83,7 @@ This is NOT "we used Gemma 4 as a chatbot." Every core capability comes from Gem
 | Component | What It Is | Why It's Fine |
 |-----------|-----------|---------------|
 | IMCI State Machine | Deterministic Python code with WHO thresholds | This is a calculator, not intelligence |
-| MMS-TTS | Speaks text Gemma generated aloud | Like a speaker — the intelligence is Gemma's |
+| Piper TTS | Speaks text Gemma generated aloud | Like a speaker — the intelligence is Gemma's |
 | OpenCV | Extracts frames from video | Like opening a file — the analysis is Gemma's |
 | Gradio UI | Displays results, captures input | A window — what you see through it is Gemma |
 
@@ -125,7 +125,7 @@ PHONE (Video proof)                    DEMO MACHINE (Live demo)
                                                     v
                                       +----------------------------+
                                       |   OUTPUT                    |
-                                      |   - MMS-TTS speaks results |
+                                      |   - Piper TTS speaks results|
                                       |   - Gradio UI shows status |
                                       |   - Red/Yellow/Green       |
                                       +----------------------------+
@@ -135,8 +135,8 @@ PHONE (Video proof)                    DEMO MACHINE (Live demo)
 
 ## Supported Languages
 
-| Language | Speakers | Understanding | Speech Output (MMS-TTS) |
-|----------|----------|---------------|-------------------------|
+| Language | Speakers | Understanding | Speech Output |
+|----------|----------|---------------|---------------|
 | English | 1.5B | Excellent | Excellent |
 | Swahili | 100M+ | Good (+ WAXAL fine-tune) | Good |
 | Hindi | 600M+ | Good (base model) | Good |
@@ -164,13 +164,15 @@ Four LoRA adapters trained on an RTX 3060 (12GB VRAM):
 
 | Component | Technology |
 |-----------|-----------|
-| AI Model | Gemma 4 E4B (4-bit quantized via bitsandbytes) |
+| AI Model | Gemma 4 E4B (4-bit quantized via BitsAndBytes) |
 | Inference | HuggingFace Transformers |
 | Fine-tuning | Unsloth QLoRA |
-| Text-to-Speech | Meta MMS-TTS (1,100+ languages, offline) |
+| Text-to-Speech | Piper TTS (offline) |
 | UI | Gradio |
 | Video processing | OpenCV |
-| Audio processing | librosa, soundfile |
+| Type checking | mypy (strict mode) |
+| Linting | Ruff |
+| Testing | pytest + pytest-cov |
 | On-device proof | LiteRT-LM + AI Edge Gallery (Gemma 4 E2B) |
 
 ---
@@ -178,38 +180,91 @@ Four LoRA adapters trained on an RTX 3060 (12GB VRAM):
 ## Project Structure
 
 ```
-malaika/
-├── config.py              # All settings in one place
-├── app.py                 # Gradio entry point
-├── inference.py           # Gemma 4 model — text, image, audio, video
-├── tts.py                 # MMS-TTS speech output
-├── imci/
-│   ├── engine.py          # IMCI state machine orchestrator
-│   ├── danger_signs.py    # Step 1: Danger sign assessment
-│   ├── breathing.py       # Step 2: Cough/breathing
-│   ├── diarrhea.py        # Step 3: Diarrhea/dehydration
-│   ├── fever.py           # Step 4: Fever/malaria
-│   ├── nutrition.py       # Step 5: Nutrition/wasting
-│   ├── heart.py           # Step 6: Heart rate (pluggable)
-│   ├── classifier.py      # Step 7: WHO classification logic
-│   └── treatment.py       # Step 8: Treatment plan generation
-├── prompts/               # Carefully engineered prompts per modality
-├── data/                  # WHO thresholds + treatment templates (5 languages)
-├── training/              # Unsloth fine-tuning scripts
-├── tests/                 # 20+ clinical test scenarios
-└── assets/                # Demo images, audio, video
+malaika/                       # Main Python package
+├── inference.py               # Gemma 4 model — self-correcting, cached
+├── imci_engine.py             # IMCI state machine orchestrator
+├── imci_protocol.py           # WHO thresholds + classification (pure deterministic)
+├── vision.py                  # Image/video perception via Gemma 4
+├── audio.py                   # Audio perception via Gemma 4
+├── tts.py                     # Piper TTS speech output (offline)
+├── app.py                     # Gradio UI entry point
+├── config.py                  # Feature flags, model paths, thresholds
+├── types.py                   # Shared type definitions (dataclasses, enums)
+│
+├── prompts/                   # Versioned, typed prompt templates
+│   ├── base.py                #   PromptTemplate base class
+│   ├── breathing.py           #   Breathing rate + respiratory prompts
+│   ├── danger_signs.py        #   Danger sign assessment prompts
+│   ├── diarrhea.py            #   Diarrhea and dehydration prompts
+│   ├── fever.py               #   Fever assessment prompts
+│   ├── nutrition.py           #   Nutrition and wasting prompts
+│   ├── heart.py               #   Heart sounds (MEMS) prompts
+│   ├── treatment.py           #   Treatment generation prompts
+│   └── speech.py              #   Speech understanding prompts
+│
+├── guards/                    # Three-layer security pipeline
+│   ├── input_guard.py         #   File validation, size limits, format checks
+│   ├── content_filter.py      #   Prompt injection defense, PII scrubbing
+│   └── output_validator.py    #   Schema validation, confidence gating
+│
+├── observability/             # Per-step tracing and cost tracking
+│   ├── tracer.py              #   IMCI step traces (input, output, latency)
+│   ├── cost_tracker.py        #   Token count + inference time per call
+│   └── feedback.py            #   Link corrections to traces
+│
+└── evaluation/                # Golden dataset evaluation
+    ├── golden_scenarios.py    #   20+ WHO IMCI test scenarios
+    └── evaluator.py           #   Offline accuracy reporting
+
+tests/                         # All tests (mirrors malaika/ structure)
+scripts/                       # One-off scripts (data prep, benchmarks)
+adapters/                      # Fine-tuned LoRA adapter weights
+configs/                       # YAML config files
+data/                          # Datasets (gitignored)
+docs/                          # Engineering documentation
 ```
+
+---
+
+## Engineering Standards
+
+This project follows production-grade engineering practices:
+
+| Document | What It Covers |
+|----------|----------------|
+| [CLAUDE.md](CLAUDE.md) | Project instructions, absolute rules, quick reference |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | System architecture, component boundaries, data flow |
+| [docs/ENGINEERING_PRINCIPLES.md](docs/ENGINEERING_PRINCIPLES.md) | Core design principles, error handling, performance |
+| [docs/TESTING_STRATEGY.md](docs/TESTING_STRATEGY.md) | Testing pyramid, 20+ medical scenarios, coverage targets |
+| [docs/SECURITY.md](docs/SECURITY.md) | Three-layer guards, data privacy, prompt injection defense |
+| [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | Code style, git workflow, dependency management |
+| [docs/PROMPT_ENGINEERING.md](docs/PROMPT_ENGINEERING.md) | Versioned prompt templates, design rules |
+
+### Key Principles
+- **Offline-first**: Zero network calls. Every dependency is local.
+- **Gemma 4 = perception, Code = decisions**: Model observes, WHO thresholds classify.
+- **Fail safe**: Uncertain AI result -> recommend referral (false positive > false negative).
+- **Typed and tested**: `mypy --strict`, 80%+ coverage, 100% on protocol logic.
+- **Prompts as code**: Versioned, typed, registered — never hardcoded strings.
+- **Three security guards**: Input validation, content filtering, output validation on every call.
+- **Self-correcting inference**: Retry with correction prompt on parse failure (max 2 retries).
+- **Full observability**: Every IMCI step traced with input, output, latency, and confidence.
 
 ---
 
 ## Running the Demo
 
 ```bash
+# Create virtual environment
+python -m venv .venv
+source .venv/bin/activate
+
 # Install dependencies
 pip install -r requirements.txt
+pip install -e .
 
 # Run the app
-python app.py
+python -m malaika.app
 
 # Gradio will output a public URL for judges
 ```
@@ -219,14 +274,20 @@ python app.py
 ## Testing
 
 ```bash
-# Run all tests
-python -m pytest tests/
+# Fast: unit tests only (no GPU needed)
+pytest tests/ -v -m "not gpu_required"
 
-# Run IMCI logic tests (no GPU needed)
-python -m pytest tests/test_imci.py
+# Full: everything including GPU tests
+pytest tests/ -v
 
-# Run inference tests (requires GPU)
-python -m pytest tests/test_inference.py
+# Coverage report
+pytest tests/ --cov=malaika --cov-report=term-missing --cov-fail-under=80
+
+# Type checking
+mypy malaika/ --strict
+
+# Linting
+ruff check malaika/ tests/
 ```
 
 ---
@@ -253,7 +314,7 @@ python -m pytest tests/test_inference.py
 | Medical validity | AI opinion | WHO IMCI protocol (100+ countries) |
 | Problem scale | Vague "helps people" | 4.9 million children die/year |
 | Languages | English | 5 languages across highest-mortality regions |
-| Technical depth | Prompt engineering | 14+ tools, LoRA adapters, multimodal fusion, state machine |
+| Engineering | Single script | Production patterns: guards, observability, versioned prompts |
 
 ---
 
@@ -265,8 +326,8 @@ python -m pytest tests/test_inference.py
 
 ## Team
 
-- **Vimal Kumar** — Architecture, IMCI engine, Gradio UI, deployment, video, submission
-- **Mark D. Hei Long** — Fine-tuning (Unsloth), dataset preparation, phone demo, testing
+- **Vimal Kumar**
+- **Mark D. Hei Long**
 
 ---
 
@@ -276,4 +337,4 @@ Apache 2.0 — Because no child should die from a disease we know how to treat.
 
 ---
 
-*Built for the Gemma 4 Good Hackathon, April–May 2026*
+*Built for the Gemma 4 Good Hackathon, April-May 2026*

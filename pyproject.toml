@@ -1,0 +1,83 @@
+[build-system]
+requires = ["setuptools>=75.0", "wheel"]
+build-backend = "setuptools.backends._legacy:_Backend"
+
+[project]
+name = "malaika"
+version = "0.1.0"
+description = "WHO IMCI child survival AI powered by Gemma 4 — fully offline"
+requires-python = ">=3.11"
+license = "Apache-2.0"
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes
+    "I",    # isort
+    "N",    # pep8-naming
+    "UP",   # pyupgrade
+    "B",    # flake8-bugbear
+    "SIM",  # flake8-simplify
+    "TCH",  # type-checking imports
+    "RUF",  # ruff-specific
+    "S",    # bandit security
+    "PTH",  # pathlib
+]
+ignore = [
+    "S101",  # assert used in tests is fine
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["malaika"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+
+[[tool.mypy.overrides]]
+module = [
+    "transformers.*",
+    "torch.*",
+    "gradio.*",
+    "piper.*",
+    "cv2.*",
+    "bitsandbytes.*",
+    "accelerate.*",
+    "unsloth.*",
+    "trl.*",
+    "structlog.*",
+    "piper_tts.*",
+]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "gpu_required: test requires GPU and loaded model (slow)",
+    "medical_accuracy: clinical scenario validation",
+    "benchmark: performance benchmark",
+    "integration: integration test with mocked inference",
+]
+addopts = "-v --tb=short"
+
+[tool.coverage.run]
+source = ["malaika"]
+omit = ["malaika/evaluation/*"]
+
+[tool.coverage.report]
+fail_under = 80
+show_missing = true
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "if __name__ == .__main__.",
+]

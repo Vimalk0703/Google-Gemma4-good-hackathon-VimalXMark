@@ -405,15 +405,15 @@ PHASE 5 (May 10-18): Video + Writeup + Submit
 
 ### PHASE 1: Foundation (April 12-18)
 
-| Day | Vimal | Mark |
-|-----|-------|------|
-| 1 | Git repo, project structure, download datasets | — |
-| 2 | Install Transformers, load E4B in 4-bit, **TEST**: image analysis + audio analysis + video analysis. Determine which modalities work reliably. | Install Unsloth, verify E4B QLoRA loads on RTX 3060 |
-| 3 | Build Gradio skeleton (camera, mic, voice tabs) | Explore ICBHI, prepare instruction pair format |
-| 4 | Connect Gemma 4 image analysis to UI | Prepare jaundice data for training |
-| 5 | Connect Gemma 4 audio (speech understanding) to UI | Begin breath sound LoRA training (if audio fine-tuning works) |
-| 6 | Connect Piper TTS output. Begin IMCI state machine. | Continue training |
-| 7 | **MILESTONE**: Speak → Gemma understands → show image → Gemma analyzes → spoken response | Training checkpoint |
+| Day | Tasks |
+|-----|-------|
+| 1 | Git repo, project structure, engineering docs, download datasets |
+| 2 | Install Transformers, load E4B in 4-bit, **TEST**: image + audio + video analysis. Install Unsloth, verify QLoRA loads. |
+| 3 | Build Gradio skeleton (camera, mic, voice tabs). Explore ICBHI, prepare instruction pair format. |
+| 4 | Connect Gemma 4 image analysis to UI. Prepare jaundice data for training. |
+| 5 | Connect Gemma 4 audio (speech understanding) to UI. Begin breath sound LoRA training (if audio fine-tuning works). |
+| 6 | Connect Piper TTS output. Begin IMCI state machine. Continue training. |
+| 7 | **MILESTONE**: Speak → Gemma understands → show image → Gemma analyzes → spoken response. Training checkpoint. |
 
 **Day 2 is CRITICAL**: Test these specific things and document results:
 - [ ] Can Gemma 4 E4B via Transformers analyze an image? (Expected: YES)
@@ -427,45 +427,45 @@ Results from Day 2 determine our approach for breathing rate and audio classific
 
 ### PHASE 2: Core IMCI (April 19-25)
 
-| Day | Vimal | Mark |
-|-----|-------|------|
-| 8 | Complete IMCI state machine (all states + transitions) | Complete breath sound training, evaluate accuracy |
-| 9 | Integrate breathing assessment (video or image-based, per Day 2 results) | Begin jaundice LoRA training |
-| 10 | Integrate chest indrawing + skin color detection | Integrate trained breath sound adapter |
-| 11 | Build dehydration + fever assessment flows | Complete jaundice training, integrate |
-| 12 | Build nutrition assessment flow | Test all adapters end-to-end |
-| 13 | Build classification aggregator + treatment generator | Accuracy metrics |
-| 14 | **MILESTONE**: Complete IMCI assessment end-to-end | All core adapters trained and tested |
+| Day | Tasks |
+|-----|-------|
+| 8 | Complete IMCI state machine (all states + transitions). Complete breath sound training, evaluate accuracy. |
+| 9 | Integrate breathing assessment (video or image-based, per Day 2 results). Begin jaundice LoRA training. |
+| 10 | Integrate chest indrawing + skin color detection. Integrate trained breath sound adapter. |
+| 11 | Build dehydration + fever assessment flows. Complete jaundice training, integrate. |
+| 12 | Build nutrition assessment flow. Test all adapters end-to-end. |
+| 13 | Build classification aggregator + treatment generator. Accuracy metrics. |
+| 14 | **MILESTONE**: Complete IMCI assessment end-to-end. All core adapters trained and tested. |
 
 ### PHASE 3: Multilingual + Polish (April 26 - May 2)
 
-| Day | Vimal | Mark |
-|-----|-------|------|
-| 15-16 | Test multilingual responses (Swahili, Hindi, Hausa) | Train WAXAL language adapter |
-| 17-18 | Build assessment history (local storage), UI improvements | Deploy language adapter |
-| 19-20 | Stress test 20+ scenarios, fix bugs | Stress test, fix bugs |
-| 21 | **MILESTONE**: Multilingual assessment working, stable | All adapters deployed |
+| Day | Tasks |
+|-----|-------|
+| 15-16 | Test multilingual responses (Swahili, Hindi, Hausa). Train WAXAL language adapter. |
+| 17-18 | Build assessment history (local storage), UI improvements. Deploy language adapter. |
+| 19-20 | Stress test 20+ scenarios, fix bugs across all modules. |
+| 21 | **MILESTONE**: Multilingual assessment working, stable. All adapters deployed. |
 
 ### PHASE 4: MEMS + Deploy (May 3-9)
 
-| Day | Vimal | Mark |
-|-----|-------|------|
-| 22-23 | UI polish, mobile-responsive | Train heart sound adapter (CirCor), test MEMS |
-| 24 | — | **MEMS GO/NO-GO** (May 6) |
-| 25-26 | Set up live demo (Gradio share=True or cloud GPU) | If GO: integrate MEMS. If NO-GO: disable. |
-| 27 | Test live demo URL end-to-end | Set up AI Edge Gallery on phone with E2B |
-| 28 | **MILESTONE**: Live demo URL working + phone demo recorded | Phone video footage captured |
+| Day | Tasks |
+|-----|-------|
+| 22-23 | UI polish, mobile-responsive. Train heart sound adapter (CirCor), test MEMS. |
+| 24 | **MEMS GO/NO-GO** (May 6). |
+| 25-26 | Set up live demo (Gradio share=True or cloud GPU). If MEMS GO: integrate. If NO-GO: disable. |
+| 27 | Test live demo URL end-to-end. Set up AI Edge Gallery on phone with E2B. |
+| 28 | **MILESTONE**: Live demo URL working + phone demo recorded. |
 
 ### PHASE 5: Video + Submit (May 10-18)
 
-| Day | Vimal | Mark |
-|-----|-------|------|
-| 29-30 | Finalize video script, record demo footage | Record phone demo, source B-roll |
-| 31-32 | Video editing, narration | Music, review |
-| 33-34 | Video polish, upload YouTube | GitHub cleanup, README |
-| 35 | Kaggle writeup (1,500 words) | Review writeup |
-| 36 | Final review all materials | Final review |
-| 37 (May 18) | **SUBMIT** | — |
+| Day | Tasks |
+|-----|-------|
+| 29-30 | Finalize video script, record demo footage, record phone demo, source B-roll. |
+| 31-32 | Video editing, narration, music. |
+| 33-34 | Video polish, upload YouTube. GitHub cleanup, README. |
+| 35 | Kaggle writeup (1,500 words). |
+| 36 | Final review all materials. |
+| 37 (May 18) | **SUBMIT**. |
 
 ---
 
@@ -604,31 +604,39 @@ All above PLUS:
 
 ---
 
-## 13. Task Ownership
+## 13. Work Streams
 
-### Vimal
-- Architecture, project setup, CLAUDE.md
+All work is pooled — any task can be picked up by any team member. Priority order:
+
+### Stream A: Core Application (Critical Path)
+- Architecture, project setup, engineering docs
+- IMCI protocol engine (state machine + WHO thresholds)
+- Gemma 4 integration (Transformers inference)
+- Perception modules (vision, audio, video analysis)
+- Prompt engineering (versioned PromptTemplates)
 - Gradio UI
-- IMCI protocol engine
-- Gemma 4 integration (Transformers)
-- Live demo deployment
-- Video production
-- Kaggle writeup + submission
 
-### Mark
-- ALL fine-tuning (Unsloth on RTX 3060)
-  - Breath sounds (ICBHI) — CORE
-  - Skin color (jaundice) — CORE
-  - African languages (WAXAL) — HIGH
-  - Heart sounds (CirCor) — PLUGGABLE
-- Dataset preparation and formatting
-- Phone demo setup (AI Edge Gallery)
-- Testing and validation
-- Video production support
+### Stream B: Fine-Tuning (Parallel)
+- Dataset preparation and formatting (ICBHI, jaundice, WAXAL, CirCor)
+- Unsloth QLoRA training on RTX 3060
+- Adapter evaluation and integration
+- Accuracy benchmarking
+
+### Stream C: Deployment & Polish
+- Live demo deployment (Gradio share=True or cloud GPU)
+- Phone demo setup (AI Edge Gallery + E2B)
+- Multilingual testing
+- Stress testing 20+ scenarios
+
+### Stream D: Submission
+- Video production (script, footage, editing)
+- Kaggle writeup (1,500 words)
+- GitHub repo cleanup, README
+- Final submission
 
 ---
 
-*Plan v3: April 12, 2026*
-*Core change: Clear hardware separation (training vs demo vs phone), Transformers-only inference, implementable with fallbacks at every step.*
+*Plan v4: April 12, 2026*
+*Changes from v3: Single-developer model (no person assignments), added production AI patterns (versioned prompts, observability, evaluation), engineering foundation docs.*
 *Deadline: May 18, 2026 (36 days)*
 *Team: Vimal Kumar + Mark D. Hei Long*

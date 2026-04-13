@@ -90,8 +90,8 @@ GOLDEN_SCENARIOS: list[GoldenScenario] = [
         who_source="IMCI Chart Booklet, p.5: 50+ breaths/min for 2-11 months",
         age_months=6,
         findings={
-            "breathing": {"rate": 55, "cough": True, "indrawing": False,
-                          "stridor": False, "wheeze": False},
+            "breathing": {"breathing_rate": 55, "has_cough": True, "has_indrawing": False,
+                          "has_stridor": False, "has_wheeze": False},
         },
         expected_classifications=[ClassificationType.PNEUMONIA],
         expected_severity=Severity.YELLOW,
@@ -103,8 +103,8 @@ GOLDEN_SCENARIOS: list[GoldenScenario] = [
         who_source="IMCI Chart Booklet, p.5: 40+ breaths/min for 12-59 months",
         age_months=24,
         findings={
-            "breathing": {"rate": 45, "cough": True, "indrawing": False,
-                          "stridor": False, "wheeze": False},
+            "breathing": {"breathing_rate": 45, "has_cough": True, "has_indrawing": False,
+                          "has_stridor": False, "has_wheeze": False},
         },
         expected_classifications=[ClassificationType.PNEUMONIA],
         expected_severity=Severity.YELLOW,
@@ -116,8 +116,8 @@ GOLDEN_SCENARIOS: list[GoldenScenario] = [
         who_source="IMCI Chart Booklet, p.5: Chest indrawing = severe pneumonia",
         age_months=10,
         findings={
-            "breathing": {"rate": 60, "cough": True, "indrawing": True,
-                          "stridor": True, "wheeze": False},
+            "breathing": {"breathing_rate": 60, "has_cough": True, "has_indrawing": True,
+                          "has_stridor": True, "has_wheeze": False},
         },
         expected_classifications=[ClassificationType.SEVERE_PNEUMONIA],
         expected_severity=Severity.RED,
@@ -129,8 +129,8 @@ GOLDEN_SCENARIOS: list[GoldenScenario] = [
         who_source="IMCI Chart Booklet, p.5: No fast breathing, no indrawing",
         age_months=36,
         findings={
-            "breathing": {"rate": 30, "cough": True, "indrawing": False,
-                          "stridor": False, "wheeze": False},
+            "breathing": {"breathing_rate": 30, "has_cough": True, "has_indrawing": False,
+                          "has_stridor": False, "has_wheeze": False},
         },
         expected_classifications=[ClassificationType.NO_PNEUMONIA_COUGH_OR_COLD],
         expected_severity=Severity.GREEN,
@@ -296,8 +296,8 @@ GOLDEN_SCENARIOS: list[GoldenScenario] = [
         age_months=18,
         findings={
             "danger_signs": {"lethargic": False, "unable_to_drink": False, "convulsions": False},
-            "breathing": {"rate": 28, "cough": False, "indrawing": False,
-                          "stridor": False, "wheeze": False},
+            "breathing": {"breathing_rate": 28, "has_cough": False, "has_indrawing": False,
+                          "has_stridor": False, "has_wheeze": False},
             "diarrhea": {"has_diarrhea": False},
             "fever": {"has_fever": False},
             "nutrition": {"visible_wasting": False, "edema": False, "muac_mm": 150},
@@ -314,8 +314,8 @@ GOLDEN_SCENARIOS: list[GoldenScenario] = [
         who_source="IMCI Chart Booklet: Independent classification per domain",
         age_months=10,
         findings={
-            "breathing": {"rate": 55, "cough": True, "indrawing": False,
-                          "stridor": False, "wheeze": False},
+            "breathing": {"breathing_rate": 55, "has_cough": True, "has_indrawing": False,
+                          "has_stridor": False, "has_wheeze": False},
             "diarrhea": {"has_diarrhea": True, "duration_days": 2, "blood_in_stool": False,
                          "sunken_eyes": True, "skin_pinch_slow": True,
                          "unable_to_drink": False},
@@ -333,8 +333,8 @@ GOLDEN_SCENARIOS: list[GoldenScenario] = [
         who_source="IMCI Chart Booklet: Worst severity wins",
         age_months=8,
         findings={
-            "breathing": {"rate": 62, "cough": True, "indrawing": True,
-                          "stridor": False, "wheeze": False},
+            "breathing": {"breathing_rate": 62, "has_cough": True, "has_indrawing": True,
+                          "has_stridor": False, "has_wheeze": False},
             "nutrition": {"visible_wasting": True, "edema": False, "muac_mm": 108},
         },
         expected_classifications=[

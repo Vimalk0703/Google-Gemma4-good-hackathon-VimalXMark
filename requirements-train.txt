@@ -1,0 +1,6 @@
+# Malaika training dependencies (separate from runtime)
+# Only needed for fine-tuning LoRA adapters
+
+unsloth>=2025.4.0             # QLoRA fine-tuning
+trl>=0.14.0                   # SFTTrainer
+datasets>=3.2.0               # HuggingFace datasets

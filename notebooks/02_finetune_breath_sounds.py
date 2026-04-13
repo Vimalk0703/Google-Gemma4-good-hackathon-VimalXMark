@@ -15,7 +15,8 @@
 # ## 1. Setup
 
 # %%
-!pip install -q unsloth trl datasets transformers bitsandbytes accelerate
+# MUST install transformers from source for Gemma 4 support
+!pip install -q git+https://github.com/huggingface/transformers.git unsloth trl datasets bitsandbytes accelerate
 
 # %%
 from huggingface_hub import login

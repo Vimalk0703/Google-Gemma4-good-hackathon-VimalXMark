@@ -14,8 +14,9 @@
 # ## 1. Setup
 
 # %%
-# Install dependencies
-!pip install -q transformers bitsandbytes accelerate torch
+# Install dependencies — MUST install transformers from source for Gemma 4 support
+# The PyPI release does not yet include the "gemma4" model type
+!pip install -q git+https://github.com/huggingface/transformers.git bitsandbytes accelerate torch
 
 # %%
 # Authenticate with HuggingFace

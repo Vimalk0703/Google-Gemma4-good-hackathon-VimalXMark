@@ -61,6 +61,48 @@ ASSESS_ALERTNESS = PromptRegistry.register(PromptTemplate(
 ))
 
 
+# --- Skin Color Assessment from Image ---
+ASSESS_SKIN_COLOR = PromptRegistry.register(PromptTemplate(
+    name="danger.assess_skin_color",
+    version="1.0.0",
+    description=(
+        "Assess skin color abnormalities from an image: jaundice (yellowing), "
+        "cyanosis (blue discoloration), pallor (paleness)."
+    ),
+    system_prompt=SYSTEM_MEDICAL_OBSERVER,
+    user_template=(
+        "This image shows a young child. Assess the child's skin color for "
+        "abnormalities according to WHO IMCI criteria.\n\n"
+        "Look for:\n"
+        "- JAUNDICE: Yellowing of the skin and/or whites of the eyes\n"
+        "- CYANOSIS: Blue or grey discoloration of lips, tongue, or nail beds\n"
+        "- PALLOR: Unusual paleness of palms, nail beds, or conjunctiva\n\n"
+        "Consider the child's natural skin tone when assessing.\n\n"
+        "Report ONLY a JSON object:\n"
+        '{{"jaundice_detected": true/false, '
+        '"cyanosis_detected": true/false, '
+        '"pallor_detected": true/false, '
+        '"confidence": <0.0-1.0>, '
+        '"description": "<brief observation>"}}'
+    ),
+    required_variables=frozenset(),
+    expected_output_format="json",
+    output_schema={
+        "type": "object",
+        "properties": {
+            "jaundice_detected": {"type": "boolean"},
+            "cyanosis_detected": {"type": "boolean"},
+            "pallor_detected": {"type": "boolean"},
+            "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+            "description": {"type": "string"},
+        },
+        "required": ["jaundice_detected", "cyanosis_detected", "pallor_detected", "confidence"],
+    },
+    max_tokens=150,
+    temperature=0.0,
+))
+
+
 # --- Ability to Drink Assessment from Audio/Text ---
 CHECK_ABILITY_TO_DRINK = PromptRegistry.register(PromptTemplate(
     name="danger.check_ability_to_drink",

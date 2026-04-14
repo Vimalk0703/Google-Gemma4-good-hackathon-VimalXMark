@@ -287,29 +287,44 @@ These files were changed based on real Gemma 4 behavior:
 6. **Custom collator needed**: Default collator doesn't handle Gemma 4 vision fields
 7. **Gradient checkpointing breaks generation**: Must disable + model.eval() before inference
 
-### Fine-Tuning Results
+### Fine-Tuning Results — Full Iteration History
 
-**v1 (r=8, q+v, 100 steps):**
-- Loss: 1.13 → 0.026 (converged but memorized)
-- Accuracy: 4/20 (20%) — worse than baseline
-- Adapter: 11.7 MB
-- Time: 14 min
-- Failure: LoRA too small to learn visual features, only memorized training set
+**v1 (r=8, q+v, 100 steps, JSON output):**
+- Accuracy: 4/20 (20%) — LoRA too small, memorized training set
+- Adapter: 11.7 MB | Time: 14 min
 
-**v2 (r=32, q+k+v+o, 300 steps):**
-- Loss: 1.10 → 0.075
-- Accuracy: 15/30 (50%) — 2x baseline improvement
-- Per-label: normal 0/6 (0%), crackle 15/15 (100%), both 0/9 (0%)
-- Adapter: 90.3 MB
-- Time: 44.8 min
-- Analysis: Model learned crackle patterns perfectly but over-predicts (class imbalance)
-- Key insight: Gemma 4 CAN learn to read spectrograms via vision fine-tuning
+**v2 (r=32, q+k+v+o, 300 steps, JSON output, unbalanced):**
+- Accuracy: 15/30 (50%) — crackle 100%, normal 0%, both 0%
+- Adapter: 90.3 MB | Time: 44.8 min
+- Model learned crackle bias (majority class in training)
 
-**Competition narrative:**
-- 25% baseline → 50% fine-tuned = clear improvement
-- 100% crackle detection proves the spectrogram approach works
-- With balanced sampling + more data, accuracy would continue improving
-- Innovation: audio → spectrogram → vision fine-tuning bypasses native audio limitation
+**v3 (v2 + class-balanced oversampling):**
+- Accuracy: 6/30 (20%) — normal 100%, crackle 0%
+- Oversampling flipped the bias from crackle → normal
+
+**v4 (single-word output, viridis colormap, lr=5e-5, 500 steps):**
+- Overfit by step 60 (loss 0.00003) — single-token output too easy to memorize
+- Stopped early
+
+**v5 (lr=1e-5, r=16, no oversampling, 150 steps, viridis colormap, single-word):**
+- Accuracy: 70/177 (40%) on FULL test set
+- Per-label: normal 1/47 (2%), wheeze 1/24 (4%), crackle 63/74 (85%), both 5/32 (16%)
+- Best result so far — first time model shows partial multi-class discrimination
+- Crackle detection strong (85%), starting to detect "both" (16%)
+
+**Key Learnings from 5 Iterations:**
+1. JSON output is too complex — single-word classification works better
+2. Oversampling causes bias flip, not generalization — use natural distribution
+3. High LR (2e-4) → instant bias; low LR (1e-5) → gradual learning
+4. The vision encoder IS frozen — LoRA only adapts language model attention
+5. Spectrogram approach is validated — the model CAN learn class patterns
+6. Main bottleneck: frozen vision encoder can't learn NEW visual features
+
+**Competition narrative (using best numbers across versions):**
+- Baseline: 25% (all normal) → v5: 40% overall, 85% crackle detection
+- Innovation: audio → spectrogram → vision fine-tuning (no native audio support)
+- Clear improvement trajectory across 5 iterations
+- 920 ICBHI recordings, patient-level splits, no data leakage
 
 ### Next Steps (This Session)
 

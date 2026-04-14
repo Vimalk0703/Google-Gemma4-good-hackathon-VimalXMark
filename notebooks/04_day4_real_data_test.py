@@ -285,6 +285,7 @@ print("SECTION B: REAL ICBHI DATA — SPECTROGRAM CLASSIFICATION")
 print("=" * 60)
 
 import librosa
+import subprocess
 
 # Download ICBHI dataset via Kaggle API (works on both Colab and Kaggle)
 ICBHI_DIR = Path("/tmp/icbhi_data")

@@ -14,16 +14,54 @@
 import subprocess
 import sys
 
-# Install dependencies (subprocess instead of ! for script mode)
+# Install dependencies for Kaggle
+# Upgrade huggingface-hub + install transformers from source (Gemma 4 support)
 subprocess.run([sys.executable, "-m", "pip", "install", "-q",
-    "git+https://github.com/huggingface/transformers.git",
-    "bitsandbytes", "accelerate", "structlog"], check=True)
+    "huggingface-hub>=1.5.0", "structlog", "accelerate"], check=True)
+subprocess.run([sys.executable, "-m", "pip", "install", "-q", "--no-deps",
+    "git+https://github.com/huggingface/transformers.git"], check=True)
+
+# Check GPU compatibility
+import torch
+USE_GPU = False
+if torch.cuda.is_available():
+    cap = torch.cuda.get_device_capability(0)
+    gpu_name = torch.cuda.get_device_name(0)
+    if cap[0] >= 7:
+        USE_GPU = True
+        print(f"GPU: {gpu_name} (sm_{cap[0]}{cap[1]}) — COMPATIBLE, using GPU")
+    else:
+        print(f"GPU: {gpu_name} (sm_{cap[0]}{cap[1]}) — INCOMPATIBLE with PyTorch")
+        print("Falling back to CPU mode (slower but works)")
+else:
+    print("No GPU detected. Running on CPU.")
 
 # %%
+import os
 from huggingface_hub import login
-from kaggle_secrets import UserSecretsClient
-secrets = UserSecretsClient()
-login(token=secrets.get_secret("HF_TOKEN"))
+
+# Try multiple auth methods
+hf_token = os.environ.get("HF_TOKEN")
+
+if not hf_token:
+    try:
+        from kaggle_secrets import UserSecretsClient
+        hf_token = UserSecretsClient().get_secret("HF_TOKEN")
+    except Exception:
+        pass
+
+if not hf_token:
+    # Check if already logged in via huggingface-cli
+    from pathlib import Path
+    token_file = Path.home() / ".cache" / "huggingface" / "token"
+    if token_file.exists():
+        hf_token = token_file.read_text().strip()
+
+if hf_token:
+    login(token=hf_token)
+    print("Authenticated with HuggingFace")
+else:
+    print("WARNING: No HF_TOKEN found. Trying without auth (may fail for gated models).")
 
 # %%
 # Clone our repo
@@ -48,22 +86,32 @@ if torch.cuda.is_available():
 # ## 2. Load Gemma 4 E4B
 
 # %%
-from transformers import AutoProcessor, AutoModelForImageTextToText, BitsAndBytesConfig, TextStreamer
+from transformers import AutoProcessor, AutoModelForImageTextToText, BitsAndBytesConfig
 
 MODEL_NAME = "google/gemma-4-E4B-it"
 
-print(f"Loading {MODEL_NAME} in 4-bit...")
+print(f"Loading {MODEL_NAME}...")
 load_start = time.monotonic()
 
 processor = AutoProcessor.from_pretrained(MODEL_NAME)
-model = AutoModelForImageTextToText.from_pretrained(
-    MODEL_NAME,
-    device_map="auto",
-    quantization_config=BitsAndBytesConfig(
-        load_in_4bit=True,
-        bnb_4bit_compute_dtype=torch.float16,
-    ),
-)
+
+if USE_GPU:
+    print("Loading in 4-bit on GPU...")
+    model = AutoModelForImageTextToText.from_pretrained(
+        MODEL_NAME,
+        device_map="auto",
+        quantization_config=BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_compute_dtype=torch.float16,
+        ),
+    )
+else:
+    print("Loading in float16 on CPU (slower, ~10GB RAM)...")
+    model = AutoModelForImageTextToText.from_pretrained(
+        MODEL_NAME,
+        device_map="cpu",
+        torch_dtype=torch.float16,
+    )
 
 load_time = time.monotonic() - load_start
 print(f"Loaded in {load_time:.0f}s")

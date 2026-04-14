@@ -52,3 +52,7 @@ reports/
 
 # ruff
 .ruff_cache/
+
+# Kaggle kernel push temp files
+.kaggle_kernel/
+.kaggle_output/

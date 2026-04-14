@@ -12,7 +12,7 @@
 #
 # **Dataset**: ICBHI 2017 Respiratory Sound Database (920 recordings)
 # **Method**: Unsloth QLoRA 4-bit on Gemma 4 E4B vision
-# **Hardware**: Kaggle T4 16GB GPU
+# **Hardware**: Colab/Kaggle T4 16GB GPU
 # **Time**: ~2-3 hours
 #
 # **This notebook targets the Unsloth $10K prize.**
@@ -23,14 +23,39 @@
 # %%
 # MUST install transformers from source for Gemma 4 support
 # librosa for spectrogram generation
-!pip install -q git+https://github.com/huggingface/transformers.git unsloth trl datasets bitsandbytes accelerate librosa Pillow soundfile
+!pip install -q git+https://github.com/huggingface/transformers.git unsloth trl datasets bitsandbytes accelerate librosa Pillow soundfile kaggle
 
 # %%
+# Authenticate — works on both Colab and Kaggle
 from huggingface_hub import login
-from kaggle_secrets import UserSecretsClient
+import os, subprocess
 
-secrets = UserSecretsClient()
-login(token=secrets.get_secret("HF_TOKEN"))
+try:
+    from kaggle_secrets import UserSecretsClient
+    secrets = UserSecretsClient()
+    login(token=secrets.get_secret("HF_TOKEN"))
+    KAGGLE_USERNAME = secrets.get_secret("KAGGLE_USERNAME")
+    KAGGLE_KEY = secrets.get_secret("KAGGLE_KEY")
+    print("Authenticated via Kaggle secrets")
+except ModuleNotFoundError:
+    try:
+        from google.colab import userdata
+        login(token=userdata.get("HF_TOKEN"))
+        KAGGLE_USERNAME = userdata.get("KAGGLE_USERNAME")
+        KAGGLE_KEY = userdata.get("KAGGLE_KEY")
+        print("Authenticated via Colab secrets")
+    except Exception:
+        login()
+        KAGGLE_USERNAME = os.environ.get("KAGGLE_USERNAME", "")
+        KAGGLE_KEY = os.environ.get("KAGGLE_KEY", "")
+        print("Authenticated via manual login")
+
+# Set up Kaggle API credentials for dataset download
+os.makedirs(os.path.expanduser("~/.kaggle"), exist_ok=True)
+import json as _json
+with open(os.path.expanduser("~/.kaggle/kaggle.json"), "w") as f:
+    _json.dump({"username": KAGGLE_USERNAME, "key": KAGGLE_KEY}, f)
+os.chmod(os.path.expanduser("~/.kaggle/kaggle.json"), 0o600)
 
 # %%
 import json
@@ -56,17 +81,37 @@ print(f"VRAM: {torch.cuda.get_device_properties(0).total_mem / 1024**3:.1f} GB")
 # **Add the dataset via Kaggle sidebar**: Search "respiratory-sound-database" by vbookshelf
 
 # %%
-ICBHI_PATH = Path("/kaggle/input/respiratory-sound-database/Respiratory_Sound_Database/Respiratory_Sound_Database")
+# Auto-detect dataset location (Kaggle native) or download via API (Colab)
+KAGGLE_NATIVE = Path("/kaggle/input/respiratory-sound-database/Respiratory_Sound_Database/Respiratory_Sound_Database")
+ICBHI_DIR = Path("/tmp/icbhi_data")
+ICBHI_INNER = ICBHI_DIR / "Respiratory_Sound_Database" / "Respiratory_Sound_Database"
 
-if ICBHI_PATH.exists():
-    audio_dir = ICBHI_PATH / "audio_and_txt_files"
-    audio_files = list(audio_dir.glob("*.wav"))
-    print(f"ICBHI dataset found: {len(audio_files)} audio files")
+if KAGGLE_NATIVE.exists():
+    audio_dir = KAGGLE_NATIVE / "audio_and_txt_files"
+    print("ICBHI dataset found at Kaggle native path")
+elif ICBHI_INNER.exists():
+    audio_dir = ICBHI_INNER / "audio_and_txt_files"
+    print(f"ICBHI dataset found at {ICBHI_INNER}")
 else:
-    print("ICBHI dataset not found. Add it as a Kaggle dataset input:")
-    print("  1. Click 'Add Data' in notebook sidebar")
-    print("  2. Search 'respiratory-sound-database'")
-    print("  3. Add the dataset by vbookshelf")
+    print("Downloading ICBHI dataset via Kaggle API...")
+    ICBHI_DIR.mkdir(parents=True, exist_ok=True)
+    dl_result = subprocess.run(
+        ["kaggle", "datasets", "download", "-d", "vbookshelf/respiratory-sound-database",
+         "-p", str(ICBHI_DIR), "--unzip"],
+        capture_output=True, text=True,
+    )
+    if dl_result.returncode == 0:
+        print("  Download complete")
+        audio_dir = ICBHI_INNER / "audio_and_txt_files"
+    else:
+        print(f"  Download failed: {dl_result.stderr}")
+        audio_dir = None
+
+if audio_dir and audio_dir.exists():
+    audio_files = list(audio_dir.glob("*.wav"))
+    print(f"ICBHI dataset: {len(audio_files)} audio files")
+else:
+    print("ICBHI dataset NOT available — will use dummy data")
     audio_files = []
 
 # %% [markdown]
@@ -137,7 +182,7 @@ if audio_files:
 import librosa
 from PIL import Image
 
-SPEC_DIR = Path("/kaggle/working/spectrograms")
+SPEC_DIR = Path("/tmp/spectrograms")
 SPEC_DIR.mkdir(exist_ok=True)
 
 # Parameters tuned for breath sounds

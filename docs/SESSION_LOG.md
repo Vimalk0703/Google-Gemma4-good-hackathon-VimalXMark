@@ -189,3 +189,82 @@ These files were changed based on real Gemma 4 behavior:
 
 - Kaggle API token: `KGAT_98d7...` — regenerate at kaggle.com → Settings → API
 - HuggingFace token: `hf_ksal...` — regenerate at huggingface.co → Settings → Access Tokens
+
+---
+
+## Session 2: April 14, 2026
+
+### What Was Built
+
+**Spectrogram Pipeline (Key Innovation)**
+- `malaika/spectrogram.py` — Audio → mel-spectrogram PNG conversion
+  - Parameters tuned for pediatric breath sounds: 50-4000 Hz, 128 mel bands
+  - Lazy imports (librosa, PIL) — doesn't break without them
+  - `audio_to_spectrogram()` — single file conversion
+  - `batch_audio_to_spectrograms()` — bulk conversion for training
+
+**Why Spectrograms Instead of Whisper for Breath Sounds**
+- Whisper is a SPEECH model — it doesn't meaningfully transcribe wheezes, crackles, grunting
+- Spectrograms preserve ALL acoustic features (frequency, intensity, timing) as a visual image
+- Gemma 4 vision WORKS (confirmed Session 1) — spectrograms leverage the working modality
+- Fine-tuning vision on spectrogram images is straightforward via Unsloth
+- More compelling competition narrative: innovative use of Gemma 4's multimodality
+
+**Treatment Prompt Fix**
+- `malaika/prompts/treatment.py` — Custom `injection_defense` for text output
+- Root cause: default injection_defense said "Output the JSON object IMMEDIATELY" even for text-format prompts
+- Fix: treatment prompt now has text-appropriate injection_defense
+- Expected result: Swahili treatment output will be plain text, not JSON
+
+**New Breathing Prompt**
+- `malaika/prompts/breathing.py` — Added `breathing.classify_breath_sounds_from_spectrogram`
+- Describes spectrogram axes and patterns for wheeze, stridor, crackles, grunting
+- Guides Gemma 4 to interpret visual patterns in the spectrogram image
+
+**Updated Audio Module**
+- `malaika/audio.py` — Added `classify_breath_sounds_from_spectrogram()`
+- `classify_breath_sounds()` now tries spectrogram first, falls back to Whisper
+- `_parse_breath_sound_result()` — extracted shared parsing logic
+
+**Updated Fine-Tuning Notebook**
+- `notebooks/02_finetune_breath_sounds.py` — Complete rewrite for spectrogram approach
+  - Generates mel-spectrogram PNGs from ICBHI audio
+  - Fine-tunes BOTH vision AND language layers (`finetune_vision_layers=True`)
+  - Evaluates on spectrogram images using processor + generate
+  - 100 training steps (up from 60)
+
+**Day 4 Kaggle Notebook**
+- `notebooks/04_day4_real_data_test.py` — Comprehensive real data testing
+  - Section A: Re-verifies ALL Session 1 tests (especially Tests 1 & 5)
+  - Section B: Real ICBHI data — stratified sample of 20 recordings
+    - Generates spectrograms from real breath sounds
+    - Tests base model Gemma 4 on real spectrograms (baseline accuracy)
+  - Section C: Latency benchmarks for all modalities
+  - Treatment prompt fix verification (Swahili should be plain text)
+
+**Tests: 227 passing (up from 213)**
+- test_spectrogram.py: 8 tests (file not found, librosa/PIL missing, empty audio, batch)
+- test_audio.py: 5 new tests (spectrogram fallback, disabled, direct success/failure/missing)
+- All 213 existing tests still pass
+
+### Files Changed
+
+| File | Change |
+|------|--------|
+| `malaika/spectrogram.py` | NEW — audio to mel-spectrogram image conversion |
+| `malaika/prompts/treatment.py` | Fixed injection_defense for text output |
+| `malaika/prompts/breathing.py` | Added spectrogram classification prompt |
+| `malaika/audio.py` | Added spectrogram path, refactored classify_breath_sounds |
+| `pyproject.toml` | Added librosa, PIL to mypy overrides |
+| `notebooks/02_finetune_breath_sounds.py` | Rewritten for spectrogram vision approach |
+| `notebooks/04_day4_real_data_test.py` | NEW — Day 4 real data testing notebook |
+| `tests/test_spectrogram.py` | NEW — 8 spectrogram tests |
+| `tests/test_audio.py` | Added 5 spectrogram classification tests |
+| `TRACKER.md` | Updated Day 4 progress |
+
+### Next Steps (This Session)
+
+1. **Push to GitHub** so Kaggle can clone the latest code
+2. **Run notebook 04 on Kaggle** — re-verify all tests, test real ICBHI data
+3. **Run notebook 02 on Kaggle** — start LoRA fine-tuning with spectrograms
+4. **Test Gradio app on GPU** — verify the actual UI works end-to-end

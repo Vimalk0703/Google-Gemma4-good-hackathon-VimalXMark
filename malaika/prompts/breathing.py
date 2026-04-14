@@ -110,6 +110,55 @@ CLASSIFY_BREATH_SOUNDS = PromptRegistry.register(PromptTemplate(
 ))
 
 
+# --- Breath Sound Classification from Spectrogram Image (audio → spectrogram → Gemma 4 vision) ---
+CLASSIFY_BREATH_SOUNDS_FROM_SPECTROGRAM = PromptRegistry.register(PromptTemplate(
+    name="breathing.classify_breath_sounds_from_spectrogram",
+    version="1.0.0",
+    description=(
+        "Classify breath sounds from a mel-spectrogram image of an audio recording. "
+        "The spectrogram shows frequency (vertical axis, low to high) vs time (horizontal). "
+        "Gemma 4 vision analyzes the visual patterns to detect abnormal breath sounds."
+    ),
+    system_prompt=SYSTEM_MEDICAL_OBSERVER,
+    user_template=(
+        "This is a mel-spectrogram image of a child's breathing audio recorded by a phone "
+        "microphone placed near the child's chest/mouth.\n\n"
+        "The image shows:\n"
+        "- Vertical axis: frequency (50 Hz at bottom to 4000 Hz at top)\n"
+        "- Horizontal axis: time (left to right)\n"
+        "- Brightness: intensity (brighter = louder)\n\n"
+        "Interpret the spectrogram to classify the breath sounds:\n"
+        "- Wheeze: continuous horizontal bright bands (200-1000 Hz), musical quality\n"
+        "- Stridor: bright band at high frequency (500-1500 Hz), during inspiration\n"
+        "- Crackles: short vertical bright spots (discontinuous, scattered)\n"
+        "- Grunting: low frequency bright spots at end of expiration (50-300 Hz)\n"
+        "- Normal: even, low-intensity pattern with no prominent bands or spots\n\n"
+        "Report ONLY a JSON object: "
+        '{{"wheeze": true/false, "stridor": true/false, "grunting": true/false, '
+        '"crackles": true/false, "normal": true/false, '
+        '"confidence": <0.0-1.0>, '
+        '"description": "<what patterns you see in the spectrogram>"}}'
+    ),
+    required_variables=frozenset(),
+    expected_output_format="json",
+    output_schema={
+        "type": "object",
+        "properties": {
+            "wheeze": {"type": "boolean"},
+            "stridor": {"type": "boolean"},
+            "grunting": {"type": "boolean"},
+            "crackles": {"type": "boolean"},
+            "normal": {"type": "boolean"},
+            "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+            "description": {"type": "string"},
+        },
+        "required": ["wheeze", "stridor", "grunting", "crackles", "normal", "confidence"],
+    },
+    max_tokens=200,
+    temperature=0.0,
+))
+
+
 # --- Breath Sound Classification from Text (Whisper transcription → Gemma 4 reasoning) ---
 CLASSIFY_BREATH_SOUNDS_FROM_TEXT = PromptRegistry.register(PromptTemplate(
     name="breathing.classify_breath_sounds_from_text",

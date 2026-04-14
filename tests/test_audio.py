@@ -21,6 +21,7 @@ from malaika.audio import (
     WhisperTranscriber,
     analyze_heart_sounds,
     classify_breath_sounds,
+    classify_breath_sounds_from_spectrogram,
     understand_speech,
 )
 
@@ -534,3 +535,110 @@ class TestAnalyzeHeartSounds:
 
         assert result.status == FindingStatus.UNCERTAIN
         assert result.confidence == 0.0
+
+
+# ---------------------------------------------------------------------------
+# Spectrogram-Based Breath Sounds
+# ---------------------------------------------------------------------------
+
+class TestSpectrogramBreathSounds:
+    """Tests for spectrogram-based breath sound classification."""
+
+    def test_spectrogram_fallback_to_whisper(
+        self,
+        mock_inference: MalaikaInference,
+        mock_transcriber: WhisperTranscriber,
+        temp_audio: Path,
+    ) -> None:
+        """When librosa is unavailable, classify_breath_sounds falls back to Whisper."""
+        mock_transcriber._pipeline.return_value = {"text": "quiet breathing"}
+        parsed = {
+            "wheeze": False, "stridor": False, "grunting": False,
+            "crackles": False, "normal": True, "confidence": 0.8,
+        }
+        validated = ValidatedOutput(status="valid", parsed=parsed, raw_output=json.dumps(parsed))
+
+        with patch.object(mock_inference, "reason", return_value=(json.dumps(parsed), validated, 0)):
+            with patch("malaika.audio.audio_to_spectrogram", side_effect=RuntimeError("no librosa")):
+                result = classify_breath_sounds(
+                    temp_audio, mock_inference, transcriber=mock_transcriber,
+                    use_spectrogram=True,
+                )
+
+        assert result.status == FindingStatus.NOT_DETECTED
+        assert result.confidence == 0.8
+
+    def test_spectrogram_disabled(
+        self,
+        mock_inference: MalaikaInference,
+        mock_transcriber: WhisperTranscriber,
+        temp_audio: Path,
+    ) -> None:
+        """When use_spectrogram=False, should skip spectrogram entirely."""
+        mock_transcriber._pipeline.return_value = {"text": "wheezing"}
+        parsed = {
+            "wheeze": True, "stridor": False, "grunting": False,
+            "crackles": False, "normal": False, "confidence": 0.9,
+        }
+        validated = ValidatedOutput(status="valid", parsed=parsed, raw_output=json.dumps(parsed))
+
+        with patch.object(mock_inference, "reason", return_value=(json.dumps(parsed), validated, 0)):
+            result = classify_breath_sounds(
+                temp_audio, mock_inference, transcriber=mock_transcriber,
+                use_spectrogram=False,
+            )
+
+        assert result.wheeze is True
+        assert result.status == FindingStatus.DETECTED
+
+    def test_spectrogram_direct_success(
+        self,
+        mock_inference: MalaikaInference,
+        temp_audio: Path,
+        tmp_path: Path,
+    ) -> None:
+        """classify_breath_sounds_from_spectrogram with mocked spectrogram generation."""
+        spec_path = tmp_path / "spec.png"
+        spec_path.write_bytes(b"fake png")
+
+        parsed = {
+            "wheeze": True, "stridor": False, "grunting": False,
+            "crackles": True, "normal": False, "confidence": 0.85,
+            "description": "Wheeze and crackles in spectrogram",
+        }
+        validated = ValidatedOutput(status="valid", parsed=parsed, raw_output=json.dumps(parsed))
+
+        with patch("malaika.audio.audio_to_spectrogram", return_value=spec_path):
+            with patch.object(
+                mock_inference, "analyze_image",
+                return_value=(json.dumps(parsed), validated, 0),
+            ):
+                result = classify_breath_sounds_from_spectrogram(temp_audio, mock_inference)
+
+        assert result.wheeze is True
+        assert result.crackles is True
+        assert result.status == FindingStatus.DETECTED
+        assert result.confidence == 0.85
+
+    def test_spectrogram_direct_failure(
+        self,
+        mock_inference: MalaikaInference,
+        temp_audio: Path,
+        tmp_path: Path,
+    ) -> None:
+        """classify_breath_sounds_from_spectrogram returns UNCERTAIN on non-RuntimeError."""
+        with patch("malaika.audio.audio_to_spectrogram", side_effect=ValueError("bad audio")):
+            result = classify_breath_sounds_from_spectrogram(temp_audio, mock_inference)
+
+        assert result.status == FindingStatus.UNCERTAIN
+        assert result.confidence == 0.0
+
+    def test_spectrogram_direct_librosa_missing(
+        self,
+        mock_inference: MalaikaInference,
+        temp_audio: Path,
+    ) -> None:
+        """classify_breath_sounds_from_spectrogram propagates RuntimeError."""
+        with patch("malaika.audio.audio_to_spectrogram", side_effect=RuntimeError("no librosa")):
+            with pytest.raises(RuntimeError):
+                classify_breath_sounds_from_spectrogram(temp_audio, mock_inference)

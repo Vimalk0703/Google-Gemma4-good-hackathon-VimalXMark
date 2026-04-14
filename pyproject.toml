@@ -56,6 +56,8 @@ module = [
     "trl.*",
     "structlog.*",
     "piper_tts.*",
+    "librosa.*",
+    "PIL.*",
 ]
 ignore_missing_imports = true
 

@@ -32,8 +32,14 @@
 - [x] 213 local tests passing
 - [x] Swahili treatment generation confirmed working
 
-### Day 4 (Apr 14) — TODO
-- [ ] Download ICBHI dataset, test breath sound pipeline with real audio
+### Day 4 (Apr 14) — IN PROGRESS
+- [x] Spectrogram pipeline: audio → mel-spectrogram PNG → Gemma 4 vision
+- [x] Fixed treatment prompt (Swahili was returning JSON instead of text)
+- [x] Spectrogram-based breath sound prompt + classification function
+- [x] Updated fine-tuning notebook: spectrogram vision approach (not text-only)
+- [x] Day 4 Kaggle notebook ready (real ICBHI data testing + all re-verification)
+- [x] 227 tests passing (up from 213)
+- [ ] Push to GitHub and run Day 4 notebook on Kaggle
 - [ ] Download jaundice dataset, test with real clinical images
 - [ ] Start LoRA fine-tuning on Kaggle (breath sounds)
 - [ ] Test Gradio app end-to-end on GPU machine
@@ -103,7 +109,7 @@ Update this weekly. Score yourself honestly 1-10.
 
 ```
 Week 1 (Apr 12-18): Foundation + Real GPU Testing
-  ✅ Code complete (213 tests)
+  ✅ Code complete (227 tests)
   → GPU end-to-end testing
   → Prompt refinement
   → Download datasets
@@ -156,5 +162,5 @@ Week 5 (May 10-18): Video + Submit
 
 ---
 
-*Last updated: April 13, 2026*
-*Next update: Start of Day 3 (April 14)*
+*Last updated: April 14, 2026 (Session 2 start)*
+*Next update: End of Day 4*

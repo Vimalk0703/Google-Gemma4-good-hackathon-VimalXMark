@@ -26,6 +26,7 @@ import structlog
 from malaika.config import load_config
 from malaika.inference import MalaikaInference
 from malaika.prompts import PromptRegistry
+from malaika.spectrogram import audio_to_spectrogram
 from malaika.types import (
     BreathSoundAssessment,
     FindingStatus,
@@ -167,36 +168,88 @@ def _description_from_parsed(parsed: dict) -> str:
 # Audio Functions — Whisper transcription → Gemma 4 text reasoning
 # ---------------------------------------------------------------------------
 
+def classify_breath_sounds_from_spectrogram(
+    audio_path: Path,
+    inference: MalaikaInference,
+) -> BreathSoundAssessment:
+    """Classify breath sounds using spectrogram image analysis.
+
+    Pipeline: audio → mel-spectrogram PNG → Gemma 4 vision.
+    This is the preferred approach — it preserves acoustic features
+    that Whisper (a speech model) cannot capture for breath sounds.
+
+    Args:
+        audio_path: Path to audio file (WAV/MP3/OGG/FLAC).
+        inference: Loaded MalaikaInference instance.
+
+    Returns:
+        BreathSoundAssessment with detected abnormal sounds.
+    """
+    input_hash = _file_hash(audio_path)
+
+    try:
+        # Step 1: Convert audio to spectrogram image
+        spec_path = audio_to_spectrogram(audio_path)
+
+        # Step 2: Analyze spectrogram via Gemma 4 vision
+        prompt = PromptRegistry.get("breathing.classify_breath_sounds_from_spectrogram")
+        raw_output, validated, retries = inference.analyze_image(
+            spec_path, prompt, input_hash=input_hash,
+        )
+    except RuntimeError:
+        # librosa not installed — fall through to caller
+        raise
+    except Exception as e:
+        logger.error("spectrogram_breath_sounds_failed", error=str(e))
+        return BreathSoundAssessment(
+            status=FindingStatus.UNCERTAIN,
+            confidence=0.0,
+            description=f"Spectrogram analysis failed: {e}",
+            raw_model_output="",
+        )
+
+    return _parse_breath_sound_result(raw_output, validated)
+
+
 def classify_breath_sounds(
     audio_path: Path,
     inference: MalaikaInference,
     transcriber: WhisperTranscriber | None = None,
+    *,
+    use_spectrogram: bool = True,
 ) -> BreathSoundAssessment:
     """Classify breath sounds from an audio recording.
 
-    Pipeline: audio → Whisper transcription → Gemma 4 text reasoning.
-    Detects wheeze, stridor, grunting, and crackles.
+    Tries spectrogram-based vision analysis first (preferred), falls back
+    to Whisper transcription + text reasoning if librosa is unavailable.
 
     Args:
         audio_path: Path to audio file (WAV/MP3/OGG/FLAC).
         inference: Loaded MalaikaInference instance.
         transcriber: WhisperTranscriber instance (created if not provided).
+        use_spectrogram: Try spectrogram approach first (default True).
 
     Returns:
         BreathSoundAssessment with detected abnormal sounds.
     """
+    # Try spectrogram approach first (preferred for breath sounds)
+    if use_spectrogram:
+        try:
+            return classify_breath_sounds_from_spectrogram(audio_path, inference)
+        except RuntimeError:
+            logger.info("spectrogram_unavailable_falling_back_to_whisper")
+
+    # Fallback: Whisper transcription → text reasoning
     if transcriber is None:
         transcriber = WhisperTranscriber()
 
     input_hash = _file_hash(audio_path)
 
     try:
-        # Step 1: Transcribe audio via Whisper
         transcription = transcriber.transcribe(audio_path)
         if not transcription:
             transcription = "(no speech or sounds detected in audio)"
 
-        # Step 2: Use Gemma 4 text reasoning on the transcription
         prompt = PromptRegistry.get("breathing.classify_breath_sounds_from_text")
         raw_output, validated, retries = inference.reason(
             prompt, input_hash=input_hash,
@@ -211,6 +264,14 @@ def classify_breath_sounds(
             raw_model_output="",
         )
 
+    return _parse_breath_sound_result(raw_output, validated)
+
+
+def _parse_breath_sound_result(
+    raw_output: str,
+    validated: ValidatedOutput,
+) -> BreathSoundAssessment:
+    """Parse validated output into BreathSoundAssessment."""
     parsed = validated.parsed
     status = _status_from_validated(validated)
     confidence = _confidence_from_parsed(parsed)
@@ -220,7 +281,6 @@ def classify_breath_sounds(
     grunting = bool(parsed.get("grunting", False))
     crackles = bool(parsed.get("crackles", False))
 
-    # If all sounds are normal (none detected), status is NOT_DETECTED
     has_abnormal = wheeze or stridor or grunting or crackles
     if status == FindingStatus.DETECTED and not has_abnormal:
         status = FindingStatus.NOT_DETECTED

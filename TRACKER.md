@@ -21,11 +21,22 @@
 - [x] Kaggle feasibility test — confirmed: text ✓, image ✓, JSON 100%, Swahili ✓, audio ✗ (Whisper fallback)
 - [x] Fine-tuning notebook ready (not trained yet)
 
-### Day 3 (Apr 14) — TODO
-- [ ] Run full app end-to-end on GPU machine (Kaggle or local)
-- [ ] Download ICBHI dataset, test breath sound pipeline
-- [ ] Prompt refinement with real Gemma 4 outputs
+### Day 2-3 (Apr 13) — COMPLETED
+- [x] Kaggle E2E integration test — FULL PIPELINE VALIDATED
+- [x] Golden scenarios: 21/21 (100%)
+- [x] JSON reliability: 5/5 (100%)
+- [x] Fixed Gemma 4 "thinking mode" — suppress chain-of-thought in prompts
+- [x] Fixed empty nutrition responses — enforce field filling
+- [x] Audio pipeline: confirmed Whisper fallback needed, implemented
+- [x] Gradio UI (app.py) + Piper TTS (tts.py) built
+- [x] 213 local tests passing
+- [x] Swahili treatment generation confirmed working
+
+### Day 4 (Apr 14) — TODO
+- [ ] Download ICBHI dataset, test breath sound pipeline with real audio
+- [ ] Download jaundice dataset, test with real clinical images
 - [ ] Start LoRA fine-tuning on Kaggle (breath sounds)
+- [ ] Test Gradio app end-to-end on GPU machine
 
 ---
 
@@ -56,7 +67,7 @@ Update this weekly. Score yourself honestly 1-10.
 |-----------|--------|---------------|--------|-----|
 | **Impact & Vision** (40%) | Highest | 8/10 | 9/10 | Need video showing human story |
 | **Video Pitch** (30%) | High | 1/10 | 9/10 | **BIGGEST GAP** — not started |
-| **Technical Depth** (30%) | High | 7/10 | 9/10 | Need real model results + accuracy data |
+| **Technical Depth** (30%) | High | 8/10 | 9/10 | Need fine-tuning + real clinical data accuracy |
 
 ### Impact & Vision — How to reach 9/10
 - [x] Problem: 4.9M children/year (WHO data, March 2026)

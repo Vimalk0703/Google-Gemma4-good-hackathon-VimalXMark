@@ -33,6 +33,24 @@ _BANNER = (
     "Demo for Gemma 4 Good Hackathon -- **not for clinical use**"
 )
 
+# Language display names -> internal codes
+_LANGUAGE_MAP: dict[str, str] = {
+    "English": "en",
+    "Swahili": "sw",
+    "Hindi": "hi",
+    "French": "fr",
+}
+_LANGUAGE_NAMES: list[str] = list(_LANGUAGE_MAP.keys())
+
+# Ordered list of user-facing assessment steps (used for progress bar)
+_ASSESSMENT_STEPS: list[IMCIState] = [
+    IMCIState.DANGER_SIGNS,
+    IMCIState.BREATHING,
+    IMCIState.DIARRHEA,
+    IMCIState.FEVER,
+    IMCIState.NUTRITION,
+]
+
 # Human-readable state labels and descriptions
 _STATE_LABELS: dict[IMCIState, str] = {
     IMCIState.DANGER_SIGNS: "Danger Signs",
@@ -89,6 +107,37 @@ _SEVERITY_EMOJI: dict[Severity, str] = {
     Severity.RED: "RED",
 }
 
+# User-friendly guidance per step
+_STEP_GUIDANCE: dict[IMCIState, str] = {
+    IMCIState.DANGER_SIGNS: (
+        "Upload a photo of the child and answer questions about their alertness. "
+        "This helps identify any urgent danger signs requiring immediate action."
+    ),
+    IMCIState.BREATHING: (
+        "Record a short chest video, take a chest photo, or record breathing sounds. "
+        "Malaika will check for fast breathing, chest indrawing, and abnormal sounds."
+    ),
+    IMCIState.DIARRHEA: (
+        "Answer questions about diarrhea symptoms and upload a photo to check for "
+        "dehydration signs like sunken eyes or slow skin pinch."
+    ),
+    IMCIState.FEVER: (
+        "Answer questions about fever, its duration, and any related symptoms like "
+        "stiff neck or recent measles exposure."
+    ),
+    IMCIState.NUTRITION: (
+        "Upload a photo to assess for visible wasting. Enter the MUAC measurement "
+        "if available. This checks for malnutrition."
+    ),
+    IMCIState.HEART_MEMS: (
+        "Optional: Record heart sounds using a phone microphone or digital stethoscope "
+        "for heart rate assessment."
+    ),
+    IMCIState.CLASSIFY: "Malaika is classifying findings using WHO IMCI protocol...",
+    IMCIState.TREAT: "Generating treatment plan...",
+    IMCIState.COMPLETE: "Assessment complete. Switch to the Results tab to view the full report.",
+}
+
 
 # ---------------------------------------------------------------------------
 # App State Management
@@ -127,12 +176,54 @@ class AppState:
         return total
 
     def progress_text(self) -> str:
-        """Progress indicator text."""
+        """Progress indicator text (plain)."""
         state = self.current_state
         label = _STATE_LABELS.get(state, state.name)
         if state in (IMCIState.CLASSIFY, IMCIState.TREAT, IMCIState.COMPLETE):
             return f"Step {self.total_steps} of {self.total_steps}: {label}"
         return f"Step {self.step_number} of {self.total_steps}: {label}"
+
+    def progress_html(self) -> str:
+        """Build an HTML progress bar with step indicators."""
+        state = self.current_state
+        total = self.total_steps
+        if state in (IMCIState.CLASSIFY, IMCIState.TREAT, IMCIState.COMPLETE):
+            current = total
+        else:
+            current = self.step_number
+
+        pct = int((current / total) * 100)
+
+        # Build step dots
+        dots: list[str] = []
+        for i, st in enumerate(_ASSESSMENT_STEPS[:total]):
+            idx = i + 1
+            lbl = _STATE_LABELS.get(st, st.name)
+            if idx < current:
+                cls = "step-dot step-done"
+            elif idx == current:
+                cls = "step-dot step-active"
+            else:
+                cls = "step-dot step-pending"
+            dots.append(
+                f'<div class="{cls}" title="{lbl}">'
+                f'<span class="step-num">{idx}</span>'
+                f'<span class="step-label">{lbl}</span>'
+                f'</div>'
+            )
+
+        dots_html = "".join(dots)
+        label = _STATE_LABELS.get(state, state.name)
+
+        return (
+            f'<div class="progress-container">'
+            f'<div class="progress-bar-track">'
+            f'<div class="progress-bar-fill" style="width:{pct}%"></div>'
+            f'</div>'
+            f'<div class="step-dots">{dots_html}</div>'
+            f'<div class="progress-label">Step {current} of {total}: {label}</div>'
+            f'</div>'
+        )
 
     def load_model(self) -> str:
         """Attempt to load the Gemma 4 model. Returns status message."""
@@ -201,31 +292,50 @@ def _severity_badge(severity: Severity) -> str:
     """Create an HTML badge for severity level."""
     color = _SEVERITY_COLORS[severity]
     label = _SEVERITY_EMOJI[severity]
+    bg_light = {
+        Severity.GREEN: "#d4edda",
+        Severity.YELLOW: "#fff3cd",
+        Severity.RED: "#f8d7da",
+    }
+    text_color = {
+        Severity.GREEN: "#155724",
+        Severity.YELLOW: "#856404",
+        Severity.RED: "#721c24",
+    }
     return (
-        f'<span style="background-color:{color};color:white;padding:4px 12px;'
-        f'border-radius:4px;font-weight:bold;font-size:1.1em;">'
-        f'{label}</span>'
+        f'<div style="display:inline-block;background:{bg_light[severity]};'
+        f'border:2px solid {color};border-radius:8px;padding:10px 24px;'
+        f'text-align:center;margin:8px 0;">'
+        f'<span style="color:{text_color[severity]};font-weight:bold;'
+        f'font-size:1.3em;letter-spacing:1px;">{label}</span>'
+        f'</div>'
     )
 
 
 def _finding_to_markdown(finding: ClinicalFinding) -> str:
-    """Convert a ClinicalFinding to markdown text."""
+    """Convert a ClinicalFinding to a styled card-like markdown block."""
     state_label = _STATE_LABELS.get(finding.imci_state, finding.imci_state.name)
     status = finding.finding_status.value.replace("_", " ").title()
-    classifications = ", ".join(c.value.replace("_", " ").title() for c in finding.classifications)
+    classifications = ", ".join(
+        c.value.replace("_", " ").title() for c in finding.classifications
+    )
 
-    lines = [f"### {state_label}"]
-    lines.append(f"- **Status**: {status}")
+    lines: list[str] = []
+    lines.append(f"### {state_label}")
+    lines.append("")
+    lines.append(f"| Field | Value |")
+    lines.append(f"|-------|-------|")
+    lines.append(f"| **Status** | {status} |")
     if classifications:
-        lines.append(f"- **Classifications**: {classifications}")
+        lines.append(f"| **Classifications** | {classifications} |")
     if finding.notes:
-        lines.append(f"- **Notes**: {finding.notes}")
+        lines.append(f"| **Notes** | {finding.notes} |")
 
     # Confidence from perception results
     for pr in finding.perception_results:
-        lines.append(f"- **Confidence**: {pr.confidence:.0%}")
+        lines.append(f"| **Confidence** | {pr.confidence:.0%} |")
         if pr.description:
-            lines.append(f"- **Observation**: {pr.description}")
+            lines.append(f"| **Observation** | {pr.description} |")
 
     return "\n".join(lines)
 
@@ -233,7 +343,7 @@ def _finding_to_markdown(finding: ClinicalFinding) -> str:
 def _build_results_markdown(app_state: AppState) -> str:
     """Build full results markdown from the completed assessment."""
     if app_state.engine is None:
-        return "No assessment has been run yet."
+        return "*No assessment has been run yet. Complete an assessment on the Assessment tab first.*"
 
     result = app_state.engine.get_result()
 
@@ -241,7 +351,7 @@ def _build_results_markdown(app_state: AppState) -> str:
     lines.append("# Assessment Results\n")
 
     # Severity banner
-    lines.append(f"## Overall Severity: {_severity_badge(result.severity)}\n")
+    lines.append(f"## Overall Severity\n\n{_severity_badge(result.severity)}\n")
 
     # Referral urgency
     referral_text = {
@@ -249,15 +359,28 @@ def _build_results_markdown(app_state: AppState) -> str:
         "24h": "See a health worker within 24 hours",
         "immediate": "URGENT: Transport to health facility immediately",
     }
+    referral_color = {
+        "none": "#155724",
+        "24h": "#856404",
+        "immediate": "#721c24",
+    }
+    urgency_val = result.referral_urgency.value
+    r_color = referral_color.get(urgency_val, "#333")
+    r_text = referral_text.get(urgency_val, urgency_val)
     lines.append(
-        f"**Referral**: {referral_text.get(result.referral_urgency.value, result.referral_urgency.value)}\n"
+        f'<div style="padding:8px 16px;border-left:4px solid {r_color};'
+        f'background:#f8f9fa;margin:8px 0;font-weight:600;color:{r_color};">'
+        f'{r_text}</div>\n'
     )
 
     # Classifications
     lines.append("## Classifications\n")
-    for ct in result.classifications:
-        label = ct.value.replace("_", " ").title()
-        lines.append(f"- {label}")
+    if result.classifications:
+        for ct in result.classifications:
+            label = ct.value.replace("_", " ").title()
+            lines.append(f"- {label}")
+    else:
+        lines.append("- No classifications assigned")
     lines.append("")
 
     # Findings per step
@@ -271,8 +394,21 @@ def _build_results_markdown(app_state: AppState) -> str:
     # Treatment
     if result.treatment_text:
         lines.append("## Treatment Plan\n")
+        lines.append(
+            '<div style="background:#e8f4fd;border:1px solid #bee5eb;'
+            'border-radius:8px;padding:16px;margin:8px 0;">\n'
+        )
         lines.append(result.treatment_text)
+        lines.append("\n</div>")
         lines.append("")
+
+    # Export note
+    lines.append("---")
+    lines.append(
+        "*To save this report, use your browser Print function (Ctrl+P / Cmd+P) "
+        "to export as PDF.*"
+    )
+    lines.append("")
 
     # Metadata
     lines.append("---")
@@ -314,18 +450,21 @@ def create_app(config: MalaikaConfig | None = None) -> Any:
     def on_load_model() -> tuple[str, str]:
         """Load model on button click."""
         status = app_state.load_model()
-        return status, app_state.progress_text()
+        return status, app_state.progress_html()
 
     def on_start_assessment(
         age_months: int, language: str,
     ) -> tuple[str, str, str, str]:
         """Start a new assessment."""
         age = max(2, min(59, int(age_months)))
-        msg = app_state.start_assessment(age, language)
+        lang_code = _LANGUAGE_MAP.get(language, language)
+        msg = app_state.start_assessment(age, lang_code)
         state = app_state.current_state
         desc = _STATE_DESCRIPTIONS.get(state, "")
-        progress = app_state.progress_text()
-        return msg, desc, progress, _get_input_visibility(state)
+        guidance = _STEP_GUIDANCE.get(state, desc)
+        guidance_html = f'<div class="step-guidance">{guidance}</div>'
+        progress = app_state.progress_html()
+        return msg, guidance_html, progress, _get_input_visibility(state)
 
     def on_assess_danger_signs(
         image: str | None,
@@ -476,9 +615,10 @@ def create_app(config: MalaikaConfig | None = None) -> Any:
         msg = app_state.advance()
         state = app_state.current_state
         desc = _STATE_DESCRIPTIONS.get(state, "")
-        progress = app_state.progress_text()
+        guidance = _STEP_GUIDANCE.get(state, desc)
+        progress = app_state.progress_html()
         visibility = _get_input_visibility(state)
-        return msg, desc, progress, visibility
+        return msg, guidance, progress, visibility
 
     def on_generate_tts(text: str, language: str) -> str | None:
         """Generate TTS audio for treatment text."""
@@ -507,20 +647,246 @@ def create_app(config: MalaikaConfig | None = None) -> Any:
     # Build the Gradio Blocks UI
     # ------------------------------------------------------------------
 
+    _custom_css = """
+        /* -- Global -- */
+        .gradio-container {
+            max-width: 960px !important;
+            margin: 0 auto !important;
+            font-family: 'Inter', 'Segoe UI', system-ui, sans-serif !important;
+        }
+
+        /* -- Header branding -- */
+        .malaika-header {
+            text-align: center;
+            padding: 24px 16px 16px;
+            background: linear-gradient(135deg, #e8f4fd 0%, #f0f7ff 100%);
+            border-bottom: 3px solid #2979b9;
+            border-radius: 12px 12px 0 0;
+            margin-bottom: 8px;
+        }
+        .malaika-header h1 {
+            margin: 0 0 4px;
+            font-size: 2em;
+            color: #1a5276;
+            letter-spacing: 1px;
+        }
+        .malaika-header .tagline {
+            color: #2e86c1;
+            font-size: 1.05em;
+            margin: 0;
+        }
+        .malaika-header .disclaimer {
+            color: #7f8c8d;
+            font-size: 0.85em;
+            margin-top: 6px;
+        }
+
+        /* -- Demo mode banner -- */
+        .demo-banner {
+            background: #fff3cd;
+            border: 1px solid #ffc107;
+            border-radius: 8px;
+            padding: 12px 20px;
+            margin: 8px 0 12px;
+            text-align: center;
+            color: #856404;
+            font-weight: 600;
+        }
+        .demo-banner .demo-title {
+            font-size: 1.15em;
+            margin-bottom: 4px;
+        }
+        .demo-banner .demo-desc {
+            font-weight: 400;
+            font-size: 0.9em;
+        }
+
+        /* -- Progress bar -- */
+        .progress-container {
+            margin: 12px 0;
+        }
+        .progress-bar-track {
+            width: 100%;
+            height: 8px;
+            background: #e0e0e0;
+            border-radius: 4px;
+            overflow: hidden;
+            margin-bottom: 10px;
+        }
+        .progress-bar-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #2979b9, #21a0e8);
+            border-radius: 4px;
+            transition: width 0.4s ease;
+        }
+        .step-dots {
+            display: flex;
+            justify-content: space-between;
+            gap: 4px;
+            margin-bottom: 6px;
+        }
+        .step-dot {
+            flex: 1;
+            text-align: center;
+            padding: 6px 2px;
+            border-radius: 6px;
+            font-size: 0.78em;
+            line-height: 1.3;
+        }
+        .step-dot .step-num {
+            display: block;
+            font-weight: 700;
+            font-size: 1.1em;
+        }
+        .step-dot .step-label {
+            display: block;
+            font-size: 0.85em;
+        }
+        .step-done {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #a3d9a5;
+        }
+        .step-active {
+            background: #cce5ff;
+            color: #004085;
+            border: 2px solid #2979b9;
+            font-weight: 700;
+        }
+        .step-pending {
+            background: #f8f9fa;
+            color: #6c757d;
+            border: 1px solid #dee2e6;
+        }
+        .progress-label {
+            text-align: center;
+            font-weight: 600;
+            color: #2c3e50;
+            font-size: 0.95em;
+        }
+
+        /* -- Step guidance -- */
+        .step-guidance {
+            background: #f0f7ff;
+            border-left: 4px solid #2979b9;
+            border-radius: 0 8px 8px 0;
+            padding: 12px 16px;
+            margin: 8px 0;
+            color: #2c3e50;
+            font-size: 0.95em;
+        }
+
+        /* -- Finding card -- */
+        .finding-card {
+            background: #ffffff;
+            border: 1px solid #dee2e6;
+            border-radius: 10px;
+            padding: 16px;
+            margin: 8px 0;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+        }
+
+        /* -- Assessment group styling -- */
+        .assess-group {
+            background: #fafbfc;
+            border: 1px solid #e1e4e8;
+            border-radius: 10px;
+            padding: 16px !important;
+            margin: 8px 0;
+        }
+        .assess-group h3 {
+            color: #1a5276;
+            border-bottom: 2px solid #e8f4fd;
+            padding-bottom: 6px;
+            margin-top: 0;
+        }
+
+        /* -- Buttons -- */
+        .next-step-btn {
+            min-height: 52px !important;
+            font-size: 1.15em !important;
+            font-weight: 700 !important;
+            letter-spacing: 0.5px;
+        }
+        .load-model-btn {
+            min-height: 56px !important;
+            font-size: 1.2em !important;
+            font-weight: 700 !important;
+        }
+        .assess-btn {
+            margin-top: 8px !important;
+        }
+
+        /* -- Results tab -- */
+        .results-area {
+            background: #ffffff;
+            border: 1px solid #dee2e6;
+            border-radius: 10px;
+            padding: 20px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+        }
+
+        /* -- Footer -- */
+        .malaika-footer {
+            text-align: center;
+            padding: 16px;
+            margin-top: 12px;
+            border-top: 2px solid #e8f4fd;
+            color: #7f8c8d;
+            font-size: 0.85em;
+        }
+        .malaika-footer a { color: #2979b9; text-decoration: none; }
+
+        /* -- Mobile responsive -- */
+        @media (max-width: 768px) {
+            .gradio-container { padding: 0 4px !important; }
+            .malaika-header h1 { font-size: 1.5em; }
+            .step-dot .step-label { display: none; }
+            .step-dot .step-num { font-size: 1em; }
+            .step-dots { gap: 2px; }
+
+            /* Stack inputs vertically */
+            .gr-row { flex-direction: column !important; }
+
+            /* Larger touch targets */
+            button, .gr-button {
+                min-height: 48px !important;
+                font-size: 1em !important;
+            }
+            input, select, textarea {
+                min-height: 44px !important;
+                font-size: 16px !important;  /* Prevents iOS zoom */
+            }
+            .gr-check-radio { min-height: 44px !important; }
+        }
+
+        @media (max-width: 480px) {
+            .malaika-header { padding: 16px 8px 12px; }
+            .malaika-header h1 { font-size: 1.3em; }
+            .malaika-header .tagline { font-size: 0.9em; }
+            .step-dot { padding: 4px 1px; font-size: 0.7em; }
+        }
+    """
+
     with gr.Blocks(
         title="Malaika -- WHO IMCI Child Health AI",
-        theme=gr.themes.Soft(),
-        css="""
-            .severity-red { background-color: #dc3545 !important; }
-            .severity-yellow { background-color: #ffc107 !important; }
-            .severity-green { background-color: #28a745 !important; }
-            .banner { text-align: center; padding: 10px; }
-            .step-header { font-size: 1.2em; font-weight: bold; }
-        """,
+        theme=gr.themes.Soft(
+            primary_hue=gr.themes.colors.blue,
+            secondary_hue=gr.themes.colors.cyan,
+            neutral_hue=gr.themes.colors.slate,
+        ),
+        css=_custom_css,
     ) as app:
 
-        # Banner
-        gr.Markdown(_BANNER, elem_classes=["banner"])
+        # Header branding
+        gr.HTML(
+            '<div class="malaika-header">'
+            '<h1>Malaika</h1>'
+            '<p class="tagline">Angel in Swahili -- '
+            'WHO IMCI Child Survival AI powered by Gemma 4</p>'
+            '<p class="disclaimer">Hackathon demo -- not for clinical use</p>'
+            '</div>'
+        )
 
         with gr.Tabs():
 
@@ -530,52 +896,73 @@ def create_app(config: MalaikaConfig | None = None) -> Any:
 
             with gr.Tab("Assessment"):
 
-                # Model status and controls
+                # Demo mode banner (shown when model not loaded)
+                gr.HTML(
+                    '<div class="demo-banner">'
+                    '<div class="demo-title">'
+                    'Demo Mode -- Model Not Loaded</div>'
+                    '<div class="demo-desc">'
+                    'Click "Load Gemma 4 Model" below to enable full AI assessment. '
+                    'Requires GPU with 6GB+ VRAM.</div>'
+                    '</div>'
+                )
+
+                # Model status and load button
                 with gr.Row():
-                    with gr.Column(scale=2):
+                    with gr.Column(scale=3):
                         model_status = gr.Textbox(
                             label="Model Status",
-                            value="Model not loaded. Click 'Load Model' to start.",
+                            value=(
+                                "Model not loaded. Click 'Load Gemma 4 Model' "
+                                "to initialize the AI engine."
+                            ),
                             interactive=False,
                             lines=2,
                         )
-                    with gr.Column(scale=1):
+                    with gr.Column(scale=1, min_width=200):
                         load_model_btn = gr.Button(
-                            "Load Model",
+                            "Load Gemma 4 Model",
+                            variant="primary",
+                            size="lg",
+                            elem_classes=["load-model-btn"],
+                        )
+
+                gr.HTML('<hr style="border:none;border-top:2px solid #e8f4fd;margin:16px 0;">')
+
+                # Assessment setup
+                with gr.Row():
+                    with gr.Column(scale=2):
+                        age_input = gr.Slider(
+                            minimum=2, maximum=59, value=12, step=1,
+                            label="Child's Age (months)",
+                            info="WHO IMCI covers ages 2 to 59 months",
+                        )
+                    with gr.Column(scale=1):
+                        language_input = gr.Dropdown(
+                            choices=_LANGUAGE_NAMES,
+                            value="English",
+                            label="Language",
+                            info="Language for treatment instructions",
+                        )
+                    with gr.Column(scale=1, min_width=180):
+                        start_btn = gr.Button(
+                            "Start New Assessment",
                             variant="primary",
                             size="lg",
                         )
 
-                gr.Markdown("---")
-
-                # Assessment setup
-                with gr.Row():
-                    age_input = gr.Slider(
-                        minimum=2, maximum=59, value=12, step=1,
-                        label="Child's Age (months)",
-                        info="WHO IMCI covers ages 2-59 months",
-                    )
-                    language_input = gr.Dropdown(
-                        choices=["en", "sw", "hi", "fr"],
-                        value="en",
-                        label="Language",
-                        info="Language for treatment instructions",
-                    )
-                    start_btn = gr.Button(
-                        "Start New Assessment",
-                        variant="primary",
-                    )
-
-                # Progress indicator
-                progress_display = gr.Textbox(
-                    label="Progress",
-                    value="Step 1 of 5: Danger Signs",
-                    interactive=False,
+                # Progress indicator (HTML for styled progress bar)
+                progress_display = gr.HTML(
+                    value=app_state.progress_html(),
                 )
 
-                # Step description
-                step_description = gr.Markdown(
-                    value=_STATE_DESCRIPTIONS[IMCIState.DANGER_SIGNS],
+                # Step guidance
+                step_description = gr.HTML(
+                    value=(
+                        '<div class="step-guidance">'
+                        + _STEP_GUIDANCE[IMCIState.DANGER_SIGNS]
+                        + '</div>'
+                    ),
                 )
 
                 # Active input group indicator (hidden, used for logic)
@@ -586,14 +973,14 @@ def create_app(config: MalaikaConfig | None = None) -> Any:
                 # Status/feedback display
                 status_display = gr.Markdown(value="", label="Status")
 
-                gr.Markdown("---")
-
                 # --------------------------------------------------------
                 # Input groups — one per IMCI domain
                 # --------------------------------------------------------
 
                 # DANGER SIGNS inputs
-                with gr.Group(visible=True) as danger_group:
+                with gr.Group(
+                    visible=True, elem_classes=["assess-group"],
+                ) as danger_group:
                     gr.Markdown("### Danger Signs Assessment")
                     with gr.Row():
                         danger_image = gr.Image(
@@ -603,13 +990,21 @@ def create_app(config: MalaikaConfig | None = None) -> Any:
                         )
                     danger_text = gr.Textbox(
                         label="Caregiver response",
-                        placeholder="Can the child drink? Has the child had convulsions?",
+                        placeholder=(
+                            "Can the child drink? Has the child had convulsions?"
+                        ),
                         lines=2,
                     )
-                    danger_btn = gr.Button("Assess Danger Signs", variant="secondary")
+                    danger_btn = gr.Button(
+                        "Assess Danger Signs",
+                        variant="secondary",
+                        elem_classes=["assess-btn"],
+                    )
 
                 # BREATHING inputs
-                with gr.Group(visible=False) as breathing_group:
+                with gr.Group(
+                    visible=False, elem_classes=["assess-group"],
+                ) as breathing_group:
                     gr.Markdown("### Breathing Assessment")
                     with gr.Row():
                         breathing_video = gr.Video(
@@ -630,10 +1025,16 @@ def create_app(config: MalaikaConfig | None = None) -> Any:
                         label="Child has cough",
                         value=False,
                     )
-                    breathing_btn = gr.Button("Assess Breathing", variant="secondary")
+                    breathing_btn = gr.Button(
+                        "Assess Breathing",
+                        variant="secondary",
+                        elem_classes=["assess-btn"],
+                    )
 
                 # DIARRHEA inputs
-                with gr.Group(visible=False) as diarrhea_group:
+                with gr.Group(
+                    visible=False, elem_classes=["assess-group"],
+                ) as diarrhea_group:
                     gr.Markdown("### Diarrhea / Dehydration Assessment")
                     with gr.Row():
                         diarrhea_image = gr.Image(
@@ -642,38 +1043,66 @@ def create_app(config: MalaikaConfig | None = None) -> Any:
                             sources=["upload", "webcam"],
                         )
                     with gr.Row():
-                        diarrhea_check = gr.Checkbox(label="Child has diarrhea", value=False)
-                        diarrhea_days = gr.Number(
-                            label="Duration (days)", value=0, minimum=0, maximum=60,
+                        diarrhea_check = gr.Checkbox(
+                            label="Child has diarrhea", value=False,
                         )
-                        diarrhea_blood = gr.Checkbox(label="Blood in stool", value=False)
+                        diarrhea_days = gr.Number(
+                            label="Duration (days)",
+                            value=0, minimum=0, maximum=60,
+                        )
+                        diarrhea_blood = gr.Checkbox(
+                            label="Blood in stool", value=False,
+                        )
                     diarrhea_text = gr.Textbox(
                         label="Caregiver response",
-                        placeholder="How long has the diarrhea lasted? Any blood?",
+                        placeholder=(
+                            "How long has the diarrhea lasted? Any blood?"
+                        ),
                         lines=2,
                     )
-                    diarrhea_btn = gr.Button("Assess Diarrhea", variant="secondary")
+                    diarrhea_btn = gr.Button(
+                        "Assess Diarrhea",
+                        variant="secondary",
+                        elem_classes=["assess-btn"],
+                    )
 
                 # FEVER inputs
-                with gr.Group(visible=False) as fever_group:
+                with gr.Group(
+                    visible=False, elem_classes=["assess-group"],
+                ) as fever_group:
                     gr.Markdown("### Fever Assessment")
                     with gr.Row():
-                        fever_check = gr.Checkbox(label="Child has fever", value=False)
+                        fever_check = gr.Checkbox(
+                            label="Child has fever", value=False,
+                        )
                         fever_days = gr.Number(
-                            label="Duration (days)", value=0, minimum=0, maximum=30,
+                            label="Duration (days)",
+                            value=0, minimum=0, maximum=30,
                         )
                     with gr.Row():
-                        fever_stiff_neck = gr.Checkbox(label="Stiff neck", value=False)
-                        fever_malaria = gr.Checkbox(label="In malaria risk area", value=False)
+                        fever_stiff_neck = gr.Checkbox(
+                            label="Stiff neck", value=False,
+                        )
+                        fever_malaria = gr.Checkbox(
+                            label="In malaria risk area", value=False,
+                        )
                     with gr.Row():
-                        fever_measles = gr.Checkbox(label="Recent measles", value=False)
+                        fever_measles = gr.Checkbox(
+                            label="Recent measles", value=False,
+                        )
                         fever_measles_comp = gr.Checkbox(
                             label="Measles complications", value=False,
                         )
-                    fever_btn = gr.Button("Assess Fever", variant="secondary")
+                    fever_btn = gr.Button(
+                        "Assess Fever",
+                        variant="secondary",
+                        elem_classes=["assess-btn"],
+                    )
 
                 # NUTRITION inputs
-                with gr.Group(visible=False) as nutrition_group:
+                with gr.Group(
+                    visible=False, elem_classes=["assess-group"],
+                ) as nutrition_group:
                     gr.Markdown("### Nutrition Assessment")
                     with gr.Row():
                         nutrition_image = gr.Image(
@@ -685,32 +1114,49 @@ def create_app(config: MalaikaConfig | None = None) -> Any:
                         label="MUAC measurement (mm, 0 = not measured)",
                         value=0, minimum=0, maximum=250,
                     )
-                    nutrition_btn = gr.Button("Assess Nutrition", variant="secondary")
+                    nutrition_btn = gr.Button(
+                        "Assess Nutrition",
+                        variant="secondary",
+                        elem_classes=["assess-btn"],
+                    )
 
                 # HEART inputs
-                with gr.Group(visible=False) as heart_group:
+                with gr.Group(
+                    visible=False, elem_classes=["assess-group"],
+                ) as heart_group:
                     gr.Markdown("### Heart Assessment (Optional)")
                     heart_audio = gr.Audio(
                         label="Heart sounds recording",
                         type="filepath",
                         sources=["upload", "microphone"],
                     )
-                    heart_btn = gr.Button("Assess Heart", variant="secondary")
+                    heart_btn = gr.Button(
+                        "Assess Heart",
+                        variant="secondary",
+                        elem_classes=["assess-btn"],
+                    )
 
-                gr.Markdown("---")
+                gr.HTML(
+                    '<hr style="border:none;border-top:2px solid #e8f4fd;'
+                    'margin:16px 0;">'
+                )
 
-                # Finding display
+                # Finding display (card-like)
                 finding_display = gr.Markdown(
-                    value="*Assessment results will appear here after each step.*",
+                    value=(
+                        "*Assessment results will appear here after each step.*"
+                    ),
                     label="Step Result",
+                    elem_classes=["finding-card"],
                 )
 
                 # Next step / finish controls
                 with gr.Row():
                     next_btn = gr.Button(
-                        "Next Step >>",
+                        "Next Step  >>",
                         variant="primary",
                         size="lg",
+                        elem_classes=["next-step-btn"],
                     )
 
                 # TTS playback
@@ -727,13 +1173,35 @@ def create_app(config: MalaikaConfig | None = None) -> Any:
             # ============================================================
 
             with gr.Tab("Results"):
+                gr.HTML(
+                    '<div style="text-align:center;margin:12px 0 8px;">'
+                    '<p style="color:#2c3e50;font-size:1.05em;">'
+                    'Complete an assessment to see the full clinical summary '
+                    'and treatment plan below.</p>'
+                    '</div>'
+                )
                 refresh_results_btn = gr.Button(
                     "Refresh Results",
                     variant="primary",
+                    size="lg",
                 )
                 results_display = gr.Markdown(
-                    value="*Run an assessment first, then view results here.*",
+                    value=(
+                        "*Run an assessment first, then view results here.*"
+                    ),
+                    elem_classes=["results-area"],
                 )
+
+        # Footer
+        gr.HTML(
+            '<div class="malaika-footer">'
+            'Malaika -- WHO IMCI Child Survival AI | '
+            'Google Gemma 4 Good Hackathon 2026 | '
+            'Powered by '
+            '<a href="https://ai.google.dev/gemma" target="_blank">Gemma 4</a>'
+            ' | Not for clinical use'
+            '</div>'
+        )
 
         # ------------------------------------------------------------------
         # Wire up event handlers
@@ -802,7 +1270,9 @@ def create_app(config: MalaikaConfig | None = None) -> Any:
             Any, Any, Any, Any, Any, Any,
             str,
         ]:
-            msg, desc, progress, visibility = on_next_step()
+            msg, guidance, progress, visibility = on_next_step()
+
+            guidance_html = f'<div class="step-guidance">{guidance}</div>'
 
             finding_text = (
                 "*Assessment complete. Switch to the Results tab.*"
@@ -812,7 +1282,7 @@ def create_app(config: MalaikaConfig | None = None) -> Any:
 
             return (
                 msg,                                                     # status_display
-                desc,                                                    # step_description
+                guidance_html,                                           # step_description
                 progress,                                                # progress_display
                 visibility,                                              # active_group
                 gr.Group(visible=(visibility == "danger_signs")),         # danger_group

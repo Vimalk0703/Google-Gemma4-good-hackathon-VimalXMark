@@ -7,25 +7,62 @@
 # 3. Verify treatment prompt fix (Swahili should output plain text, not JSON)
 # 4. Benchmark spectrogram generation + vision pipeline latency
 #
-# **Prerequisites**: Add "respiratory-sound-database" by vbookshelf as Kaggle dataset input
-#
-# **Hardware**: Kaggle T4 GPU
+# **Works on**: Google Colab (T4 GPU) or Kaggle (T4 GPU)
+# **ICBHI dataset**: Downloaded automatically via Kaggle API
 
 # %% [markdown]
 # ## 1. Setup
 
 # %%
-!pip install -q git+https://github.com/huggingface/transformers.git structlog librosa Pillow soundfile
+!pip install -q git+https://github.com/huggingface/transformers.git structlog librosa Pillow soundfile kaggle bitsandbytes accelerate
 
 # %%
+# Authenticate — works on both Colab and Kaggle
 from huggingface_hub import login
-from kaggle_secrets import UserSecretsClient
-login(token=UserSecretsClient().get_secret("HF_TOKEN"))
+import os
+
+try:
+    from kaggle_secrets import UserSecretsClient
+    secrets = UserSecretsClient()
+    login(token=secrets.get_secret("HF_TOKEN"))
+    KAGGLE_USERNAME = secrets.get_secret("KAGGLE_USERNAME")
+    KAGGLE_KEY = secrets.get_secret("KAGGLE_KEY")
+    ENV = "kaggle"
+    print("Authenticated via Kaggle secrets")
+except ModuleNotFoundError:
+    try:
+        from google.colab import userdata
+        login(token=userdata.get("HF_TOKEN"))
+        KAGGLE_USERNAME = userdata.get("KAGGLE_USERNAME")
+        KAGGLE_KEY = userdata.get("KAGGLE_KEY")
+        ENV = "colab"
+        print("Authenticated via Colab secrets")
+    except Exception:
+        login()
+        KAGGLE_USERNAME = os.environ.get("KAGGLE_USERNAME", "")
+        KAGGLE_KEY = os.environ.get("KAGGLE_KEY", "")
+        ENV = "manual"
+        print("Authenticated via manual login")
+
+# Set up Kaggle API credentials for dataset download
+os.makedirs(os.path.expanduser("~/.kaggle"), exist_ok=True)
+with open(os.path.expanduser("~/.kaggle/kaggle.json"), "w") as f:
+    import json as _json
+    _json.dump({"username": KAGGLE_USERNAME, "key": KAGGLE_KEY}, f)
+os.chmod(os.path.expanduser("~/.kaggle/kaggle.json"), 0o600)
+print(f"Environment: {ENV}")
 
 # %%
-!git clone -q https://github.com/Vimalk0703/Google-Gemma4-good-hackathon-VimalXMark.git /tmp/malaika-repo
-import sys
-sys.path.insert(0, "/tmp/malaika-repo")
+# Clone the repo
+import subprocess, sys
+REPO_DIR = "/tmp/malaika-repo"
+if not os.path.exists(REPO_DIR):
+    subprocess.run(["git", "clone", "-q",
+        "https://github.com/Vimalk0703/Google-Gemma4-good-hackathon-VimalXMark.git",
+        REPO_DIR], check=True)
+else:
+    subprocess.run(["git", "-C", REPO_DIR, "pull", "-q"], check=True)
+sys.path.insert(0, REPO_DIR)
 
 import time, json, re, torch
 import numpy as np
@@ -249,18 +286,44 @@ print("=" * 60)
 
 import librosa
 
-ICBHI_PATH = Path("/kaggle/input/respiratory-sound-database/Respiratory_Sound_Database/Respiratory_Sound_Database")
-SPEC_DIR = Path("/kaggle/working/test_spectrograms")
-SPEC_DIR.mkdir(exist_ok=True)
+# Download ICBHI dataset via Kaggle API (works on both Colab and Kaggle)
+ICBHI_DIR = Path("/tmp/icbhi_data")
+ICBHI_INNER = ICBHI_DIR / "Respiratory_Sound_Database" / "Respiratory_Sound_Database"
 
-if ICBHI_PATH.exists():
-    audio_dir = ICBHI_PATH / "audio_and_txt_files"
-    all_wavs = sorted(audio_dir.glob("*.wav"))
-    print(f"ICBHI dataset found: {len(all_wavs)} audio files")
+# Check Kaggle-native path first (if running on Kaggle with dataset attached)
+KAGGLE_NATIVE = Path("/kaggle/input/respiratory-sound-database/Respiratory_Sound_Database/Respiratory_Sound_Database")
+
+if KAGGLE_NATIVE.exists():
+    audio_dir = KAGGLE_NATIVE / "audio_and_txt_files"
+    print(f"ICBHI dataset found at Kaggle native path")
+elif ICBHI_INNER.exists():
+    audio_dir = ICBHI_INNER / "audio_and_txt_files"
+    print(f"ICBHI dataset found at {ICBHI_INNER}")
 else:
-    print("ICBHI dataset NOT found — skipping real data tests")
-    print("  Add 'respiratory-sound-database' by vbookshelf as Kaggle input")
+    print("Downloading ICBHI dataset via Kaggle API...")
+    ICBHI_DIR.mkdir(parents=True, exist_ok=True)
+    dl_result = subprocess.run(
+        ["kaggle", "datasets", "download", "-d", "vbookshelf/respiratory-sound-database",
+         "-p", str(ICBHI_DIR), "--unzip"],
+        capture_output=True, text=True,
+    )
+    if dl_result.returncode == 0:
+        print(f"  Download complete")
+        audio_dir = ICBHI_INNER / "audio_and_txt_files"
+    else:
+        print(f"  Download failed: {dl_result.stderr}")
+        print("  Set KAGGLE_USERNAME and KAGGLE_KEY secrets to enable download")
+        audio_dir = None
+
+if audio_dir and audio_dir.exists():
+    all_wavs = sorted(audio_dir.glob("*.wav"))
+    print(f"ICBHI dataset: {len(all_wavs)} audio files")
+else:
+    print("ICBHI dataset NOT available — skipping real data tests")
     all_wavs = []
+
+SPEC_DIR = Path("/tmp/test_spectrograms")
+SPEC_DIR.mkdir(exist_ok=True)
 
 # %%
 # Parse annotations to get labels
@@ -491,6 +554,7 @@ print("=" * 60)
 print(f"Model:           {MODEL_NAME}")
 print(f"GPU:             {torch.cuda.get_device_name(0)}")
 print(f"Load time:       {load_time:.0f}s")
+print(f"Environment:     {ENV}")
 print()
 
 print("Session 1 Re-verification:")

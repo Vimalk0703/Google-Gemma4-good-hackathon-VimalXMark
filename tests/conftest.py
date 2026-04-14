@@ -36,7 +36,6 @@ def _auto_restore_prompt_registry() -> None:  # type: ignore[misc]
     Clears first to avoid duplicate registration errors, then reloads.
     """
     if not PromptRegistry.list_all():
-        PromptRegistry.clear()
         from malaika.prompts import (
             breathing,
             danger_signs,
@@ -47,5 +46,7 @@ def _auto_restore_prompt_registry() -> None:  # type: ignore[misc]
             speech,
             treatment,
         )
-        for mod in [breathing, danger_signs, diarrhea, fever, heart, nutrition, speech, treatment]:
+        modules = [breathing, danger_signs, diarrhea, fever, heart, nutrition, speech, treatment]
+        PromptRegistry.clear()  # Clear AFTER imports, BEFORE reloads
+        for mod in modules:
             importlib.reload(mod)

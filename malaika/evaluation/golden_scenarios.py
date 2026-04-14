@@ -302,7 +302,13 @@ GOLDEN_SCENARIOS: list[GoldenScenario] = [
             "fever": {"has_fever": False},
             "nutrition": {"visible_wasting": False, "edema": False, "muac_mm": 150},
         },
-        expected_classifications=[ClassificationType.HEALTHY],
+        # When domains are assessed and all return GREEN, the protocol outputs
+        # individual GREEN classifications (no_pneumonia + no_malnutrition),
+        # not a single "healthy" label. Severity GREEN is what matters.
+        expected_classifications=[
+            ClassificationType.NO_PNEUMONIA_COUGH_OR_COLD,
+            ClassificationType.NO_MALNUTRITION,
+        ],
         expected_severity=Severity.GREEN,
         expected_referral=ReferralUrgency.NONE,
     ),

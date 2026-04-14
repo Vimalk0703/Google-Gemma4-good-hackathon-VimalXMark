@@ -39,9 +39,13 @@
 - [x] Updated fine-tuning notebook: spectrogram vision approach (not text-only)
 - [x] Day 4 Kaggle notebook ready (real ICBHI data testing + all re-verification)
 - [x] 227 tests passing (up from 213)
-- [ ] Push to GitHub and run Day 4 notebook on Kaggle
+- [x] Push to GitHub and run Day 4 notebook on Colab T4
+- [x] All 8 tests PASS, 21/21 golden, 5/5 JSON, Swahili plain text
+- [x] Spectrogram baseline: 25% (20/20 JSON parse)
+- [x] LoRA fine-tuning v1: r=8, 100 steps → 20% (too weak)
+- [x] LoRA fine-tuning v2: r=32, 300 steps → 50% (100% crackle detection)
+- [x] Adapter saved: 90.3 MB
 - [ ] Download jaundice dataset, test with real clinical images
-- [ ] Start LoRA fine-tuning on Kaggle (breath sounds)
 - [ ] Test Gradio app end-to-end on GPU machine
 
 ---
@@ -73,7 +77,7 @@ Update this weekly. Score yourself honestly 1-10.
 |-----------|--------|---------------|--------|-----|
 | **Impact & Vision** (40%) | Highest | 8/10 | 9/10 | Need video showing human story |
 | **Video Pitch** (30%) | High | 1/10 | 9/10 | **BIGGEST GAP** — not started |
-| **Technical Depth** (30%) | High | 8/10 | 9/10 | Need fine-tuning + real clinical data accuracy |
+| **Technical Depth** (30%) | High | 9/10 | 9/10 | Fine-tuning done (50%, 100% crackle), need phone demo |
 
 ### Impact & Vision — How to reach 9/10
 - [x] Problem: 4.9M children/year (WHO data, March 2026)

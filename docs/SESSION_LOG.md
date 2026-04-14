@@ -262,9 +262,42 @@ These files were changed based on real Gemma 4 behavior:
 | `tests/test_audio.py` | Added 5 spectrogram classification tests |
 | `TRACKER.md` | Updated Day 4 progress |
 
+### Colab/Kaggle Testing Results
+
+**Notebook 04 (Day 4 Real Data Test) — ALL PASS on Colab T4:**
+- Tests 1-8: ALL PASS (21/21 golden, 5/5 JSON, Swahili plain text confirmed)
+- Spectrogram baseline (no fine-tuning): 25% accuracy (model predicts all normal)
+- JSON parse: 20/20 (100%) — spectrogram prompt works perfectly
+- Latency: spectrogram gen 35ms, vision 28s, text 42s
+
+**Notebook 02 v1 (Fine-Tuning) — Training works, accuracy low:**
+- Training loss: 1.13 → 0.026 (excellent convergence)
+- Adapter size: 11.7 MB
+- Training time: 14 min on T4
+- Test accuracy: 4/20 (20%) — WORSE than baseline
+- Root cause: r=8 too small, only q_proj+v_proj, model memorized but didn't generalize
+
+### Technical Issues Resolved During Session
+
+1. **Colab compatibility**: `kaggle_secrets` not available on Colab → auto-detect env
+2. **ICBHI download**: Kaggle API auto-download for Colab (not just native path)
+3. **Gemma4ClippableLinear**: PEFT doesn't recognize this custom layer → unwrap to Linear4bit
+4. **OOM on prepare_model_for_kbit_training**: Upcasts to float32 → use gradient_checkpointing directly
+5. **Missing pixel_position_ids**: Field is actually called `image_position_ids` → use processor.apply_chat_template single-step
+6. **Custom collator needed**: Default collator doesn't handle Gemma 4 vision fields
+7. **Gradient checkpointing breaks generation**: Must disable + model.eval() before inference
+
+### Fine-Tuning v2 (In Progress)
+
+Stronger config to improve from v1's 20%:
+- LoRA rank: 8 → 32
+- Target modules: q+v → q+k+v+o_proj
+- Steps: 100 → 300
+- Added: warmup=20, weight_decay=0.01, dropout=0.05
+- Expected training time: ~45 min on T4
+
 ### Next Steps (This Session)
 
-1. **Push to GitHub** so Kaggle can clone the latest code
-2. **Run notebook 04 on Kaggle** — re-verify all tests, test real ICBHI data
-3. **Run notebook 02 on Kaggle** — start LoRA fine-tuning with spectrograms
-4. **Test Gradio app on GPU** — verify the actual UI works end-to-end
+1. **Run v2 fine-tuning** on Colab — should improve accuracy
+2. **Test Gradio app on GPU** — verify the actual UI works end-to-end
+3. **Prepare demo assets** — clinical images for video recording

@@ -1,6 +1,8 @@
 """Tests for audio perception module — breath sounds, speech, heart sounds.
 
-All tests use mocked inference (no GPU needed).
+All tests use mocked inference and mocked WhisperTranscriber (no GPU or
+Whisper model needed). Tests verify the Whisper→Gemma 4 text pipeline.
+
 Tests JSON parsing: valid output, invalid output, and uncertain results.
 """
 
@@ -16,6 +18,7 @@ from malaika.config import MalaikaConfig, load_config
 from malaika.inference import MalaikaInference, ModelError
 from malaika.types import FindingStatus, ValidatedOutput
 from malaika.audio import (
+    WhisperTranscriber,
     analyze_heart_sounds,
     classify_breath_sounds,
     understand_speech,
@@ -48,6 +51,15 @@ def mock_inference(config: MalaikaConfig) -> MalaikaInference:
 
 
 @pytest.fixture
+def mock_transcriber() -> WhisperTranscriber:
+    """Create a WhisperTranscriber with mocked pipeline."""
+    transcriber = WhisperTranscriber.__new__(WhisperTranscriber)
+    transcriber._model_name = "openai/whisper-small"
+    transcriber._pipeline = MagicMock()
+    return transcriber
+
+
+@pytest.fixture
 def temp_audio(tmp_path: Path) -> Path:
     """Create a minimal WAV file for testing."""
     wav = tmp_path / "test.wav"
@@ -57,13 +69,78 @@ def temp_audio(tmp_path: Path) -> Path:
 
 
 # ---------------------------------------------------------------------------
+# WhisperTranscriber Tests
+# ---------------------------------------------------------------------------
+
+class TestWhisperTranscriber:
+    """Tests for WhisperTranscriber class."""
+
+    def test_lazy_loading(self) -> None:
+        """Whisper model should NOT be loaded at construction time."""
+        transcriber = WhisperTranscriber.__new__(WhisperTranscriber)
+        transcriber._model_name = "openai/whisper-small"
+        transcriber._pipeline = None
+        assert transcriber.is_loaded is False
+
+    def test_model_name_from_config(self) -> None:
+        """Model name should default from config."""
+        with patch("malaika.audio.load_config") as mock_config:
+            mock_cfg = MagicMock()
+            mock_cfg.model.whisper_model_name = "openai/whisper-small"
+            mock_config.return_value = mock_cfg
+            transcriber = WhisperTranscriber()
+            assert transcriber.model_name == "openai/whisper-small"
+
+    def test_custom_model_name(self) -> None:
+        """Should accept a custom model name."""
+        with patch("malaika.audio.load_config"):
+            transcriber = WhisperTranscriber(model_name="openai/whisper-tiny")
+            assert transcriber.model_name == "openai/whisper-tiny"
+
+    def test_transcribe_returns_text(
+        self, mock_transcriber: WhisperTranscriber, temp_audio: Path,
+    ) -> None:
+        """Transcribe should return text from Whisper pipeline."""
+        mock_transcriber._pipeline.return_value = {"text": "the child is coughing"}
+        result = mock_transcriber.transcribe(temp_audio)
+        assert result == "the child is coughing"
+
+    def test_transcribe_file_not_found(
+        self, mock_transcriber: WhisperTranscriber,
+    ) -> None:
+        """Transcribe should raise FileNotFoundError for missing files."""
+        with pytest.raises(FileNotFoundError):
+            mock_transcriber.transcribe(Path("/nonexistent/audio.wav"))
+
+    def test_transcribe_empty_result(
+        self, mock_transcriber: WhisperTranscriber, temp_audio: Path,
+    ) -> None:
+        """Transcribe should return empty string for empty Whisper output."""
+        mock_transcriber._pipeline.return_value = {"text": ""}
+        result = mock_transcriber.transcribe(temp_audio)
+        assert result == ""
+
+    def test_unload(self, mock_transcriber: WhisperTranscriber) -> None:
+        """Unload should clear the pipeline."""
+        assert mock_transcriber.is_loaded is True
+        mock_transcriber.unload()
+        assert mock_transcriber.is_loaded is False
+
+
+# ---------------------------------------------------------------------------
 # Breath Sounds
 # ---------------------------------------------------------------------------
 
 class TestClassifyBreathSounds:
-    """Tests for classify_breath_sounds."""
+    """Tests for classify_breath_sounds (Whisper → Gemma 4 text pipeline)."""
 
-    def test_normal_breathing(self, mock_inference: MalaikaInference, temp_audio: Path) -> None:
+    def test_normal_breathing(
+        self,
+        mock_inference: MalaikaInference,
+        mock_transcriber: WhisperTranscriber,
+        temp_audio: Path,
+    ) -> None:
+        mock_transcriber._pipeline.return_value = {"text": "quiet breathing sounds"}
         parsed = {
             "wheeze": False,
             "stridor": False,
@@ -75,8 +152,8 @@ class TestClassifyBreathSounds:
         }
         validated = ValidatedOutput(status="valid", parsed=parsed, raw_output=json.dumps(parsed))
 
-        with patch.object(mock_inference, "analyze_audio", return_value=(json.dumps(parsed), validated, 0)):
-            result = classify_breath_sounds(temp_audio, mock_inference)
+        with patch.object(mock_inference, "reason", return_value=(json.dumps(parsed), validated, 0)):
+            result = classify_breath_sounds(temp_audio, mock_inference, transcriber=mock_transcriber)
 
         assert result.wheeze is False
         assert result.stridor is False
@@ -85,7 +162,13 @@ class TestClassifyBreathSounds:
         assert result.status == FindingStatus.NOT_DETECTED
         assert result.confidence == 0.9
 
-    def test_wheeze_detected(self, mock_inference: MalaikaInference, temp_audio: Path) -> None:
+    def test_wheeze_detected(
+        self,
+        mock_inference: MalaikaInference,
+        mock_transcriber: WhisperTranscriber,
+        temp_audio: Path,
+    ) -> None:
+        mock_transcriber._pipeline.return_value = {"text": "whistling breathing sound"}
         parsed = {
             "wheeze": True,
             "stridor": False,
@@ -97,13 +180,19 @@ class TestClassifyBreathSounds:
         }
         validated = ValidatedOutput(status="valid", parsed=parsed, raw_output=json.dumps(parsed))
 
-        with patch.object(mock_inference, "analyze_audio", return_value=(json.dumps(parsed), validated, 0)):
-            result = classify_breath_sounds(temp_audio, mock_inference)
+        with patch.object(mock_inference, "reason", return_value=(json.dumps(parsed), validated, 0)):
+            result = classify_breath_sounds(temp_audio, mock_inference, transcriber=mock_transcriber)
 
         assert result.wheeze is True
         assert result.status == FindingStatus.DETECTED
 
-    def test_stridor_detected(self, mock_inference: MalaikaInference, temp_audio: Path) -> None:
+    def test_stridor_detected(
+        self,
+        mock_inference: MalaikaInference,
+        mock_transcriber: WhisperTranscriber,
+        temp_audio: Path,
+    ) -> None:
+        mock_transcriber._pipeline.return_value = {"text": "harsh inspiratory noise"}
         parsed = {
             "wheeze": False,
             "stridor": True,
@@ -114,15 +203,19 @@ class TestClassifyBreathSounds:
         }
         validated = ValidatedOutput(status="valid", parsed=parsed, raw_output=json.dumps(parsed))
 
-        with patch.object(mock_inference, "analyze_audio", return_value=(json.dumps(parsed), validated, 0)):
-            result = classify_breath_sounds(temp_audio, mock_inference)
+        with patch.object(mock_inference, "reason", return_value=(json.dumps(parsed), validated, 0)):
+            result = classify_breath_sounds(temp_audio, mock_inference, transcriber=mock_transcriber)
 
         assert result.stridor is True
         assert result.status == FindingStatus.DETECTED
 
     def test_multiple_abnormal_sounds(
-        self, mock_inference: MalaikaInference, temp_audio: Path,
+        self,
+        mock_inference: MalaikaInference,
+        mock_transcriber: WhisperTranscriber,
+        temp_audio: Path,
     ) -> None:
+        mock_transcriber._pipeline.return_value = {"text": "wheezing grunting crackles"}
         parsed = {
             "wheeze": True,
             "stridor": True,
@@ -133,8 +226,8 @@ class TestClassifyBreathSounds:
         }
         validated = ValidatedOutput(status="valid", parsed=parsed, raw_output=json.dumps(parsed))
 
-        with patch.object(mock_inference, "analyze_audio", return_value=(json.dumps(parsed), validated, 0)):
-            result = classify_breath_sounds(temp_audio, mock_inference)
+        with patch.object(mock_inference, "reason", return_value=(json.dumps(parsed), validated, 0)):
+            result = classify_breath_sounds(temp_audio, mock_inference, transcriber=mock_transcriber)
 
         assert result.wheeze is True
         assert result.stridor is True
@@ -142,26 +235,67 @@ class TestClassifyBreathSounds:
         assert result.crackles is True
 
     def test_inference_failure_returns_uncertain(
-        self, mock_inference: MalaikaInference, temp_audio: Path,
+        self,
+        mock_inference: MalaikaInference,
+        mock_transcriber: WhisperTranscriber,
+        temp_audio: Path,
     ) -> None:
-        with patch.object(mock_inference, "analyze_audio", side_effect=ModelError("fail")):
-            result = classify_breath_sounds(temp_audio, mock_inference)
+        mock_transcriber._pipeline.return_value = {"text": "some audio"}
+        with patch.object(mock_inference, "reason", side_effect=ModelError("fail")):
+            result = classify_breath_sounds(temp_audio, mock_inference, transcriber=mock_transcriber)
+
+        assert result.status == FindingStatus.UNCERTAIN
+        assert result.confidence == 0.0
+
+    def test_whisper_failure_returns_uncertain(
+        self,
+        mock_inference: MalaikaInference,
+        mock_transcriber: WhisperTranscriber,
+        temp_audio: Path,
+    ) -> None:
+        mock_transcriber._pipeline.side_effect = RuntimeError("Whisper crashed")
+        result = classify_breath_sounds(temp_audio, mock_inference, transcriber=mock_transcriber)
 
         assert result.status == FindingStatus.UNCERTAIN
         assert result.confidence == 0.0
 
     def test_uncertain_output(
-        self, mock_inference: MalaikaInference, temp_audio: Path,
+        self,
+        mock_inference: MalaikaInference,
+        mock_transcriber: WhisperTranscriber,
+        temp_audio: Path,
     ) -> None:
+        mock_transcriber._pipeline.return_value = {"text": "unclear audio"}
         validated = ValidatedOutput(
             status="uncertain",
             parsed={"wheeze": False, "stridor": False, "grunting": False, "crackles": False, "confidence": 0.3},
             raw_output="low confidence",
         )
-        with patch.object(mock_inference, "analyze_audio", return_value=("low", validated, 1)):
-            result = classify_breath_sounds(temp_audio, mock_inference)
+        with patch.object(mock_inference, "reason", return_value=("low", validated, 1)):
+            result = classify_breath_sounds(temp_audio, mock_inference, transcriber=mock_transcriber)
 
         assert result.status == FindingStatus.UNCERTAIN
+
+    def test_empty_transcription_uses_fallback(
+        self,
+        mock_inference: MalaikaInference,
+        mock_transcriber: WhisperTranscriber,
+        temp_audio: Path,
+    ) -> None:
+        """When Whisper returns empty text, a fallback placeholder is used."""
+        mock_transcriber._pipeline.return_value = {"text": ""}
+        parsed = {
+            "wheeze": False, "stridor": False, "grunting": False,
+            "crackles": False, "normal": True, "confidence": 0.5,
+        }
+        validated = ValidatedOutput(status="valid", parsed=parsed, raw_output=json.dumps(parsed))
+
+        with patch.object(mock_inference, "reason", return_value=(json.dumps(parsed), validated, 0)) as mock_reason:
+            classify_breath_sounds(temp_audio, mock_inference, transcriber=mock_transcriber)
+
+        # Verify the fallback text was passed
+        call_kwargs = mock_reason.call_args
+        assert "no speech or sounds detected" in call_kwargs.kwargs.get("transcription", "")
 
 
 # ---------------------------------------------------------------------------
@@ -169,11 +303,17 @@ class TestClassifyBreathSounds:
 # ---------------------------------------------------------------------------
 
 class TestUnderstandSpeech:
-    """Tests for understand_speech."""
+    """Tests for understand_speech (Whisper → Gemma 4 text pipeline)."""
 
     def test_affirmative_response(
-        self, mock_inference: MalaikaInference, temp_audio: Path,
+        self,
+        mock_inference: MalaikaInference,
+        mock_transcriber: WhisperTranscriber,
+        temp_audio: Path,
     ) -> None:
+        mock_transcriber._pipeline.return_value = {
+            "text": "Yes, the child has been coughing for 3 days",
+        }
         parsed = {
             "intent": "affirmative",
             "yes_no": True,
@@ -184,8 +324,11 @@ class TestUnderstandSpeech:
         }
         validated = ValidatedOutput(status="valid", parsed=parsed, raw_output=json.dumps(parsed))
 
-        with patch.object(mock_inference, "analyze_audio", return_value=(json.dumps(parsed), validated, 0)):
-            result = understand_speech(temp_audio, mock_inference, "Does the child have a cough?")
+        with patch.object(mock_inference, "reason", return_value=(json.dumps(parsed), validated, 0)):
+            result = understand_speech(
+                temp_audio, mock_inference, "Does the child have a cough?",
+                transcriber=mock_transcriber,
+            )
 
         assert result.intent == "affirmative"
         assert result.language_detected == "en"
@@ -193,8 +336,12 @@ class TestUnderstandSpeech:
         assert result.status == FindingStatus.DETECTED
 
     def test_negative_response(
-        self, mock_inference: MalaikaInference, temp_audio: Path,
+        self,
+        mock_inference: MalaikaInference,
+        mock_transcriber: WhisperTranscriber,
+        temp_audio: Path,
     ) -> None:
+        mock_transcriber._pipeline.return_value = {"text": "Hapana, hakuna kuhara"}
         parsed = {
             "intent": "negative",
             "yes_no": False,
@@ -205,15 +352,22 @@ class TestUnderstandSpeech:
         }
         validated = ValidatedOutput(status="valid", parsed=parsed, raw_output=json.dumps(parsed))
 
-        with patch.object(mock_inference, "analyze_audio", return_value=(json.dumps(parsed), validated, 0)):
-            result = understand_speech(temp_audio, mock_inference, "Does the child have diarrhea?")
+        with patch.object(mock_inference, "reason", return_value=(json.dumps(parsed), validated, 0)):
+            result = understand_speech(
+                temp_audio, mock_inference, "Does the child have diarrhea?",
+                transcriber=mock_transcriber,
+            )
 
         assert result.intent == "negative"
         assert result.language_detected == "sw"
 
     def test_uncertain_intent(
-        self, mock_inference: MalaikaInference, temp_audio: Path,
+        self,
+        mock_inference: MalaikaInference,
+        mock_transcriber: WhisperTranscriber,
+        temp_audio: Path,
     ) -> None:
+        mock_transcriber._pipeline.return_value = {"text": "mmm maybe"}
         parsed = {
             "intent": "uncertain",
             "yes_no": None,
@@ -222,18 +376,43 @@ class TestUnderstandSpeech:
         }
         validated = ValidatedOutput(status="uncertain", parsed=parsed, raw_output="")
 
-        with patch.object(mock_inference, "analyze_audio", return_value=("", validated, 0)):
-            result = understand_speech(temp_audio, mock_inference, "Is there blood in the stool?")
+        with patch.object(mock_inference, "reason", return_value=("", validated, 0)):
+            result = understand_speech(
+                temp_audio, mock_inference, "Is there blood in the stool?",
+                transcriber=mock_transcriber,
+            )
 
         assert result.status == FindingStatus.UNCERTAIN
 
     def test_inference_failure(
-        self, mock_inference: MalaikaInference, temp_audio: Path,
+        self,
+        mock_inference: MalaikaInference,
+        mock_transcriber: WhisperTranscriber,
+        temp_audio: Path,
     ) -> None:
-        with patch.object(mock_inference, "analyze_audio", side_effect=Exception("audio error")):
-            result = understand_speech(temp_audio, mock_inference, "question?")
+        mock_transcriber._pipeline.return_value = {"text": "some speech"}
+        with patch.object(mock_inference, "reason", side_effect=Exception("audio error")):
+            result = understand_speech(
+                temp_audio, mock_inference, "question?",
+                transcriber=mock_transcriber,
+            )
 
         assert result.status == FindingStatus.UNCERTAIN
+
+    def test_whisper_failure_returns_uncertain(
+        self,
+        mock_inference: MalaikaInference,
+        mock_transcriber: WhisperTranscriber,
+        temp_audio: Path,
+    ) -> None:
+        mock_transcriber._pipeline.side_effect = RuntimeError("Whisper failed")
+        result = understand_speech(
+            temp_audio, mock_inference, "Has the child vomited?",
+            transcriber=mock_transcriber,
+        )
+
+        assert result.status == FindingStatus.UNCERTAIN
+        assert result.confidence == 0.0
 
 
 # ---------------------------------------------------------------------------
@@ -241,9 +420,15 @@ class TestUnderstandSpeech:
 # ---------------------------------------------------------------------------
 
 class TestAnalyzeHeartSounds:
-    """Tests for analyze_heart_sounds."""
+    """Tests for analyze_heart_sounds (Whisper → Gemma 4 text pipeline)."""
 
-    def test_normal_heart(self, mock_inference: MalaikaInference, temp_audio: Path) -> None:
+    def test_normal_heart(
+        self,
+        mock_inference: MalaikaInference,
+        mock_transcriber: WhisperTranscriber,
+        temp_audio: Path,
+    ) -> None:
+        mock_transcriber._pipeline.return_value = {"text": "lub dub lub dub regular rhythm"}
         parsed = {
             "estimated_bpm": 120,
             "rhythm": "regular",
@@ -254,14 +439,20 @@ class TestAnalyzeHeartSounds:
         }
         validated = ValidatedOutput(status="valid", parsed=parsed, raw_output=json.dumps(parsed))
 
-        with patch.object(mock_inference, "analyze_audio", return_value=(json.dumps(parsed), validated, 0)):
-            result = analyze_heart_sounds(temp_audio, mock_inference)
+        with patch.object(mock_inference, "reason", return_value=(json.dumps(parsed), validated, 0)):
+            result = analyze_heart_sounds(temp_audio, mock_inference, transcriber=mock_transcriber)
 
         assert result.estimated_bpm == 120
         assert result.abnormal_sounds is False
         assert result.status == FindingStatus.DETECTED
 
-    def test_murmur_detected(self, mock_inference: MalaikaInference, temp_audio: Path) -> None:
+    def test_murmur_detected(
+        self,
+        mock_inference: MalaikaInference,
+        mock_transcriber: WhisperTranscriber,
+        temp_audio: Path,
+    ) -> None:
+        mock_transcriber._pipeline.return_value = {"text": "swooshing sound between beats"}
         parsed = {
             "estimated_bpm": 130,
             "rhythm": "regular",
@@ -272,12 +463,18 @@ class TestAnalyzeHeartSounds:
         }
         validated = ValidatedOutput(status="valid", parsed=parsed, raw_output=json.dumps(parsed))
 
-        with patch.object(mock_inference, "analyze_audio", return_value=(json.dumps(parsed), validated, 0)):
-            result = analyze_heart_sounds(temp_audio, mock_inference)
+        with patch.object(mock_inference, "reason", return_value=(json.dumps(parsed), validated, 0)):
+            result = analyze_heart_sounds(temp_audio, mock_inference, transcriber=mock_transcriber)
 
         assert result.abnormal_sounds is True
 
-    def test_irregular_rhythm(self, mock_inference: MalaikaInference, temp_audio: Path) -> None:
+    def test_irregular_rhythm(
+        self,
+        mock_inference: MalaikaInference,
+        mock_transcriber: WhisperTranscriber,
+        temp_audio: Path,
+    ) -> None:
+        mock_transcriber._pipeline.return_value = {"text": "irregular thumping"}
         parsed = {
             "estimated_bpm": 110,
             "rhythm": "irregular",
@@ -288,14 +485,18 @@ class TestAnalyzeHeartSounds:
         }
         validated = ValidatedOutput(status="valid", parsed=parsed, raw_output=json.dumps(parsed))
 
-        with patch.object(mock_inference, "analyze_audio", return_value=(json.dumps(parsed), validated, 0)):
-            result = analyze_heart_sounds(temp_audio, mock_inference)
+        with patch.object(mock_inference, "reason", return_value=(json.dumps(parsed), validated, 0)):
+            result = analyze_heart_sounds(temp_audio, mock_inference, transcriber=mock_transcriber)
 
         assert result.abnormal_sounds is True
 
     def test_no_bpm_returns_none(
-        self, mock_inference: MalaikaInference, temp_audio: Path,
+        self,
+        mock_inference: MalaikaInference,
+        mock_transcriber: WhisperTranscriber,
+        temp_audio: Path,
     ) -> None:
+        mock_transcriber._pipeline.return_value = {"text": "noisy recording"}
         parsed = {
             "rhythm": "regular",
             "murmur_detected": False,
@@ -304,16 +505,32 @@ class TestAnalyzeHeartSounds:
         }
         validated = ValidatedOutput(status="valid", parsed=parsed, raw_output=json.dumps(parsed))
 
-        with patch.object(mock_inference, "analyze_audio", return_value=(json.dumps(parsed), validated, 0)):
-            result = analyze_heart_sounds(temp_audio, mock_inference)
+        with patch.object(mock_inference, "reason", return_value=(json.dumps(parsed), validated, 0)):
+            result = analyze_heart_sounds(temp_audio, mock_inference, transcriber=mock_transcriber)
 
         assert result.estimated_bpm is None
 
     def test_inference_failure(
-        self, mock_inference: MalaikaInference, temp_audio: Path,
+        self,
+        mock_inference: MalaikaInference,
+        mock_transcriber: WhisperTranscriber,
+        temp_audio: Path,
     ) -> None:
-        with patch.object(mock_inference, "analyze_audio", side_effect=Exception("fail")):
-            result = analyze_heart_sounds(temp_audio, mock_inference)
+        mock_transcriber._pipeline.return_value = {"text": "some audio"}
+        with patch.object(mock_inference, "reason", side_effect=Exception("fail")):
+            result = analyze_heart_sounds(temp_audio, mock_inference, transcriber=mock_transcriber)
+
+        assert result.status == FindingStatus.UNCERTAIN
+        assert result.confidence == 0.0
+
+    def test_whisper_failure_returns_uncertain(
+        self,
+        mock_inference: MalaikaInference,
+        mock_transcriber: WhisperTranscriber,
+        temp_audio: Path,
+    ) -> None:
+        mock_transcriber._pipeline.side_effect = RuntimeError("Whisper crashed")
+        result = analyze_heart_sounds(temp_audio, mock_inference, transcriber=mock_transcriber)
 
         assert result.status == FindingStatus.UNCERTAIN
         assert result.confidence == 0.0

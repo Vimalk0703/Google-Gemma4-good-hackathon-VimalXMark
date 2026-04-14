@@ -74,7 +74,7 @@ DETECT_CHEST_INDRAWING = PromptRegistry.register(PromptTemplate(
 ))
 
 
-# --- Breath Sound Classification from Audio ---
+# --- Breath Sound Classification from Audio (original — kept for future native audio support) ---
 CLASSIFY_BREATH_SOUNDS = PromptRegistry.register(PromptTemplate(
     name="breathing.classify_breath_sounds",
     version="1.0.0",
@@ -91,6 +91,56 @@ CLASSIFY_BREATH_SOUNDS = PromptRegistry.register(PromptTemplate(
         '"description": "<what you hear>"}}'
     ),
     required_variables=frozenset(),
+    expected_output_format="json",
+    output_schema={
+        "type": "object",
+        "properties": {
+            "wheeze": {"type": "boolean"},
+            "stridor": {"type": "boolean"},
+            "grunting": {"type": "boolean"},
+            "crackles": {"type": "boolean"},
+            "normal": {"type": "boolean"},
+            "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+            "description": {"type": "string"},
+        },
+        "required": ["wheeze", "stridor", "grunting", "crackles", "normal", "confidence"],
+    },
+    max_tokens=200,
+    temperature=0.0,
+))
+
+
+# --- Breath Sound Classification from Text (Whisper transcription → Gemma 4 reasoning) ---
+CLASSIFY_BREATH_SOUNDS_FROM_TEXT = PromptRegistry.register(PromptTemplate(
+    name="breathing.classify_breath_sounds_from_text",
+    version="1.0.0",
+    description=(
+        "Classify breath sounds from a text description of audio "
+        "(produced by Whisper transcription). Gemma 4 reasons on the "
+        "description to detect wheeze, stridor, grunting, crackles."
+    ),
+    system_prompt=SYSTEM_MEDICAL_OBSERVER,
+    user_template=(
+        "A phone microphone was placed near a child's chest/mouth to record breathing sounds. "
+        "An automatic speech recognition system transcribed the audio as follows:\n\n"
+        "--- AUDIO TRANSCRIPTION ---\n"
+        "{transcription}\n"
+        "--- END TRANSCRIPTION ---\n\n"
+        "Based on this transcription and description of the audio, classify the breath sounds. "
+        "Note: The transcription may contain onomatopoeia, descriptions of sounds, or may be "
+        "mostly silence/noise indicators. Use clinical reasoning to interpret what these sounds "
+        "likely represent.\n\n"
+        "Wheeze = high-pitched whistling on expiration\n"
+        "Stridor = harsh, high-pitched sound on inspiration (upper airway obstruction)\n"
+        "Grunting = short, low-pitched sound at end of expiration (sign of respiratory distress)\n"
+        "Crackles = discontinuous popping/bubbling sounds (fluid in airways)\n\n"
+        "Report ONLY a JSON object: "
+        '{{"wheeze": true/false, "stridor": true/false, "grunting": true/false, '
+        '"crackles": true/false, "normal": true/false, '
+        '"confidence": <0.0-1.0>, '
+        '"description": "<your clinical interpretation>"}}'
+    ),
+    required_variables=frozenset({"transcription"}),
     expected_output_format="json",
     output_schema={
         "type": "object",

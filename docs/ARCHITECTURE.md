@@ -9,7 +9,7 @@
 Malaika is an offline-first, multimodal child health assessment system built on Gemma 4. It implements the WHO IMCI (Integrated Management of Childhood Illness) protocol as a deterministic state machine, using Gemma 4 for all perception (vision, audio, language understanding) and code for all clinical logic (thresholds, classifications, treatment selection).
 
 ### Design Philosophy
-- **One model, one runtime**: Single Gemma 4 instance handles all AI tasks
+- **Two models, one runtime**: Gemma 4 for reasoning + Whisper-small for audio transcription, both via Transformers
 - **Protocol-driven**: IMCI state machine is the backbone, Gemma 4 is the perception layer
 - **Modular and pluggable**: Each assessment module is independent; disable any without breaking the flow
 - **Offline-complete**: Zero network calls. Every dependency is local.
@@ -35,6 +35,7 @@ Malaika is an offline-first, multimodal child health assessment system built on 
 │                                                               │
 │  Model: google/gemma-4-E4B-it (4-bit quantized)              │
 │  VRAM: ~5-6 GB | Runtime: Transformers + BitsAndBytes         │
+│  Audio: Whisper-small (244 MB) for transcription → Gemma 4    │
 │  URL: Gradio share=True (public, no login)                    │
 └─────────────────────────────────────────────────────────────┘
 
@@ -101,8 +102,9 @@ Malaika is an offline-first, multimodal child health assessment system built on 
 │ count_      │ │ analyze_    │ │  validator │ │ Every step produces  │
 │  breathing()│ │  heart()   │ │             │ │ a trace entry        │
 │             │ │             │ │ Every call  │ │                      │
-│ ALL call    │ │ ALL call    │ │ passes all 3│ │                      │
-│ Gemma 4     │ │ Gemma 4     │ │ guards      │ │                      │
+│ ALL call    │ │ Audio→       │ │ passes all 3│ │                      │
+│ Gemma 4     │ │ Whisper→     │ │ guards      │ │                      │
+│             │ │ text→Gemma 4 │ │             │ │                      │
 └──────┬─────┘ └──────┬─────┘ └─────────────┘ └──────────────────────┘
        │              │
        ▼              ▼
@@ -121,7 +123,8 @@ Malaika is an offline-first, multimodal child health assessment system built on 
 │  Response cache: hash-based, per-session, invalidates on reload.     │
 │                                                                       │
 │  Runtime: Transformers + BitsAndBytes (4-bit quantization)           │
-│  VRAM: ~5-6 GB | Modalities: text, image, audio, video              │
+│  VRAM: ~5-6 GB | Modalities: text, image, video                     │
+│  Audio: Whisper-small (244 MB) transcribes → text → Gemma 4 reasons │
 └──────────────────────────────┬──────────────────────────────────────┘
                                │
                                ▼
@@ -454,10 +457,20 @@ datasets              # HuggingFace datasets
 ### NOT Dependencies (explicitly excluded)
 
 - No Ollama (unified Transformers runtime)
-- No Whisper (Gemma 4 handles audio natively)
 - No external APIs (offline-only)
 - No database (local file storage only)
 - No Docker (direct Python execution for hackathon)
+
+### Audio Pipeline Note
+
+Gemma 4 E4B does **not** support native audio input (the processor ignores
+the ``audios`` keyword argument). Audio is handled via a two-step pipeline:
+
+1. **Whisper-small** (``openai/whisper-small``, 244 MB) transcribes audio to text
+2. **Gemma 4** reasons on the transcription text
+
+Both models use the Transformers library. Whisper is loaded lazily on first
+audio call and can be unloaded independently of Gemma 4.
 
 ---
 

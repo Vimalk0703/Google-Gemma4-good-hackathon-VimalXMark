@@ -1,7 +1,16 @@
-"""Audio perception module — breath sounds, speech, and heart sounds via Gemma 4.
+"""Audio perception module — breath sounds, speech, and heart sounds.
 
-Each function: gets prompt from PromptRegistry, calls inference, parses
-JSON into typed dataclass. On parse failure returns result with status=UNCERTAIN.
+Pipeline: Audio file → Whisper (transcription) → text → Gemma 4 (reasoning).
+
+Gemma 4 E4B does NOT support native audio input (the processor ignores the
+``audios`` keyword argument). Instead, we use OpenAI Whisper-small (244 MB)
+via the Transformers ``pipeline("automatic-speech-recognition")`` to
+transcribe audio to text, then pass that text to Gemma 4 for clinical
+reasoning.
+
+Each function: gets prompt from PromptRegistry, transcribes audio via
+Whisper, calls Gemma 4 text inference, parses JSON into typed dataclass.
+On parse failure returns result with status=UNCERTAIN.
 
 This module MUST NOT contain clinical logic or thresholds.
 """
@@ -10,9 +19,11 @@ from __future__ import annotations
 
 import hashlib
 from pathlib import Path
+from typing import Any
 
 import structlog
 
+from malaika.config import load_config
 from malaika.inference import MalaikaInference
 from malaika.prompts import PromptRegistry
 from malaika.types import (
@@ -20,9 +31,102 @@ from malaika.types import (
     FindingStatus,
     HeartSoundAssessment,
     SpeechUnderstanding,
+    ValidatedOutput,
 )
 
 logger = structlog.get_logger()
+
+
+# ---------------------------------------------------------------------------
+# Whisper Transcriber
+# ---------------------------------------------------------------------------
+
+class WhisperTranscriber:
+    """Lazy-loaded Whisper model for audio-to-text transcription.
+
+    Uses the Transformers ``pipeline("automatic-speech-recognition")``
+    with ``openai/whisper-small`` (244 MB) by default.  The model is NOT
+    loaded at import time — it is loaded on first ``transcribe()`` call.
+
+    Args:
+        model_name: HuggingFace model ID for Whisper.  Defaults to the
+            value from ``ModelConfig.whisper_model_name``.
+    """
+
+    def __init__(self, model_name: str | None = None) -> None:
+        config = load_config()
+        self._model_name: str = model_name or config.model.whisper_model_name
+        self._pipeline: Any | None = None
+
+    @property
+    def model_name(self) -> str:
+        """The Whisper model ID being used."""
+        return self._model_name
+
+    @property
+    def is_loaded(self) -> bool:
+        """Whether the Whisper model is currently loaded in memory."""
+        return self._pipeline is not None
+
+    def _load(self) -> None:
+        """Load the Whisper model lazily on first use."""
+        if self._pipeline is not None:
+            return
+        try:
+            from transformers import pipeline as hf_pipeline
+
+            logger.info("loading_whisper", model_name=self._model_name)
+            self._pipeline = hf_pipeline(
+                "automatic-speech-recognition",
+                model=self._model_name,
+            )
+            logger.info("whisper_loaded", model_name=self._model_name)
+        except Exception as e:
+            logger.error("whisper_load_failed", error=str(e))
+            raise RuntimeError(
+                f"Failed to load Whisper model '{self._model_name}': {e}"
+            ) from e
+
+    def transcribe(self, audio_path: Path) -> str:
+        """Transcribe an audio file to text using Whisper.
+
+        Args:
+            audio_path: Path to an audio file (WAV/MP3/OGG/FLAC).
+
+        Returns:
+            Transcribed text string.
+
+        Raises:
+            RuntimeError: If the Whisper model cannot be loaded.
+            FileNotFoundError: If the audio file does not exist.
+            ValueError: If the audio file cannot be processed.
+        """
+        if not audio_path.exists():
+            raise FileNotFoundError(f"Audio file not found: {audio_path}")
+
+        self._load()
+
+        try:
+            result = self._pipeline(str(audio_path))
+            text = result.get("text", "").strip() if isinstance(result, dict) else ""
+            logger.debug(
+                "whisper_transcription",
+                audio_path=str(audio_path),
+                text_length=len(text),
+            )
+            return text
+        except Exception as e:
+            logger.error(
+                "whisper_transcription_failed",
+                audio_path=str(audio_path),
+                error=str(e),
+            )
+            raise ValueError(f"Failed to transcribe audio: {e}") from e
+
+    def unload(self) -> None:
+        """Unload the Whisper model and free memory."""
+        self._pipeline = None
+        logger.info("whisper_unloaded")
 
 
 # ---------------------------------------------------------------------------
@@ -60,30 +164,43 @@ def _description_from_parsed(parsed: dict) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Audio Functions
+# Audio Functions — Whisper transcription → Gemma 4 text reasoning
 # ---------------------------------------------------------------------------
 
 def classify_breath_sounds(
     audio_path: Path,
     inference: MalaikaInference,
+    transcriber: WhisperTranscriber | None = None,
 ) -> BreathSoundAssessment:
     """Classify breath sounds from an audio recording.
 
+    Pipeline: audio → Whisper transcription → Gemma 4 text reasoning.
     Detects wheeze, stridor, grunting, and crackles.
 
     Args:
         audio_path: Path to audio file (WAV/MP3/OGG/FLAC).
         inference: Loaded MalaikaInference instance.
+        transcriber: WhisperTranscriber instance (created if not provided).
 
     Returns:
         BreathSoundAssessment with detected abnormal sounds.
     """
-    prompt = PromptRegistry.get("breathing.classify_breath_sounds")
+    if transcriber is None:
+        transcriber = WhisperTranscriber()
+
     input_hash = _file_hash(audio_path)
 
     try:
-        raw_output, validated, retries = inference.analyze_audio(
-            audio_path, prompt, input_hash=input_hash,
+        # Step 1: Transcribe audio via Whisper
+        transcription = transcriber.transcribe(audio_path)
+        if not transcription:
+            transcription = "(no speech or sounds detected in audio)"
+
+        # Step 2: Use Gemma 4 text reasoning on the transcription
+        prompt = PromptRegistry.get("breathing.classify_breath_sounds_from_text")
+        raw_output, validated, retries = inference.reason(
+            prompt, input_hash=input_hash,
+            transcription=transcription,
         )
     except Exception as e:
         logger.error("audio_breath_sounds_failed", error=str(e))
@@ -124,24 +241,38 @@ def understand_speech(
     audio_path: Path,
     inference: MalaikaInference,
     clinical_question: str,
+    transcriber: WhisperTranscriber | None = None,
 ) -> SpeechUnderstanding:
     """Understand caregiver's spoken response to a clinical question.
+
+    Pipeline: audio → Whisper transcription → Gemma 4 text reasoning.
 
     Args:
         audio_path: Path to audio file (WAV/MP3/OGG/FLAC).
         inference: Loaded MalaikaInference instance.
         clinical_question: The question that was asked to the caregiver.
+        transcriber: WhisperTranscriber instance (created if not provided).
 
     Returns:
         SpeechUnderstanding with parsed intent and entities.
     """
-    prompt = PromptRegistry.get("speech.understand_response")
+    if transcriber is None:
+        transcriber = WhisperTranscriber()
+
     input_hash = _file_hash(audio_path)
 
     try:
-        raw_output, validated, retries = inference.analyze_audio(
-            audio_path, prompt, input_hash=input_hash,
+        # Step 1: Transcribe audio via Whisper
+        transcription = transcriber.transcribe(audio_path)
+        if not transcription:
+            transcription = "(no speech detected in audio)"
+
+        # Step 2: Use Gemma 4 text reasoning on the transcription
+        prompt = PromptRegistry.get("speech.understand_response_from_text")
+        raw_output, validated, retries = inference.reason(
+            prompt, input_hash=input_hash,
             question_asked=clinical_question,
+            transcription=transcription,
         )
     except Exception as e:
         logger.error("audio_speech_understanding_failed", error=str(e))
@@ -157,15 +288,15 @@ def understand_speech(
     confidence = _confidence_from_parsed(parsed)
 
     intent = str(parsed.get("intent", "uncertain"))
-    transcription = str(parsed.get("transcription_summary", ""))
+    transcription_summary = str(parsed.get("transcription_summary", ""))
     detected_language = str(parsed.get("detected_language", ""))
 
     return SpeechUnderstanding(
         status=status,
         confidence=confidence,
-        description=transcription or _description_from_parsed(parsed),
+        description=transcription_summary or _description_from_parsed(parsed),
         raw_model_output=raw_output,
-        understood_text=transcription,
+        understood_text=transcription_summary,
         language_detected=detected_language,
         intent=intent,
     )
@@ -175,24 +306,38 @@ def analyze_heart_sounds(
     audio_path: Path,
     inference: MalaikaInference,
     duration_seconds: int = 10,
+    transcriber: WhisperTranscriber | None = None,
 ) -> HeartSoundAssessment:
     """Analyze heart sounds from an audio recording.
+
+    Pipeline: audio → Whisper transcription → Gemma 4 text reasoning.
 
     Args:
         audio_path: Path to audio file (WAV/MP3/OGG/FLAC).
         inference: Loaded MalaikaInference instance.
         duration_seconds: Duration of the recording in seconds.
+        transcriber: WhisperTranscriber instance (created if not provided).
 
     Returns:
         HeartSoundAssessment with BPM estimate and abnormality detection.
     """
-    prompt = PromptRegistry.get("heart.analyze_sounds")
+    if transcriber is None:
+        transcriber = WhisperTranscriber()
+
     input_hash = _file_hash(audio_path)
 
     try:
-        raw_output, validated, retries = inference.analyze_audio(
-            audio_path, prompt, input_hash=input_hash,
+        # Step 1: Transcribe audio via Whisper
+        transcription = transcriber.transcribe(audio_path)
+        if not transcription:
+            transcription = "(no discernible sounds detected in audio)"
+
+        # Step 2: Use Gemma 4 text reasoning on the transcription
+        prompt = PromptRegistry.get("heart.analyze_sounds_from_text")
+        raw_output, validated, retries = inference.reason(
+            prompt, input_hash=input_hash,
             duration_seconds=duration_seconds,
+            transcription=transcription,
         )
     except Exception as e:
         logger.error("audio_heart_sounds_failed", error=str(e))

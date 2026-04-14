@@ -48,6 +48,9 @@ class ModelConfig:
     model_name: str = "google/gemma-4-E4B-it"
     quantize_4bit: bool = True
 
+    # Whisper model for audio transcription (Gemma 4 does NOT support audio input)
+    whisper_model_name: str = "openai/whisper-small"
+
     # Inference defaults
     default_max_tokens: int = 512
     default_temperature: float = 0.0  # Deterministic for clinical tasks

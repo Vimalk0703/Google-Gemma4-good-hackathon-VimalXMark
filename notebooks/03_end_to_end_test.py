@@ -11,7 +11,13 @@
 # ## 1. Setup
 
 # %%
-!pip install -q git+https://github.com/huggingface/transformers.git bitsandbytes accelerate structlog
+import subprocess
+import sys
+
+# Install dependencies (subprocess instead of ! for script mode)
+subprocess.run([sys.executable, "-m", "pip", "install", "-q",
+    "git+https://github.com/huggingface/transformers.git",
+    "bitsandbytes", "accelerate", "structlog"], check=True)
 
 # %%
 from huggingface_hub import login
@@ -21,8 +27,8 @@ login(token=secrets.get_secret("HF_TOKEN"))
 
 # %%
 # Clone our repo
-!git clone https://github.com/Vimalk0703/Google-Gemma4-good-hackathon-VimalXMark.git /tmp/malaika-repo
-import sys
+subprocess.run(["git", "clone", "https://github.com/Vimalk0703/Google-Gemma4-good-hackathon-VimalXMark.git",
+    "/tmp/malaika-repo"], check=True)
 sys.path.insert(0, "/tmp/malaika-repo")
 
 # %%

@@ -23,7 +23,7 @@
 # %%
 # MUST install transformers from source for Gemma 4 support
 # librosa for spectrogram generation
-!pip install -q git+https://github.com/huggingface/transformers.git unsloth trl datasets bitsandbytes accelerate librosa Pillow soundfile kaggle
+!pip install -q git+https://github.com/huggingface/transformers.git peft trl datasets bitsandbytes accelerate librosa Pillow soundfile kaggle
 
 # %%
 # Authenticate — works on both Colab and Kaggle
@@ -348,132 +348,226 @@ if audio_files:
         print(f"  {split_name}: {dict(counts)}")
 
 # %% [markdown]
-# ## 7. Format for Unsloth Vision SFTTrainer
+# ## 7. Prepare Training Data
 #
-# Gemma 4 vision format: image content block + text instruction.
+# Convert pairs into tokenized training examples with spectrogram images.
+# We use the processor to create input_ids + pixel_values for each example.
 
 # %%
-def format_for_vision_training(pairs: list[dict]) -> list[dict]:
-    """Format instruction pairs into Gemma 4 vision chat format for SFTTrainer."""
-    formatted = []
-    for pair in pairs:
-        conversation = {
-            "messages": [
-                {
-                    "role": "system",
-                    "content": [{"type": "text", "text": (
-                        "You are Malaika, a medical audio analysis assistant "
-                        "following the WHO IMCI protocol. You analyze mel-spectrogram "
-                        "images of breath sounds to detect abnormalities. "
-                        "Respond ONLY in the format specified. Do NOT use thinking mode."
-                    )}],
-                },
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "image", "image": pair["spectrogram_path"]},
-                        {"type": "text", "text": pair["instruction"]},
-                    ],
-                },
-                {
-                    "role": "assistant",
-                    "content": [{"type": "text", "text": pair["response"]}],
-                },
-            ]
-        }
-        formatted.append(conversation)
-    return formatted
+from transformers import AutoProcessor, AutoModelForImageTextToText, BitsAndBytesConfig
+import re
 
+MODEL_NAME = "google/gemma-4-E4B-it"
 
-if audio_files:
-    train_formatted = format_for_vision_training(train_pairs)
-    print(f"Formatted {len(train_formatted)} training examples")
+print(f"Loading processor for {MODEL_NAME}...")
+processor = AutoProcessor.from_pretrained(MODEL_NAME)
+tokenizer = processor.tokenizer
 
-# %% [markdown]
-# ## 8. Load Model with Unsloth
-
-# %%
-from unsloth import FastModel
-
-model, tokenizer = FastModel.from_pretrained(
-    model_name="unsloth/gemma-4-E4B-it",
-    max_seq_length=4096,
-    load_in_4bit=True,
+SYSTEM_MSG = (
+    "You are Malaika, a medical audio analysis assistant "
+    "following the WHO IMCI protocol. You analyze mel-spectrogram "
+    "images of breath sounds to detect abnormalities. "
+    "Respond ONLY in the format specified. Do NOT use thinking mode."
 )
 
-print(f"Model loaded via Unsloth")
+
+def tokenize_example(pair: dict) -> dict:
+    """Tokenize a single training example with spectrogram image."""
+    spec_img = Image.open(pair["spectrogram_path"]).convert("RGB")
+
+    messages = [
+        {"role": "user", "content": [
+            {"type": "image"},
+            {"type": "text", "text": f"{SYSTEM_MSG}\n\n{pair['instruction']}"},
+        ]},
+        {"role": "assistant", "content": [
+            {"type": "text", "text": pair["response"]},
+        ]},
+    ]
+
+    text = processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=False)
+    inputs = processor(text=text, images=[spec_img], return_tensors="pt", padding=False, truncation=True, max_length=2048)
+
+    input_ids = inputs["input_ids"].squeeze(0)
+    labels = input_ids.clone()
+
+    # Mask everything before the assistant response (only train on output)
+    response_text = pair["response"]
+    response_tokens = tokenizer.encode(response_text, add_special_tokens=False)
+    response_len = len(response_tokens)
+    if response_len > 0 and len(labels) > response_len:
+        labels[:-response_len] = -100
+
+    return {
+        "input_ids": input_ids,
+        "attention_mask": inputs["attention_mask"].squeeze(0),
+        "pixel_values": inputs.get("pixel_values", inputs.get("pixel_values_videos")),
+        "labels": labels,
+    }
+
+
+# Test tokenization with one example
+if audio_files:
+    test_tok = tokenize_example(pairs[0])
+    print(f"Tokenized example: input_ids={test_tok['input_ids'].shape}, labels masked except last {(test_tok['labels'] != -100).sum()} tokens")
+
+# %% [markdown]
+# ## 8. Load Model in 4-bit
+
+# %%
+print(f"Loading {MODEL_NAME} in 4-bit...")
+t0 = time.monotonic()
+
+model = AutoModelForImageTextToText.from_pretrained(
+    MODEL_NAME,
+    device_map="auto",
+    quantization_config=BitsAndBytesConfig(
+        load_in_4bit=True,
+        bnb_4bit_compute_dtype=torch.float16,
+        bnb_4bit_quant_type="nf4",
+    ),
+    torch_dtype=torch.float16,
+)
+
+load_time = time.monotonic() - t0
+print(f"Model loaded in {load_time:.0f}s")
 print(f"  VRAM: {torch.cuda.memory_allocated() / 1024**3:.1f} GB")
 
 # %% [markdown]
-# ## 9. Add LoRA Adapter (Vision + Language)
+# ## 9. Add LoRA Adapter (PEFT)
 #
-# Key difference from text-only: we fine-tune BOTH vision and language layers
-# so the model learns to interpret spectrogram patterns.
+# We target attention and MLP modules in both vision encoder and language model.
+# This teaches the model to interpret spectrogram patterns.
 
 # %%
-model = FastModel.get_peft_model(
-    model,
-    finetune_vision_layers=True,    # CRITICAL: fine-tune vision for spectrograms
-    finetune_language_layers=True,
-    finetune_attention_modules=True,
-    finetune_mlp_modules=True,
+from peft import LoraConfig, get_peft_model, TaskType, prepare_model_for_kbit_training
+
+# Prepare model for training (freeze base, enable gradients on LoRA)
+model = prepare_model_for_kbit_training(model)
+
+# Find target modules — we want attention + MLP in both vision and language
+# Print model module names to identify targets
+target_modules = []
+for name, _ in model.named_modules():
+    if any(key in name for key in ["q_proj", "v_proj", "k_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]):
+        # Extract just the module type name
+        parts = name.split(".")
+        if parts[-1] not in target_modules:
+            target_modules.append(parts[-1])
+
+target_modules = list(set(target_modules))
+print(f"LoRA target modules: {target_modules}")
+
+lora_config = LoraConfig(
     r=8,
     lora_alpha=8,
-    lora_dropout=0,
+    lora_dropout=0.0,
     bias="none",
+    target_modules=target_modules,
+    task_type=TaskType.CAUSAL_LM,
 )
 
-trainable, total = model.get_nb_trainable_parameters()
-print(f"LoRA adapter added")
-print(f"  Trainable: {trainable:,} / {total:,} ({100*trainable/total:.2f}%)")
+model = get_peft_model(model, lora_config)
+model.print_trainable_parameters()
 
 # %% [markdown]
 # ## 10. Train
 
 # %%
-from trl import SFTTrainer, SFTConfig
-from datasets import Dataset
+from torch.utils.data import Dataset as TorchDataset, DataLoader
+from transformers import TrainingArguments, Trainer
+
+class SpectrogramDataset(TorchDataset):
+    """Dataset that tokenizes spectrogram training pairs on-the-fly."""
+
+    def __init__(self, pairs: list[dict]):
+        self.pairs = pairs
+
+    def __len__(self) -> int:
+        return len(self.pairs)
+
+    def __getitem__(self, idx: int) -> dict:
+        pair = self.pairs[idx]
+        spec_img = Image.open(pair["spectrogram_path"]).convert("RGB")
+
+        messages = [
+            {"role": "user", "content": [
+                {"type": "image"},
+                {"type": "text", "text": f"{SYSTEM_MSG}\n\n{pair['instruction']}"},
+            ]},
+            {"role": "assistant", "content": [
+                {"type": "text", "text": pair["response"]},
+            ]},
+        ]
+
+        text = processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=False)
+        inputs = processor(text=text, images=[spec_img], return_tensors="pt", padding="max_length", truncation=True, max_length=1024)
+
+        input_ids = inputs["input_ids"].squeeze(0)
+        attention_mask = inputs["attention_mask"].squeeze(0)
+        labels = input_ids.clone()
+
+        # Mask non-response tokens
+        response_tokens = tokenizer.encode(pair["response"], add_special_tokens=False)
+        response_len = len(response_tokens)
+        if response_len > 0 and len(labels) > response_len:
+            labels[:-response_len] = -100
+
+        result = {
+            "input_ids": input_ids,
+            "attention_mask": attention_mask,
+            "labels": labels,
+        }
+
+        # Add pixel values if present
+        if "pixel_values" in inputs:
+            result["pixel_values"] = inputs["pixel_values"].squeeze(0)
+
+        return result
+
 
 if audio_files:
-    train_dataset = Dataset.from_list(train_formatted)
+    train_dataset = SpectrogramDataset(train_pairs)
+    print(f"Training dataset: {len(train_dataset)} examples")
 else:
-    # Minimal dummy dataset for testing without ICBHI data
-    dummy_spec = SPEC_DIR / "dummy_spec.png"
-    if not dummy_spec.exists():
-        SPEC_DIR.mkdir(exist_ok=True)
-        img = Image.fromarray(np.random.randint(0, 255, (SPEC_HEIGHT, SPEC_WIDTH, 3), dtype=np.uint8))
-        img.save(str(dummy_spec))
-
-    train_dataset = Dataset.from_list([
-        {"messages": [
-            {"role": "system", "content": [{"type": "text", "text": "You are a medical assistant."}]},
-            {"role": "user", "content": [
-                {"type": "image", "image": str(dummy_spec)},
-                {"type": "text", "text": "Classify the breath sounds in this spectrogram."},
-            ]},
-            {"role": "assistant", "content": [{"type": "text", "text":
-                '{"wheeze": false, "crackles": false, "normal": true, "confidence": 0.9, '
-                '"description": "Normal breath sounds"}'}]},
-        ]}
-    ] * 10)
+    # Create dummy data
+    SPEC_DIR.mkdir(exist_ok=True)
+    dummy_pairs = []
+    for i in range(10):
+        dummy_path = SPEC_DIR / f"dummy_{i}.png"
+        if not dummy_path.exists():
+            img = Image.fromarray(np.random.randint(0, 255, (SPEC_HEIGHT, SPEC_WIDTH, 3), dtype=np.uint8))
+            img.save(str(dummy_path))
+        dummy_pairs.append({
+            "spectrogram_path": str(dummy_path),
+            "instruction": "Classify the breath sounds in this spectrogram. Report JSON.",
+            "response": '{"wheeze": false, "crackles": false, "normal": true, "confidence": 0.9, "description": "Normal breath sounds"}',
+            "label": "normal",
+        })
+    train_dataset = SpectrogramDataset(dummy_pairs)
     print("Using dummy data -- add ICBHI dataset for real training")
 
-trainer = SFTTrainer(
+# %%
+training_args = TrainingArguments(
+    output_dir="./breath_sound_spectrogram_lora",
+    per_device_train_batch_size=1,
+    gradient_accumulation_steps=4,
+    max_steps=100,
+    learning_rate=2e-4,
+    fp16=True,
+    logging_steps=5,
+    save_steps=50,
+    save_total_limit=2,
+    seed=42,
+    report_to="none",
+    remove_unused_columns=False,
+    dataloader_pin_memory=False,
+)
+
+trainer = Trainer(
     model=model,
-    tokenizer=tokenizer,
+    args=training_args,
     train_dataset=train_dataset,
-    args=SFTConfig(
-        per_device_train_batch_size=1,
-        gradient_accumulation_steps=4,
-        max_steps=100,   # More steps for vision fine-tuning
-        learning_rate=2e-4,
-        optim="adamw_8bit",
-        logging_steps=5,
-        output_dir="./breath_sound_spectrogram_lora",
-        seed=42,
-        dataset_text_field="",  # Using messages format
-        remove_unused_columns=False,
-    ),
 )
 
 print("Starting training...")
@@ -494,19 +588,14 @@ print(f"Adapter saved to {ADAPTER_NAME}/")
 
 # List adapter files and sizes
 for f in sorted(Path(ADAPTER_NAME).glob("*")):
-    size_mb = f.stat().st_size / 1024 / 1024
-    print(f"  {f.name}: {size_mb:.1f} MB")
+    if f.is_file():
+        size_mb = f.stat().st_size / 1024 / 1024
+        print(f"  {f.name}: {size_mb:.1f} MB")
 
 # %% [markdown]
 # ## 12. Evaluate on Test Set
 
 # %%
-import re
-
-from transformers import AutoProcessor
-
-processor = AutoProcessor.from_pretrained("google/gemma-4-E4B-it")
-
 print("=" * 60)
 print("EVALUATION ON TEST SET")
 print("=" * 60)
@@ -516,7 +605,6 @@ if audio_files and test_pairs:
     total_test = 0
 
     for pair in test_pairs[:20]:  # First 20 for speed
-        # Load spectrogram image
         spec_img = Image.open(pair["spectrogram_path"]).convert("RGB")
 
         messages = [
@@ -527,13 +615,10 @@ if audio_files and test_pairs:
         ]
 
         input_text = processor.apply_chat_template(messages, add_generation_prompt=True)
-        inputs = processor(
-            text=input_text, images=[spec_img],
-            return_tensors="pt",
-        ).to(model.device)
+        inputs = processor(text=input_text, images=[spec_img], return_tensors="pt").to(model.device)
 
         with torch.inference_mode():
-            outputs = model.generate(**inputs, max_new_tokens=200, temperature=0.0, do_sample=False)
+            outputs = model.generate(**inputs, max_new_tokens=200, do_sample=False)
 
         new_tokens = outputs[0][inputs["input_ids"].shape[1]:]
         prediction = tokenizer.decode(new_tokens, skip_special_tokens=True)
@@ -570,7 +655,7 @@ else:
 # | Metric | Value |
 # |--------|-------|
 # | Base model | Gemma 4 E4B (4-bit) |
-# | Method | Unsloth QLoRA, r=8, vision+language |
+# | Method | PEFT LoRA, r=8, vision+language |
 # | Dataset | ICBHI 2017 (spectrograms) |
 # | Input | Mel-spectrogram PNG (512x256, 50-4000 Hz) |
 # | Training steps | 100 |

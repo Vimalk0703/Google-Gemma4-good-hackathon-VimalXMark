@@ -251,12 +251,18 @@ class MalaikaInference:
     def _extract_images_from_messages(
         self, messages: list[dict[str, Any]],
     ) -> list[Any]:
-        """Extract image paths from multimodal messages and load as PIL Images."""
+        """Extract image paths from multimodal messages and load as PIL Images.
+
+        Images are resized to max 512px on longest side to prevent OOM
+        and reduce generation time on T4 GPU.
+        """
         images: list[Any] = []
         try:
             from PIL import Image
         except ImportError:
             return images
+
+        max_size = 512  # Max pixels on longest side
 
         for msg in messages:
             content = msg.get("content")
@@ -265,7 +271,21 @@ class MalaikaInference:
                     if isinstance(part, dict) and part.get("type") == "image":
                         image_path = part.get("image", "")
                         if image_path and Path(image_path).exists():
-                            images.append(Image.open(image_path).convert("RGB"))
+                            img = Image.open(image_path).convert("RGB")
+                            # Resize large images
+                            w, h = img.size
+                            if max(w, h) > max_size:
+                                scale = max_size / max(w, h)
+                                img = img.resize(
+                                    (int(w * scale), int(h * scale)),
+                                    Image.Resampling.LANCZOS,
+                                )
+                                logger.debug(
+                                    "image_resized",
+                                    original=f"{w}x{h}",
+                                    resized=f"{img.size[0]}x{img.size[1]}",
+                                )
+                            images.append(img)
         return images
 
     def generate(
@@ -329,6 +349,7 @@ class MalaikaInference:
 
                     gen_kwargs: dict[str, Any] = {
                         "max_new_tokens": max_tokens,
+                        "repetition_penalty": 1.3,
                     }
                     if temperature > 0:
                         gen_kwargs["temperature"] = temperature

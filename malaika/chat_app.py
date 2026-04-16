@@ -107,33 +107,34 @@ class ChatSession:
             logger.error("model_load_failed", error=str(e))
             return f"Model load failed: {e}"
 
-    def analyze_image(self, image_path: str, prompt_name: str) -> dict:
-        """Run Gemma 4 vision analysis on an image."""
-        if not self.model_loaded or self.inference is None:
-            return {"error": "Model not loaded"}
+    def analyze_image_direct(self, image_path: str, question: str) -> str:
+        """Analyze an image with a simple question — fast, no JSON, no retries.
 
-        try:
-            from malaika.prompts import PromptRegistry
-            prompt = PromptRegistry.get(prompt_name)
-            raw, validated, retries = self.inference.analyze_image(
-                Path(image_path), prompt,
-            )
-            return validated.parsed
-        except Exception as e:
-            logger.error("image_analysis_failed", error=str(e), prompt=prompt_name)
-            return {"error": str(e)}
-
-    def analyze_with_gemma(self, user_message: str, system_context: str) -> str:
-        """Get a conversational response from Gemma 4."""
+        Returns natural language response from Gemma 4.
+        """
         if not self.model_loaded or self.inference is None:
             return ""
 
         try:
             messages = [
-                {"role": "system", "content": system_context},
-                {"role": "user", "content": user_message},
+                {"role": "user", "content": [
+                    {"type": "image", "image": image_path},
+                    {"type": "text", "text": question},
+                ]},
             ]
-            return self.inference.generate(messages, max_tokens=300, temperature=0.3)
+            return self.inference.generate(messages, max_tokens=100, temperature=0.0)
+        except Exception as e:
+            logger.error("image_analysis_failed", error=str(e))
+            return ""
+
+    def ask_gemma(self, question: str) -> str:
+        """Ask Gemma a text-only question — fast, max 150 tokens."""
+        if not self.model_loaded or self.inference is None:
+            return ""
+
+        try:
+            messages = [{"role": "user", "content": question}]
+            return self.inference.generate(messages, max_tokens=150, temperature=0.3)
         except Exception as e:
             logger.error("gemma_response_failed", error=str(e))
             return ""
@@ -296,45 +297,37 @@ def process_message(
     # --- DANGER SIGNS: PHOTO ---
     if step == "danger_signs_photo":
         if image_path:
-            # Analyze the image with Gemma 4
-            result = session.analyze_image(image_path, "danger.assess_alertness")
+            obs = session.analyze_image_direct(
+                image_path,
+                "Look at this child. Is the child alert, lethargic (abnormally sleepy), "
+                "or unconscious? Describe briefly what you see in 1-2 sentences."
+            )
 
-            if "error" not in result:
-                alertness = result.get("alertness", "alert")
-                session.findings["lethargic"] = alertness == "lethargic"
-                session.findings["unconscious"] = alertness == "unconscious"
-                description = result.get("description", "")
-                confidence = result.get("confidence", 0)
+            if obs:
+                lower_obs = obs.lower()
+                if "lethargic" in lower_obs or "sleepy" in lower_obs or "drowsy" in lower_obs:
+                    session.findings["lethargic"] = True
+                if "unconscious" in lower_obs or "unresponsive" in lower_obs:
+                    session.findings["unconscious"] = True
 
-                session.image_observations["danger_signs"] = description
-
-                if alertness == "alert":
-                    obs = f"Your child appears **alert and responsive**. {description}"
-                elif alertness == "lethargic":
-                    obs = f"**Warning:** Your child appears lethargic (abnormally sleepy). {description}"
-                else:
-                    obs = f"**URGENT:** Your child appears unconscious. {description}"
-
-                session.advance()  # -> danger_signs_questions
+                session.advance()
                 return (
                     f"I've analyzed the photo.\n\n{obs}\n\n"
-                    f"*(Confidence: {confidence:.0%})*\n\n"
-                    "Now I need to ask a few questions:\n\n"
                     "**Can your child drink or breastfeed?**"
                 )
             else:
-                # Gemma failed — ask to try again or skip
-                session.advance()  # -> danger_signs_questions
+                session.advance()
                 return (
-                    "I couldn't analyze the photo clearly. That's okay — "
-                    "let me ask you some questions instead.\n\n"
+                    "I couldn't analyze the photo clearly.\n\n"
                     "**Can your child drink or breastfeed?**"
                 )
+        elif user_text.lower() == "skip":
+            session.advance()
+            return "**Can your child drink or breastfeed?**"
         else:
             return (
-                "I need a photo of your child to check for danger signs. "
-                "Please upload one using the 📎 button.\n\n"
-                "Or type **skip** to continue with questions only."
+                "Please upload a photo of your child using the 📎 button, "
+                "or type **skip** to continue."
             )
 
     # --- DANGER SIGNS: QUESTIONS ---
@@ -382,24 +375,21 @@ def process_message(
     # --- BREATHING: PHOTO ---
     if step == "breathing_photo":
         if image_path:
-            result = session.analyze_image(image_path, "breathing.detect_chest_indrawing")
+            obs = session.analyze_image_direct(
+                image_path,
+                "Look at this child's chest. Is there chest indrawing "
+                "(lower chest pulling inward when breathing in)? "
+                "Describe what you see in 1-2 sentences."
+            )
 
-            if "error" not in result:
-                indrawing = result.get("indrawing_detected", False)
-                session.findings["has_indrawing"] = indrawing
-                description = result.get("description", "")
-                confidence = result.get("confidence", 0)
+            if obs:
+                lower_obs = obs.lower()
+                if "indrawing" in lower_obs and "no " not in lower_obs.split("indrawing")[0][-10:]:
+                    session.findings["has_indrawing"] = True
 
-                if indrawing:
-                    obs = f"**Warning:** I can see chest indrawing. {description}"
-                else:
-                    obs = f"The chest looks normal — no indrawing detected. {description}"
-
-                session.advance()  # -> breathing_questions
+                session.advance()
                 return (
                     f"I've analyzed the chest photo.\n\n{obs}\n\n"
-                    f"*(Confidence: {confidence:.0%})*\n\n"
-                    "Now let me ask:\n\n"
                     "**Does your child have a cough? Is the breathing fast or noisy?**"
                 )
             else:
@@ -414,7 +404,7 @@ def process_message(
         else:
             return (
                 "Please upload a photo of your child's chest, "
-                "or type **skip** to continue with questions."
+                "or type **skip** to continue."
             )
 
     # --- BREATHING: QUESTIONS ---
@@ -460,31 +450,20 @@ def process_message(
         session.findings["has_diarrhea"] = True
 
         if image_path:
-            result = session.analyze_image(image_path, "diarrhea.assess_dehydration_signs")
+            obs = session.analyze_image_direct(
+                image_path,
+                "Look at this child's face. Are the eyes sunken? "
+                "Does the child look dehydrated? Describe in 1-2 sentences."
+            )
 
-            if "error" not in result:
-                sunken = result.get("sunken_eyes", False)
-                slow_pinch = result.get("skin_pinch_slow", False)
-                session.findings["sunken_eyes"] = sunken
-                session.findings["skin_pinch_slow"] = slow_pinch
-                description = result.get("description", "")
-                confidence = result.get("confidence", 0)
+            if obs:
+                lower_obs = obs.lower()
+                if "sunken" in lower_obs:
+                    session.findings["sunken_eyes"] = True
 
-                signs = []
-                if sunken:
-                    signs.append("sunken eyes")
-                if slow_pinch:
-                    signs.append("slow skin pinch")
-
-                if signs:
-                    obs = f"**Warning:** I can see signs of dehydration: {', '.join(signs)}. {description}"
-                else:
-                    obs = f"No obvious dehydration signs from the photo. {description}"
-
-                session.advance()  # -> diarrhea_questions
+                session.advance()
                 return (
                     f"I've analyzed the photo.\n\n{obs}\n\n"
-                    f"*(Confidence: {confidence:.0%})*\n\n"
                     "**How many days has the diarrhea lasted? Is there any blood in the stool?**"
                 )
 
@@ -553,24 +532,22 @@ def process_message(
             )
 
         if image_path:
-            result = session.analyze_image(image_path, "nutrition.assess_wasting")
+            obs = session.analyze_image_direct(
+                image_path,
+                "Look at this child's body. Is there visible wasting "
+                "(very thin, ribs/bones showing)? Does the child look "
+                "well-nourished or malnourished? Describe in 1-2 sentences."
+            )
 
-            if "error" not in result:
-                wasting = result.get("visible_wasting", False)
-                session.findings["visible_wasting"] = wasting
-                description = result.get("description", "")
-                confidence = result.get("confidence", 0)
+            if obs:
+                lower_obs = obs.lower()
+                if any(w in lower_obs for w in ["wasting", "malnourish", "thin", "emaciated"]):
+                    session.findings["visible_wasting"] = True
 
-                if wasting:
-                    obs = f"**Warning:** Signs of visible wasting detected. {description}"
-                else:
-                    obs = f"No visible wasting detected. {description}"
-
-                session.advance()  # -> classify
+                session.advance()
                 return (
                     f"I've analyzed the photo.\n\n{obs}\n\n"
-                    f"*(Confidence: {confidence:.0%})*\n\n"
-                    "I now have enough information to complete the assessment. "
+                    "I now have enough information. "
                     "Type **results** to see my findings."
                 )
 
@@ -621,18 +598,12 @@ def process_message(
             classifications_str = ", ".join(
                 ct.value for _, ct, _ in results
             )
-            treatment_context = (
-                f"{MALAIKA_SYSTEM}\n\n"
-                f"The child is {session.age_months} months old.\n"
-                f"Classifications: {classifications_str}\n"
-                f"Urgency: {urgency}\n\n"
-                "Generate a clear, simple treatment plan for the caregiver. "
-                "Use numbered steps. Include medication dosages from WHO guidelines. "
-                "Include when to return immediately (danger signs to watch for). "
-                "Be warm and reassuring."
-            )
-            treatment = session.analyze_with_gemma(
-                "What should I do for my child?", treatment_context,
+            treatment = session.ask_gemma(
+                f"You are a child health assistant. A {session.age_months}-month-old child "
+                f"has these conditions: {classifications_str}. "
+                f"Urgency: {urgency}. "
+                "Give a simple treatment plan in numbered steps. "
+                "Include WHO medication dosages. Be brief and clear."
             )
             if treatment:
                 lines.append("### Treatment Plan:\n")

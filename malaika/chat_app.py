@@ -305,10 +305,13 @@ def process_message(
             )
 
             if obs:
-                lower_obs = obs.lower()
-                if "lethargic" in lower_obs or "sleepy" in lower_obs or "drowsy" in lower_obs:
+                obs_parsed = _llm_parse_observation(session, obs, {
+                    "lethargic": "Is the child lethargic (abnormally sleepy)? (true/false)",
+                    "unconscious": "Is the child unconscious? (true/false)",
+                })
+                if obs_parsed.get("lethargic") is True:
                     session.findings["lethargic"] = True
-                if "unconscious" in lower_obs or "unresponsive" in lower_obs:
+                if obs_parsed.get("unconscious") is True:
                     session.findings["unconscious"] = True
 
                 session.advance()
@@ -333,12 +336,15 @@ def process_message(
 
     # --- DANGER SIGNS: QUESTIONS ---
     if step == "danger_signs_questions":
-        # "Can your child drink?" — negative means unable to drink
-        if _is_negative_response(user_text):
+        parsed = _llm_parse(session, user_text,
+            "Can your child drink or breastfeed?",
+            {
+                "able_to_drink": "Is the child able to drink or breastfeed? (true/false)",
+                "vomits_everything": "Does the child vomit everything they drink? (true/false)",
+            })
+        if parsed.get("able_to_drink") is False:
             session.findings["unable_to_drink"] = True
-        elif _has_keyword(user_text, ["cannot", "can't", "unable", "won't drink", "refuses"]):
-            session.findings["unable_to_drink"] = True
-        if _has_keyword(user_text, ["vomit", "throw up", "throws up"]):
+        if parsed.get("vomits_everything") is True:
             session.findings["vomits_everything"] = True
 
         session.advance()  # -> breathing_photo
@@ -373,8 +379,10 @@ def process_message(
             )
 
             if obs:
-                lower_obs = obs.lower()
-                if "indrawing" in lower_obs and "no " not in lower_obs.split("indrawing")[0][-10:]:
+                obs_parsed = _llm_parse_observation(session, obs, {
+                    "chest_indrawing": "Is chest indrawing present? (true/false)",
+                })
+                if obs_parsed.get("chest_indrawing") is True:
                     session.findings["has_indrawing"] = True
 
                 session.advance()
@@ -399,19 +407,20 @@ def process_message(
 
     # --- BREATHING: QUESTIONS ---
     if step == "breathing_questions":
-        if _is_negative_response(user_text):
-            pass  # No cough, no issues
-        else:
-            if _has_keyword(user_text, ["cough", "fast", "noisy", "difficult"]) or user_text.lower().strip() in ("yes", "yes."):
-                session.findings["has_cough"] = True
-            if _has_keyword(user_text, ["wheez", "whistl"]):
-                session.findings["has_wheeze"] = True
-            if _has_keyword(user_text, ["stridor", "harsh"]):
-                session.findings["has_stridor"] = True
-
-        # Try to extract breathing rate if mentioned
-        rate = _extract_number(user_text)
-        if rate and 10 <= rate <= 120:
+        parsed = _llm_parse(session, user_text,
+            "Does your child have a cough? Is the breathing fast or noisy?",
+            {
+                "has_cough": "Does the child have a cough? (true/false)",
+                "fast_breathing": "Is the breathing fast or rapid? (true/false)",
+                "noisy_breathing": "Is the breathing noisy, wheezy, or making unusual sounds? (true/false)",
+                "breathing_rate": "Breathing rate per minute if mentioned (number or unknown)",
+            })
+        if parsed.get("has_cough") is True:
+            session.findings["has_cough"] = True
+        if parsed.get("noisy_breathing") is True:
+            session.findings["has_wheeze"] = True
+        rate = parsed.get("breathing_rate")
+        if isinstance(rate, int) and 10 <= rate <= 120:
             session.findings["breathing_rate"] = rate
 
         session.advance()  # -> diarrhea_photo
@@ -426,7 +435,11 @@ def process_message(
 
     # --- DIARRHEA: PHOTO ---
     if step == "diarrhea_photo":
-        if _is_negative_response(user_text):
+        # Check if user says no diarrhea
+        parsed = _llm_parse(session, user_text,
+            "Has your child had diarrhea (loose or watery stools)?",
+            {"has_diarrhea": "Does the child have diarrhea? (true/false)"})
+        if parsed.get("has_diarrhea") is False or _is_negative_response(user_text):
             session.findings["has_diarrhea"] = False
             session.advance()  # skip diarrhea_questions
             session.advance()  # -> fever_questions
@@ -446,9 +459,14 @@ def process_message(
             )
 
             if obs:
-                lower_obs = obs.lower()
-                if "sunken" in lower_obs:
+                obs_parsed = _llm_parse_observation(session, obs, {
+                    "sunken_eyes": "Are the child's eyes sunken? (true/false)",
+                    "dehydrated": "Does the child appear dehydrated? (true/false)",
+                })
+                if obs_parsed.get("sunken_eyes") is True:
                     session.findings["sunken_eyes"] = True
+                if obs_parsed.get("dehydrated") is True:
+                    session.findings["skin_pinch_slow"] = True
 
                 session.advance()
                 return (
@@ -461,10 +479,21 @@ def process_message(
 
     # --- DIARRHEA: QUESTIONS ---
     if step == "diarrhea_questions":
-        days = _extract_number(user_text)
-        if days and days > 0:
+        parsed = _llm_parse(session, user_text,
+            "How many days has the diarrhea lasted? Is there any blood in the stool?",
+            {
+                "duration_days": "How many days has the diarrhea lasted? (number or unknown)",
+                "blood_in_stool": "Is there blood in the stool? (true/false)",
+            })
+        days = parsed.get("duration_days")
+        if isinstance(days, int) and days > 0:
             session.findings["diarrhea_days"] = days
-        if _has_keyword(user_text, ["blood", "bloody"]):
+        else:
+            # Fallback to number extraction
+            num = _extract_number(user_text)
+            if num and num > 0:
+                session.findings["diarrhea_days"] = num
+        if parsed.get("blood_in_stool") is True:
             session.findings["blood_in_stool"] = True
 
         session.advance()  # -> fever_questions
@@ -478,7 +507,13 @@ def process_message(
 
     # --- FEVER: QUESTIONS ---
     if step == "fever_questions":
-        if _is_negative_response(user_text):
+        parsed = _llm_parse(session, user_text,
+            "Does your child have a fever or feel hot? How many days?",
+            {
+                "has_fever": "Does the child have a fever? (true/false)",
+                "fever_days": "How many days has the fever lasted? (number or unknown)",
+            })
+        if parsed.get("has_fever") is False or _is_negative_response(user_text):
             session.findings["has_fever"] = False
             session.advance()  # -> fever_followup
             session.advance()  # -> nutrition_photo
@@ -491,9 +526,13 @@ def process_message(
             )
         else:
             session.findings["has_fever"] = True
-            days = _extract_number(user_text)
-            if days and days > 0:
+            days = parsed.get("fever_days")
+            if isinstance(days, int) and days > 0:
                 session.findings["fever_days"] = days
+            else:
+                num = _extract_number(user_text)
+                if num and num > 0:
+                    session.findings["fever_days"] = num
             session.advance()  # -> fever_followup
             return (
                 "I've noted the fever.\n\n"
@@ -503,12 +542,15 @@ def process_message(
 
     # --- FEVER: FOLLOW-UP ---
     if step == "fever_followup":
-        if _has_keyword(user_text, ["stiff neck", "stiff"]) and not _is_negative_response(user_text):
+        parsed = _llm_parse(session, user_text,
+            "Does your child have a stiff neck? Are you in a malaria-risk area?",
+            {
+                "stiff_neck": "Does the child have a stiff neck? (true/false)",
+                "malaria_risk": "Is the family in a malaria-risk or malaria-endemic area? (true/false)",
+            })
+        if parsed.get("stiff_neck") is True:
             session.findings["stiff_neck"] = True
-        if _has_keyword(user_text, ["malaria", "endemic"]):
-            session.findings["malaria_risk"] = True
-        elif "yes" in user_text.lower().split():
-            # Only set malaria if they clearly say yes
+        if parsed.get("malaria_risk") is True:
             session.findings["malaria_risk"] = True
 
         session.advance()  # -> nutrition_photo
@@ -533,9 +575,14 @@ def process_message(
             )
 
             if obs:
-                # Only flag wasting if the model says it IS present (not "no wasting")
-                if _has_keyword(obs, ["wasting", "malnourish", "emaciated", "severely thin"]):
+                obs_parsed = _llm_parse_observation(session, obs, {
+                    "visible_wasting": "Is there visible wasting or severe thinness? (true/false)",
+                    "edema": "Is there bilateral pitting edema? (true/false)",
+                })
+                if obs_parsed.get("visible_wasting") is True:
                     session.findings["visible_wasting"] = True
+                if obs_parsed.get("edema") is True:
+                    session.findings["edema"] = True
 
                 session.advance()
                 return (
@@ -627,6 +674,99 @@ def process_message(
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+def _llm_parse(session: ChatSession, user_text: str, question: str, fields: dict[str, str]) -> dict[str, bool | int | str]:
+    """Use Gemma 4 to parse a caregiver's response and extract clinical findings.
+
+    Args:
+        session: ChatSession with ask_gemma available.
+        user_text: What the caregiver said.
+        question: What question was asked.
+        fields: Dict of field_name → description to extract.
+            e.g. {"able_to_drink": "Can the child drink or breastfeed?"}
+
+    Returns:
+        Dict of field_name → extracted value (True/False/number/string).
+    """
+    fields_desc = "\n".join(f"- {name}: {desc}" for name, desc in fields.items())
+    prompt = (
+        f"A caregiver was asked: \"{question}\"\n"
+        f"They answered: \"{user_text}\"\n\n"
+        f"Extract these facts from their answer. "
+        f"Reply ONLY with one line per field in format: field_name = true/false/number\n\n"
+        f"{fields_desc}\n\n"
+        f"If unclear or not mentioned, write: field_name = unknown"
+    )
+
+    response = session.ask_gemma(prompt)
+    if not response:
+        return {}
+
+    # Parse "field = value" lines
+    result: dict[str, bool | int | str] = {}
+    for line in response.strip().split("\n"):
+        line = line.strip().lstrip("- ")
+        if "=" not in line:
+            continue
+        parts = line.split("=", 1)
+        if len(parts) != 2:
+            continue
+        name = parts[0].strip().lower().replace(" ", "_")
+        val = parts[1].strip().lower()
+
+        if val in ("true", "yes"):
+            result[name] = True
+        elif val in ("false", "no", "none"):
+            result[name] = False
+        elif val == "unknown":
+            continue
+        else:
+            # Try as number
+            num = _extract_number(val)
+            if num is not None:
+                result[name] = num
+            else:
+                result[name] = val
+
+    logger.debug("llm_parse_result", input=user_text[:50], parsed=result)
+    return result
+
+
+def _llm_parse_observation(session: ChatSession, observation: str, fields: dict[str, str]) -> dict[str, bool]:
+    """Use Gemma 4 to parse its OWN image observation and extract findings.
+
+    Handles cases like "no visible wasting" → wasting=False.
+    """
+    fields_desc = "\n".join(f"- {name}: {desc}" for name, desc in fields.items())
+    prompt = (
+        f"A medical AI observed the following about a child's photo:\n"
+        f"\"{observation}\"\n\n"
+        f"Based on this observation, extract these findings. "
+        f"Reply ONLY with one line per field: field_name = true/false\n\n"
+        f"{fields_desc}"
+    )
+
+    response = session.ask_gemma(prompt)
+    if not response:
+        return {}
+
+    result: dict[str, bool] = {}
+    for line in response.strip().split("\n"):
+        line = line.strip().lstrip("- ")
+        if "=" not in line:
+            continue
+        parts = line.split("=", 1)
+        if len(parts) != 2:
+            continue
+        name = parts[0].strip().lower().replace(" ", "_")
+        val = parts[1].strip().lower()
+        if val in ("true", "yes"):
+            result[name] = True
+        elif val in ("false", "no", "none"):
+            result[name] = False
+
+    return result
+
 
 def _extract_number(text: str) -> int | None:
     """Extract the first number from a text string."""

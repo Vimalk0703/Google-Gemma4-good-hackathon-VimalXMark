@@ -61,6 +61,10 @@ class ChatSession:
         self.age_months: int = 12
         self.language: str = "en"
 
+        # Direct model/processor references (set externally when using Unsloth)
+        self._model_ref: Any = None
+        self._processor_ref: Any = None
+
         # Clinical findings collected during conversation
         self.findings: dict[str, Any] = {
             "lethargic": False,
@@ -241,20 +245,46 @@ MALAIKA_SYSTEM = (
 def _gemma_respond(session: ChatSession, context: str) -> str:
     """Generate a conversational response from Gemma.
 
-    Uses MALAIKA_SYSTEM persona + step-specific context.
-    Falls back to context itself if model unavailable.
+    Uses a system/user message pair so Gemma follows the instruction
+    rather than echoing it.
+    Falls back to a simple version if model unavailable.
     """
     if not session.model_loaded:
         return context
 
-    prompt = (
-        f"{MALAIKA_SYSTEM}\n\n"
-        f"Current situation:\n{context}\n\n"
-        "Respond warmly and naturally in 2-4 sentences. Be caring but concise. "
-        "End with the next question or instruction for the caregiver."
-    )
-    response = session.ask_gemma(prompt)
-    return response if response else context
+    try:
+        messages = [
+            {"role": "system", "content": MALAIKA_SYSTEM},
+            {"role": "user", "content": (
+                f"{context}\n\n"
+                "Write your response to the caregiver now. "
+                "Be warm, natural, and concise (2-4 sentences). "
+                "Do NOT repeat these instructions. Just speak directly to the caregiver."
+            )},
+        ]
+        # Use processor + model directly for system/user message pair
+        input_text = session._processor_ref.apply_chat_template(
+            messages, add_generation_prompt=True,
+        )
+        inputs = session._processor_ref(
+            text=input_text, return_tensors="pt",
+        ).to(session._model_ref.device)
+
+        import torch
+        with torch.inference_mode():
+            out = session._model_ref.generate(
+                **inputs, max_new_tokens=150,
+                do_sample=True, temperature=0.4,
+                repetition_penalty=1.3,
+            )
+        response = session._processor_ref.decode(
+            out[0][inputs["input_ids"].shape[-1]:],
+            skip_special_tokens=True,
+        ).strip()
+        return response if response else context
+    except Exception as e:
+        logger.error("gemma_respond_failed", error=str(e))
+        return context
 
 
 def process_message(

@@ -39,6 +39,7 @@ STEPS = [
     "diarrhea_photo",
     "diarrhea_questions",
     "fever_questions",
+    "fever_followup",
     "nutrition_photo",
     "classify",
     "complete",
@@ -334,18 +335,7 @@ def process_message(
     if step == "danger_signs_questions":
         lower = user_text.lower()
 
-        # Parse responses about drinking/vomiting/convulsions
-        if session.model_loaded:
-            context = (
-                f"{MALAIKA_SYSTEM}\n\n"
-                "The caregiver was asked about their child's ability to drink. "
-                "Extract whether the child can drink and if they vomit everything. "
-                "Respond with a brief, warm acknowledgment and then ask: "
-                "'Has your child had any convulsions or fits?'"
-            )
-            gemma_response = session.analyze_with_gemma(user_text, context)
-
-        # Simple keyword parsing for findings
+        # Parse caregiver response about drinking/vomiting
         if any(w in lower for w in ["no", "cannot", "can't", "unable", "won't"]):
             session.findings["unable_to_drink"] = True
         if any(w in lower for w in ["vomit", "throw up", "throws up"]):
@@ -360,16 +350,16 @@ def process_message(
         )
 
         if has_danger:
-            danger_note = "\n\n**Note:** I've detected some danger signs. We'll continue the full assessment."
+            danger_note = "\n\n**Warning:** I've detected some danger signs. We'll continue the full assessment."
         else:
-            danger_note = "\n\nNo danger signs detected so far. Good."
+            danger_note = "\n\nGood — no danger signs detected."
 
         return (
-            f"Thank you for that information.{danger_note}\n\n"
+            f"Thank you.{danger_note}\n\n"
             "**Step 2: Breathing Assessment**\n\n"
             "Please take a photo of your child's **chest area**. "
             "I'll check for chest indrawing (when the lower chest pulls inward during breathing).\n\n"
-            "*Tap 📎 to upload or take a chest photo.*"
+            "*Upload a chest photo using 📎*"
         )
 
     # --- BREATHING: PHOTO ---
@@ -495,41 +485,47 @@ def process_message(
 
         if any(w in lower for w in ["no", "not", "doesn't", "hasn't", "don't"]):
             session.findings["has_fever"] = False
-        else:
-            session.findings["has_fever"] = True
-            days = _extract_number(user_text)
-            if days and days > 0:
-                session.findings["fever_days"] = days
-
-        if session.findings["has_fever"]:
-            # Ask follow-up about malaria risk
-            session.advance()  # -> nutrition_photo
-            return (
-                "I've noted the fever.\n\n"
-                "**Does your child have a stiff neck? "
-                "Are you in a malaria-risk area?**\n\n"
-                "After answering, we'll move to the nutrition check."
-            )
-        else:
+            session.advance()  # -> fever_followup
             session.advance()  # -> nutrition_photo
             return (
                 "No fever — that's good.\n\n"
                 "**Step 5: Nutrition**\n\n"
                 "Please take a photo of your child's body — "
                 "I'll check for signs of malnutrition like visible wasting.\n\n"
-                "*Tap 📎 to upload a photo.*"
+                "*Upload a photo using 📎, or type **skip**.*"
             )
+        else:
+            session.findings["has_fever"] = True
+            days = _extract_number(user_text)
+            if days and days > 0:
+                session.findings["fever_days"] = days
+            session.advance()  # -> fever_followup
+            return (
+                "I've noted the fever.\n\n"
+                "**Does your child have a stiff neck? "
+                "Are you in a malaria-risk area?**"
+            )
+
+    # --- FEVER: FOLLOW-UP ---
+    if step == "fever_followup":
+        lower = user_text.lower()
+        if any(w in lower for w in ["stiff", "yes"]):
+            session.findings["stiff_neck"] = True
+        if any(w in lower for w in ["malaria", "risk", "area", "endemic", "yes"]):
+            session.findings["malaria_risk"] = True
+
+        session.advance()  # -> nutrition_photo
+        return (
+            "Thank you.\n\n"
+            "**Step 5: Nutrition**\n\n"
+            "Please take a photo of your child's body — "
+            "I'll check for signs of malnutrition like visible wasting.\n\n"
+            "*Upload a photo using 📎, or type **skip**.*"
+        )
 
     # --- NUTRITION: PHOTO ---
     if step == "nutrition_photo":
-        # Handle fever follow-up answers if they come here
         lower = user_text.lower()
-        if "stiff" in lower or "neck" in lower:
-            session.findings["stiff_neck"] = "yes" in lower or "stiff" in lower
-        if "malaria" in lower:
-            session.findings["malaria_risk"] = any(
-                w in lower for w in ["yes", "risk", "area", "endemic"]
-            )
 
         if image_path:
             obs = session.analyze_image_direct(
@@ -551,18 +547,17 @@ def process_message(
                     "Type **results** to see my findings."
                 )
 
-        if "skip" in lower or not image_path:
-            if "skip" in lower or (user_text and not image_path):
-                session.advance()  # -> classify
-                return (
-                    "**Assessment complete.** I have enough information.\n\n"
-                    "Type **results** to see my findings and recommendations."
-                )
+        if "skip" in lower:
+            session.advance()  # -> classify
             return (
-                "**Step 5: Nutrition**\n\n"
-                "Please take a photo of your child's body to check for wasting, "
-                "or type **skip** to finish the assessment."
+                "**Assessment complete.** I have enough information.\n\n"
+                "Type **results** to see my findings and recommendations."
             )
+
+        return (
+            "Please upload a photo of your child's body, "
+            "or type **skip** to finish the assessment."
+        )
 
     # --- CLASSIFY ---
     if step == "classify":

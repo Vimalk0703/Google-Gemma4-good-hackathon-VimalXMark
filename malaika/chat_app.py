@@ -238,6 +238,25 @@ MALAIKA_SYSTEM = (
 )
 
 
+def _gemma_respond(session: ChatSession, context: str) -> str:
+    """Generate a conversational response from Gemma.
+
+    Uses MALAIKA_SYSTEM persona + step-specific context.
+    Falls back to context itself if model unavailable.
+    """
+    if not session.model_loaded:
+        return context
+
+    prompt = (
+        f"{MALAIKA_SYSTEM}\n\n"
+        f"Current situation:\n{context}\n\n"
+        "Respond warmly and naturally in 2-4 sentences. Be caring but concise. "
+        "End with the next question or instruction for the caregiver."
+    )
+    response = session.ask_gemma(prompt)
+    return response if response else context
+
+
 def process_message(
     message: dict | str,
     history: list,
@@ -267,32 +286,29 @@ def process_message(
     # --- WELCOME ---
     if step == "welcome":
         session.advance()  # -> age
-        return (
-            "Hello, I'm **Malaika** — your child health assistant.\n\n"
-            "I'll help you check on your child's health using the WHO IMCI protocol. "
-            "I'll guide you step by step.\n\n"
-            "**How old is your child in months?** (2 to 59 months)"
+        return _gemma_respond(session,
+            "You are meeting the caregiver for the first time. "
+            "Introduce yourself as Malaika, a child health assistant. "
+            "Explain you'll do a WHO IMCI health check step by step. "
+            "Ask how old their child is in months (2-59 months)."
         )
 
     # --- AGE ---
     if step == "age":
-        # Try to extract age from text
         age = _extract_number(user_text)
         if age and 2 <= age <= 59:
             session.age_months = age
             session.advance()  # -> danger_signs_photo
-            return (
-                f"Thank you. Your child is **{age} months** old.\n\n"
-                "Let's begin the assessment.\n\n"
-                "**Step 1: Danger Signs**\n\n"
-                "Please take a photo of your child so I can check their alertness. "
-                "Make sure the child's face and eyes are visible.\n\n"
-                "*Tap the 📎 button to upload or take a photo.*"
+            return _gemma_respond(session,
+                f"The caregiver said their child is {age} months old. "
+                "Acknowledge this warmly. Explain you'll start with checking for danger signs. "
+                "Ask them to take a photo of their child's face so you can check alertness. "
+                "Tell them to use the 📎 button to upload."
             )
         else:
-            return (
-                "I need your child's age in months (between 2 and 59). "
-                "For example, type **12** if your child is 12 months old."
+            return _gemma_respond(session,
+                "The caregiver gave an unclear age. "
+                "Gently ask again for the child's age in months, between 2 and 59."
             )
 
     # --- DANGER SIGNS: PHOTO ---
@@ -300,8 +316,10 @@ def process_message(
         if image_path:
             obs = session.analyze_image_direct(
                 image_path,
-                "Look at this child. Is the child alert, lethargic (abnormally sleepy), "
-                "or unconscious? Describe briefly what you see in 1-2 sentences."
+                "You are a child health assistant. Look at this child carefully. "
+                "Is the child alert (awake, responsive), lethargic (abnormally sleepy, hard to wake), "
+                "or unconscious (cannot be woken)? "
+                "Describe what you observe about the child's alertness, eyes, and posture in 2-3 sentences."
             )
 
             if obs:
@@ -315,37 +333,45 @@ def process_message(
                     session.findings["unconscious"] = True
 
                 session.advance()
-                return (
-                    f"I've analyzed the photo.\n\n{obs}\n\n"
-                    "**Can your child drink or breastfeed?**"
+                return _gemma_respond(session,
+                    f"You just analyzed a photo of the child. Your observation: \"{obs}\"\n"
+                    "Share your observation with the caregiver in a caring way. "
+                    "Then ask: Can your child drink or breastfeed? "
+                    "Also ask if the child has had any convulsions or fits."
                 )
             else:
                 session.advance()
-                return (
-                    "I couldn't analyze the photo clearly.\n\n"
-                    "**Can your child drink or breastfeed?**"
+                return _gemma_respond(session,
+                    "You couldn't analyze the photo clearly. "
+                    "Reassure the caregiver and ask: Can your child drink or breastfeed?"
                 )
         elif user_text.lower() == "skip":
             session.advance()
-            return "**Can your child drink or breastfeed?**"
+            return _gemma_respond(session,
+                "The caregiver skipped the photo. "
+                "Ask: Can your child drink or breastfeed? Has the child had convulsions?"
+            )
         else:
-            return (
-                "Please upload a photo of your child using the 📎 button, "
-                "or type **skip** to continue."
+            return _gemma_respond(session,
+                "You need a photo of the child to check alertness. "
+                "Ask the caregiver to upload a photo using the 📎 button, or type skip."
             )
 
     # --- DANGER SIGNS: QUESTIONS ---
     if step == "danger_signs_questions":
         parsed = _llm_parse(session, user_text,
-            "Can your child drink or breastfeed?",
+            "Can your child drink or breastfeed? Has the child had convulsions?",
             {
                 "able_to_drink": "Is the child able to drink or breastfeed? (true/false)",
                 "vomits_everything": "Does the child vomit everything they drink? (true/false)",
+                "convulsions": "Has the child had convulsions or fits? (true/false)",
             })
         if parsed.get("able_to_drink") is False:
             session.findings["unable_to_drink"] = True
         if parsed.get("vomits_everything") is True:
             session.findings["vomits_everything"] = True
+        if parsed.get("convulsions") is True:
+            session.findings["has_convulsions"] = True
 
         session.advance()  # -> breathing_photo
         has_danger = (
@@ -353,29 +379,32 @@ def process_message(
             or session.findings["unconscious"]
             or session.findings["unable_to_drink"]
             or session.findings["vomits_everything"]
+            or session.findings["has_convulsions"]
         )
 
         if has_danger:
-            danger_note = "\n\n**Warning:** I've detected some danger signs. We'll continue the full assessment."
+            context = (
+                f"The caregiver said: \"{user_text}\". You detected DANGER SIGNS. "
+                "Warn the caregiver clearly but calmly. Say you'll continue the assessment. "
+                "Now move to Step 2: Breathing. Ask them to take a photo of the child's chest "
+                "so you can check for chest indrawing."
+            )
         else:
-            danger_note = "\n\nGood — no danger signs detected."
-
-        return (
-            f"Thank you.{danger_note}\n\n"
-            "**Step 2: Breathing Assessment**\n\n"
-            "Please take a photo of your child's **chest area**. "
-            "I'll check for chest indrawing (when the lower chest pulls inward during breathing).\n\n"
-            "*Upload a chest photo using 📎*"
-        )
+            context = (
+                f"The caregiver said: \"{user_text}\". No danger signs detected. "
+                "Reassure the caregiver. Now move to Step 2: Breathing. "
+                "Ask them to take a photo of the child's chest so you can check for chest indrawing."
+            )
+        return _gemma_respond(session, context)
 
     # --- BREATHING: PHOTO ---
     if step == "breathing_photo":
         if image_path:
             obs = session.analyze_image_direct(
                 image_path,
-                "Look at this child's chest. Is there chest indrawing "
-                "(lower chest pulling inward when breathing in)? "
-                "Describe what you see in 1-2 sentences."
+                "You are a child health assistant. Examine this child's chest area carefully. "
+                "Is there chest indrawing (the lower chest wall pulling inward when the child breathes in)? "
+                "Describe what you observe about the chest, ribs, and breathing pattern in 2-3 sentences."
             )
 
             if obs:
@@ -386,23 +415,25 @@ def process_message(
                     session.findings["has_indrawing"] = True
 
                 session.advance()
-                return (
-                    f"I've analyzed the chest photo.\n\n{obs}\n\n"
-                    "**Does your child have a cough? Is the breathing fast or noisy?**"
+                return _gemma_respond(session,
+                    f"You analyzed the child's chest photo. Your observation: \"{obs}\"\n"
+                    "Share your findings with the caregiver in a caring way. "
+                    "Then ask: Does the child have a cough? Is the breathing fast, difficult, or noisy?"
                 )
             else:
                 session.advance()
-                return (
-                    "I couldn't analyze the chest photo clearly.\n\n"
-                    "**Does your child have a cough? Is the breathing fast or noisy?**"
+                return _gemma_respond(session,
+                    "You couldn't see the chest clearly in the photo. "
+                    "Ask: Does the child have a cough? Is the breathing fast or noisy?"
                 )
         elif "skip" in user_text.lower():
             session.advance()
-            return "**Does your child have a cough? Is the breathing fast or noisy?**"
+            return _gemma_respond(session,
+                "Caregiver skipped chest photo. Ask about cough and breathing problems."
+            )
         else:
-            return (
-                "Please upload a photo of your child's chest, "
-                "or type **skip** to continue."
+            return _gemma_respond(session,
+                "You need a chest photo. Ask the caregiver to upload one or type skip."
             )
 
     # --- BREATHING: QUESTIONS ---
@@ -424,13 +455,11 @@ def process_message(
             session.findings["breathing_rate"] = rate
 
         session.advance()  # -> diarrhea_photo
-
-        return (
-            "Thank you.\n\n"
-            "**Step 3: Diarrhea & Dehydration**\n\n"
-            "**Has your child had diarrhea (loose or watery stools)?**\n\n"
-            "If yes, please also upload a photo of your child's face — "
-            "I'll check for signs of dehydration like sunken eyes."
+        return _gemma_respond(session,
+            f"The caregiver said about breathing: \"{user_text}\". "
+            "Acknowledge their answer. Now move to Step 3: Diarrhea & Dehydration. "
+            "Ask if the child has had diarrhea (loose or watery stools). "
+            "If yes, ask them to upload a photo of the child's face so you can check for dehydration signs."
         )
 
     # --- DIARRHEA: PHOTO ---
@@ -443,10 +472,9 @@ def process_message(
             session.findings["has_diarrhea"] = False
             session.advance()  # skip diarrhea_questions
             session.advance()  # -> fever_questions
-            return (
-                "No diarrhea — that's good.\n\n"
-                "**Step 4: Fever**\n\n"
-                "**Does your child have a fever or feel hot?**"
+            return _gemma_respond(session,
+                "The child does not have diarrhea. Reassure the caregiver. "
+                "Move to Step 4: Fever. Ask if the child has a fever or feels hot, and for how many days."
             )
 
         session.findings["has_diarrhea"] = True
@@ -454,8 +482,9 @@ def process_message(
         if image_path:
             obs = session.analyze_image_direct(
                 image_path,
-                "Look at this child's face. Are the eyes sunken? "
-                "Does the child look dehydrated? Describe in 1-2 sentences."
+                "You are a child health assistant. Look at this child's face carefully. "
+                "Are the eyes sunken (deeper than normal)? Does the child look dehydrated "
+                "(dry lips, listless, sunken fontanelle)? Describe what you observe in 2-3 sentences."
             )
 
             if obs:
@@ -469,13 +498,16 @@ def process_message(
                     session.findings["skin_pinch_slow"] = True
 
                 session.advance()
-                return (
-                    f"I've analyzed the photo.\n\n{obs}\n\n"
-                    "**How many days has the diarrhea lasted? Is there any blood in the stool?**"
+                return _gemma_respond(session,
+                    f"You analyzed the child's face for dehydration. Your observation: \"{obs}\"\n"
+                    "Share your findings with the caregiver. "
+                    "Then ask: How many days has the diarrhea lasted? Is there any blood in the stool?"
                 )
 
         session.advance()  # -> diarrhea_questions
-        return "**How many days has the diarrhea lasted? Is there any blood in the stool?**"
+        return _gemma_respond(session,
+            "The child has diarrhea. Ask: How many days has the diarrhea lasted? Is there any blood in the stool?"
+        )
 
     # --- DIARRHEA: QUESTIONS ---
     if step == "diarrhea_questions":
@@ -489,7 +521,6 @@ def process_message(
         if isinstance(days, int) and days > 0:
             session.findings["diarrhea_days"] = days
         else:
-            # Fallback to number extraction
             num = _extract_number(user_text)
             if num and num > 0:
                 session.findings["diarrhea_days"] = num
@@ -497,12 +528,10 @@ def process_message(
             session.findings["blood_in_stool"] = True
 
         session.advance()  # -> fever_questions
-
-        return (
-            "Thank you.\n\n"
-            "**Step 4: Fever**\n\n"
-            "**Does your child have a fever or feel hot? "
-            "If yes, how many days has the fever lasted?**"
+        return _gemma_respond(session,
+            f"The caregiver said about diarrhea: \"{user_text}\". "
+            "Acknowledge their answer. Move to Step 4: Fever. "
+            "Ask if the child has a fever or feels hot, and how many days it has lasted."
         )
 
     # --- FEVER: QUESTIONS ---
@@ -517,12 +546,10 @@ def process_message(
             session.findings["has_fever"] = False
             session.advance()  # -> fever_followup
             session.advance()  # -> nutrition_photo
-            return (
-                "No fever — that's good.\n\n"
-                "**Step 5: Nutrition**\n\n"
-                "Please take a photo of your child's body — "
-                "I'll check for signs of malnutrition like visible wasting.\n\n"
-                "*Upload a photo using 📎, or type **skip**.*"
+            return _gemma_respond(session,
+                "The child does not have a fever. Reassure the caregiver. "
+                "Move to Step 5: Nutrition. Ask them to take a photo of the child's body "
+                "so you can check for visible wasting or malnutrition. They can also type skip."
             )
         else:
             session.findings["has_fever"] = True
@@ -534,10 +561,11 @@ def process_message(
                 if num and num > 0:
                     session.findings["fever_days"] = num
             session.advance()  # -> fever_followup
-            return (
-                "I've noted the fever.\n\n"
-                "**Does your child have a stiff neck? "
-                "Are you in a malaria-risk area?**"
+            return _gemma_respond(session,
+                f"The caregiver reported fever: \"{user_text}\". "
+                "Acknowledge the fever. Ask two important questions: "
+                "1) Does the child have a stiff neck? "
+                "2) Are they in a malaria-risk area (area with mosquitoes, tropical region)?"
             )
 
     # --- FEVER: FOLLOW-UP ---
@@ -554,12 +582,11 @@ def process_message(
             session.findings["malaria_risk"] = True
 
         session.advance()  # -> nutrition_photo
-        return (
-            "Thank you.\n\n"
-            "**Step 5: Nutrition**\n\n"
-            "Please take a photo of your child's body — "
-            "I'll check for signs of malnutrition like visible wasting.\n\n"
-            "*Upload a photo using 📎, or type **skip**.*"
+        return _gemma_respond(session,
+            f"The caregiver said about stiff neck/malaria: \"{user_text}\". "
+            "Acknowledge their answer. Move to Step 5: Nutrition. "
+            "Ask them to take a photo of the child's whole body so you can check for "
+            "visible wasting or signs of malnutrition. They can also type skip."
         )
 
     # --- NUTRITION: PHOTO ---
@@ -569,9 +596,10 @@ def process_message(
         if image_path:
             obs = session.analyze_image_direct(
                 image_path,
-                "Look at this child's body. Is there visible wasting "
-                "(very thin, ribs/bones showing)? Does the child look "
-                "well-nourished or malnourished? Describe in 1-2 sentences."
+                "You are a child health assistant. Look at this child's body carefully. "
+                "Is there visible wasting (very thin, ribs and bones prominently showing)? "
+                "Does the child appear well-nourished or malnourished? "
+                "Check for swollen feet (edema). Describe what you observe in 2-3 sentences."
             )
 
             if obs:
@@ -585,22 +613,23 @@ def process_message(
                     session.findings["edema"] = True
 
                 session.advance()
-                return (
-                    f"I've analyzed the photo.\n\n{obs}\n\n"
-                    "I now have enough information. "
-                    "Type **results** to see my findings."
+                return _gemma_respond(session,
+                    f"You analyzed the child's body for nutrition. Your observation: \"{obs}\"\n"
+                    "Share your findings with the caregiver. "
+                    "Tell them you now have enough information to complete the assessment. "
+                    "Ask them to type 'results' to see the findings and recommendations."
                 )
 
         if "skip" in lower:
             session.advance()  # -> classify
-            return (
-                "**Assessment complete.** I have enough information.\n\n"
-                "Type **results** to see my findings and recommendations."
+            return _gemma_respond(session,
+                "The caregiver skipped the nutrition photo. "
+                "Tell them the assessment is complete and ask them to type 'results' to see findings."
             )
 
-        return (
-            "Please upload a photo of your child's body, "
-            "or type **skip** to finish the assessment."
+        return _gemma_respond(session,
+            "You need a body photo to check nutrition. "
+            "Ask the caregiver to upload a photo or type skip to finish."
         )
 
     # --- CLASSIFY ---

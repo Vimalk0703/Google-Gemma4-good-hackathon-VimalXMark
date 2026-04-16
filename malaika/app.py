@@ -22,6 +22,16 @@ from malaika.types import (
     Severity,
 )
 
+# ---------------------------------------------------------------------------
+# Sample data paths
+# ---------------------------------------------------------------------------
+
+_SAMPLES_DIR = Path(__file__).parent.parent / "data" / "samples"
+_SAMPLE_CHILD = str(_SAMPLES_DIR / "sample_child.jpg")
+_SAMPLE_CHEST = str(_SAMPLES_DIR / "sample_chest.jpg")
+_SAMPLE_FACE = str(_SAMPLES_DIR / "sample_face.jpg")
+_SAMPLE_SPECTROGRAM = str(_SAMPLES_DIR / "sample_spectrogram.png")
+
 logger = structlog.get_logger()
 
 # ---------------------------------------------------------------------------
@@ -253,7 +263,7 @@ class AppState:
         if not self.model_loaded or self.inference is None:
             return (
                 "Cannot start assessment: model not loaded. "
-                "Please check the model status above."
+                "Please wait for model to finish loading."
             )
 
         try:
@@ -466,21 +476,25 @@ def create_app(config: MalaikaConfig | None = None) -> Any:
         progress = app_state.progress_html()
         return msg, guidance_html, progress, _get_input_visibility(state)
 
+    def _check_engine(expected_state: IMCIState) -> str | None:
+        """Check engine is ready and on the expected state. Returns error or None."""
+        if app_state.engine is None:
+            return "No assessment in progress. Click 'Start New Assessment' first."
+        if app_state.current_state != expected_state:
+            return f"Not on {_STATE_LABELS.get(expected_state, expected_state.name)} step (current: {app_state.current_state.name})."
+        return None
+
     def on_assess_danger_signs(
         image: str | None,
         caregiver_text: str,
     ) -> tuple[str, str]:
         """Run danger signs assessment."""
-        if app_state.engine is None:
-            return "No assessment in progress. Start one first.", ""
-
-        if app_state.current_state != IMCIState.DANGER_SIGNS:
-            return f"Not on danger signs step (current: {app_state.current_state.name}).", ""
-
+        err = _check_engine(IMCIState.DANGER_SIGNS)
+        if err:
+            return err, ""
         try:
-            image_path = Path(image) if image else None
             finding = app_state.engine.assess_danger_signs(
-                image_path=image_path,
+                image_path=Path(image) if image else None,
                 caregiver_response=caregiver_text or None,
             )
             return _finding_to_markdown(finding), ""
@@ -491,20 +505,19 @@ def create_app(config: MalaikaConfig | None = None) -> Any:
     def on_assess_breathing(
         video: str | None,
         image: str | None,
+        spectrogram: str | None,
         audio: str | None,
         has_cough: bool,
     ) -> tuple[str, str]:
-        """Run breathing assessment."""
-        if app_state.engine is None:
-            return "No assessment in progress.", ""
-
-        if app_state.current_state != IMCIState.BREATHING:
-            return f"Not on breathing step (current: {app_state.current_state.name}).", ""
-
+        """Run breathing assessment with spectrogram support."""
+        err = _check_engine(IMCIState.BREATHING)
+        if err:
+            return err, ""
         try:
             finding = app_state.engine.assess_breathing(
                 video_path=Path(video) if video else None,
                 image_path=Path(image) if image else None,
+                spectrogram_path=Path(spectrogram) if spectrogram else None,
                 audio_path=Path(audio) if audio else None,
                 has_cough=has_cough,
             )
@@ -521,12 +534,9 @@ def create_app(config: MalaikaConfig | None = None) -> Any:
         caregiver_text: str,
     ) -> tuple[str, str]:
         """Run diarrhea assessment."""
-        if app_state.engine is None:
-            return "No assessment in progress.", ""
-
-        if app_state.current_state != IMCIState.DIARRHEA:
-            return f"Not on diarrhea step (current: {app_state.current_state.name}).", ""
-
+        err = _check_engine(IMCIState.DIARRHEA)
+        if err:
+            return err, ""
         try:
             finding = app_state.engine.assess_diarrhea(
                 image_path=Path(image) if image else None,
@@ -549,12 +559,9 @@ def create_app(config: MalaikaConfig | None = None) -> Any:
         measles_complications: bool,
     ) -> tuple[str, str]:
         """Run fever assessment."""
-        if app_state.engine is None:
-            return "No assessment in progress.", ""
-
-        if app_state.current_state != IMCIState.FEVER:
-            return f"Not on fever step (current: {app_state.current_state.name}).", ""
-
+        err = _check_engine(IMCIState.FEVER)
+        if err:
+            return err, ""
         try:
             finding = app_state.engine.assess_fever(
                 has_fever=has_fever,
@@ -574,12 +581,9 @@ def create_app(config: MalaikaConfig | None = None) -> Any:
         muac_mm: int | None,
     ) -> tuple[str, str]:
         """Run nutrition assessment."""
-        if app_state.engine is None:
-            return "No assessment in progress.", ""
-
-        if app_state.current_state != IMCIState.NUTRITION:
-            return f"Not on nutrition step (current: {app_state.current_state.name}).", ""
-
+        err = _check_engine(IMCIState.NUTRITION)
+        if err:
+            return err, ""
         try:
             muac = int(muac_mm) if muac_mm and muac_mm > 0 else None
             finding = app_state.engine.assess_nutrition(
@@ -595,12 +599,9 @@ def create_app(config: MalaikaConfig | None = None) -> Any:
         audio: str | None,
     ) -> tuple[str, str]:
         """Run heart assessment."""
-        if app_state.engine is None:
-            return "No assessment in progress.", ""
-
-        if app_state.current_state != IMCIState.HEART_MEMS:
-            return f"Not on heart step (current: {app_state.current_state.name}).", ""
-
+        err = _check_engine(IMCIState.HEART_MEMS)
+        if err:
+            return err, ""
         try:
             finding = app_state.engine.assess_heart(
                 audio_path=Path(audio) if audio else None,
@@ -896,36 +897,13 @@ def create_app(config: MalaikaConfig | None = None) -> Any:
 
             with gr.Tab("Assessment"):
 
-                # Demo mode banner (shown when model not loaded)
-                gr.HTML(
-                    '<div class="demo-banner">'
-                    '<div class="demo-title">'
-                    'Demo Mode -- Model Not Loaded</div>'
-                    '<div class="demo-desc">'
-                    'Click "Load Gemma 4 Model" below to enable full AI assessment. '
-                    'Requires GPU with 6GB+ VRAM.</div>'
-                    '</div>'
+                # Model status bar
+                model_status = gr.Textbox(
+                    label="Model Status",
+                    value="Loading Gemma 4 model...",
+                    interactive=False,
+                    lines=1,
                 )
-
-                # Model status and load button
-                with gr.Row():
-                    with gr.Column(scale=3):
-                        model_status = gr.Textbox(
-                            label="Model Status",
-                            value=(
-                                "Model not loaded. Click 'Load Gemma 4 Model' "
-                                "to initialize the AI engine."
-                            ),
-                            interactive=False,
-                            lines=2,
-                        )
-                    with gr.Column(scale=1, min_width=200):
-                        load_model_btn = gr.Button(
-                            "Load Gemma 4 Model",
-                            variant="primary",
-                            size="lg",
-                            elem_classes=["load-model-btn"],
-                        )
 
                 gr.HTML('<hr style="border:none;border-top:2px solid #e8f4fd;margin:16px 0;">')
 
@@ -987,12 +965,11 @@ def create_app(config: MalaikaConfig | None = None) -> Any:
                             label="Photo of child (for alertness)",
                             type="filepath",
                             sources=["upload", "webcam"],
+                            value=_SAMPLE_CHILD if Path(_SAMPLE_CHILD).exists() else None,
                         )
                     danger_text = gr.Textbox(
                         label="Caregiver response",
-                        placeholder=(
-                            "Can the child drink? Has the child had convulsions?"
-                        ),
+                        value="The child is alert but has a fever. Can drink but is irritable.",
                         lines=2,
                     )
                     danger_btn = gr.Button(
@@ -1015,6 +992,14 @@ def create_app(config: MalaikaConfig | None = None) -> Any:
                             label="Chest image (indrawing)",
                             type="filepath",
                             sources=["upload", "webcam"],
+                            value=_SAMPLE_CHEST if Path(_SAMPLE_CHEST).exists() else None,
+                        )
+                    with gr.Row():
+                        breathing_spectrogram = gr.Image(
+                            label="Breath sound spectrogram",
+                            type="filepath",
+                            sources=["upload"],
+                            value=_SAMPLE_SPECTROGRAM if Path(_SAMPLE_SPECTROGRAM).exists() else None,
                         )
                     breathing_audio = gr.Audio(
                         label="Breath sounds recording",
@@ -1023,7 +1008,7 @@ def create_app(config: MalaikaConfig | None = None) -> Any:
                     )
                     breathing_cough = gr.Checkbox(
                         label="Child has cough",
-                        value=False,
+                        value=True,
                     )
                     breathing_btn = gr.Button(
                         "Assess Breathing",
@@ -1041,23 +1026,22 @@ def create_app(config: MalaikaConfig | None = None) -> Any:
                             label="Image for dehydration signs (skin pinch, eyes)",
                             type="filepath",
                             sources=["upload", "webcam"],
+                            value=_SAMPLE_FACE if Path(_SAMPLE_FACE).exists() else None,
                         )
                     with gr.Row():
                         diarrhea_check = gr.Checkbox(
-                            label="Child has diarrhea", value=False,
+                            label="Child has diarrhea", value=True,
                         )
                         diarrhea_days = gr.Number(
                             label="Duration (days)",
-                            value=0, minimum=0, maximum=60,
+                            value=3, minimum=0, maximum=60,
                         )
                         diarrhea_blood = gr.Checkbox(
                             label="Blood in stool", value=False,
                         )
                     diarrhea_text = gr.Textbox(
                         label="Caregiver response",
-                        placeholder=(
-                            "How long has the diarrhea lasted? Any blood?"
-                        ),
+                        value="Diarrhea for 3 days, watery stools, child is thirsty and drinks eagerly.",
                         lines=2,
                     )
                     diarrhea_btn = gr.Button(
@@ -1073,18 +1057,18 @@ def create_app(config: MalaikaConfig | None = None) -> Any:
                     gr.Markdown("### Fever Assessment")
                     with gr.Row():
                         fever_check = gr.Checkbox(
-                            label="Child has fever", value=False,
+                            label="Child has fever", value=True,
                         )
                         fever_days = gr.Number(
                             label="Duration (days)",
-                            value=0, minimum=0, maximum=30,
+                            value=2, minimum=0, maximum=30,
                         )
                     with gr.Row():
                         fever_stiff_neck = gr.Checkbox(
                             label="Stiff neck", value=False,
                         )
                         fever_malaria = gr.Checkbox(
-                            label="In malaria risk area", value=False,
+                            label="In malaria risk area", value=True,
                         )
                     with gr.Row():
                         fever_measles = gr.Checkbox(
@@ -1109,10 +1093,11 @@ def create_app(config: MalaikaConfig | None = None) -> Any:
                             label="Photo of child (wasting assessment)",
                             type="filepath",
                             sources=["upload", "webcam"],
+                            value=_SAMPLE_CHILD if Path(_SAMPLE_CHILD).exists() else None,
                         )
                     nutrition_muac = gr.Number(
                         label="MUAC measurement (mm, 0 = not measured)",
-                        value=0, minimum=0, maximum=250,
+                        value=125, minimum=0, maximum=250,
                     )
                     nutrition_btn = gr.Button(
                         "Assess Nutrition",
@@ -1207,8 +1192,8 @@ def create_app(config: MalaikaConfig | None = None) -> Any:
         # Wire up event handlers
         # ------------------------------------------------------------------
 
-        # Model loading
-        load_model_btn.click(
+        # Auto-load model on app startup
+        app.load(
             fn=on_load_model,
             inputs=[],
             outputs=[model_status, progress_display],
@@ -1230,7 +1215,7 @@ def create_app(config: MalaikaConfig | None = None) -> Any:
 
         breathing_btn.click(
             fn=on_assess_breathing,
-            inputs=[breathing_video, breathing_image, breathing_audio, breathing_cough],
+            inputs=[breathing_video, breathing_image, breathing_spectrogram, breathing_audio, breathing_cough],
             outputs=[finding_display, status_display],
         )
 

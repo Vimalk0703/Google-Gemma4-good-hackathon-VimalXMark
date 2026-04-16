@@ -260,6 +260,7 @@ class IMCIEngine:
         video_path: Path | None = None,
         image_path: Path | None = None,
         audio_path: Path | None = None,
+        spectrogram_path: Path | None = None,
         has_cough: bool = False,
     ) -> ClinicalFinding:
         """Assess cough/breathing (IMCI step 2).
@@ -267,7 +268,8 @@ class IMCIEngine:
         Args:
             video_path: Video of chest for breathing rate.
             image_path: Image of chest for indrawing.
-            audio_path: Audio for breath sounds.
+            audio_path: Audio for breath sounds (converted to spectrogram automatically).
+            spectrogram_path: Pre-generated spectrogram image for breath sounds.
             has_cough: Whether cough was reported.
 
         Returns:
@@ -296,8 +298,16 @@ class IMCIEngine:
             perception_results.append(chest)
             has_indrawing = chest.indrawing_detected
 
-        # Breath sounds from audio
-        if audio_path is not None:
+        # Breath sounds from spectrogram image (preferred — uses fine-tuned adapter)
+        if spectrogram_path is not None:
+            sounds = audio.classify_breath_sounds_from_spectrogram_image(
+                spectrogram_path, self._inference,
+            )
+            perception_results.append(sounds)
+            has_stridor = sounds.stridor
+            has_wheeze = sounds.wheeze
+        # Breath sounds from audio (converts to spectrogram internally)
+        elif audio_path is not None:
             sounds = audio.classify_breath_sounds(audio_path, self._inference)
             perception_results.append(sounds)
             has_stridor = sounds.stridor

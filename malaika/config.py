@@ -44,8 +44,9 @@ class FeatureFlags:
 class ModelConfig:
     """Gemma 4 model configuration."""
 
-    # Model identity
-    model_name: str = "google/gemma-4-E4B-it"
+    # Model identity — use merged fine-tuned model if available, else base
+    model_name: str = "Vimal0703/malaika-breath-sounds-E4B-merged"
+    base_model_name: str = "google/gemma-4-E4B-it"
     quantize_4bit: bool = True
 
     # Whisper model for audio transcription (Gemma 4 does NOT support audio input)
@@ -61,6 +62,10 @@ class ModelConfig:
 
     # Cache
     max_cache_entries: int = 100  # Per-session cache limit
+
+    # LoRA adapter for breath sound classification (binary: normal vs abnormal)
+    breath_sounds_adapter: Path = field(default_factory=lambda: ADAPTERS_DIR)
+    enable_breath_sounds_adapter: bool = True
 
 
 # ---------------------------------------------------------------------------

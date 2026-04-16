@@ -171,6 +171,8 @@ def _description_from_parsed(parsed: dict) -> str:
 def classify_breath_sounds_from_spectrogram(
     audio_path: Path,
     inference: MalaikaInference,
+    *,
+    use_binary_prompt: bool = True,
 ) -> BreathSoundAssessment:
     """Classify breath sounds using spectrogram image analysis.
 
@@ -178,9 +180,13 @@ def classify_breath_sounds_from_spectrogram(
     This is the preferred approach — it preserves acoustic features
     that Whisper (a speech model) cannot capture for breath sounds.
 
+    When the fine-tuned LoRA adapter is loaded, uses the binary prompt
+    (normal vs abnormal) that matches the training instruction exactly.
+
     Args:
         audio_path: Path to audio file (WAV/MP3/OGG/FLAC).
         inference: Loaded MalaikaInference instance.
+        use_binary_prompt: Use binary prompt matching fine-tuned adapter (default True).
 
     Returns:
         BreathSoundAssessment with detected abnormal sounds.
@@ -192,7 +198,12 @@ def classify_breath_sounds_from_spectrogram(
         spec_path = audio_to_spectrogram(audio_path)
 
         # Step 2: Analyze spectrogram via Gemma 4 vision
-        prompt = PromptRegistry.get("breathing.classify_breath_sounds_from_spectrogram")
+        # Use binary prompt when fine-tuned adapter is loaded (matches training)
+        if use_binary_prompt:
+            prompt = PromptRegistry.get("breathing.classify_breath_sounds_binary")
+        else:
+            prompt = PromptRegistry.get("breathing.classify_breath_sounds_from_spectrogram")
+
         raw_output, validated, retries = inference.analyze_image(
             spec_path, prompt, input_hash=input_hash,
         )
@@ -208,6 +219,56 @@ def classify_breath_sounds_from_spectrogram(
             raw_model_output="",
         )
 
+    # Binary prompt returns {"abnormal": bool}, multi-class returns individual fields
+    if use_binary_prompt:
+        return _parse_binary_breath_result(raw_output, validated)
+    return _parse_breath_sound_result(raw_output, validated)
+
+
+def classify_breath_sounds_from_spectrogram_image(
+    spectrogram_path: Path,
+    inference: MalaikaInference,
+    *,
+    use_binary_prompt: bool = True,
+) -> BreathSoundAssessment:
+    """Classify breath sounds from an existing spectrogram image.
+
+    Skips audio-to-spectrogram conversion — use when a spectrogram
+    PNG is already available (e.g., uploaded directly by user).
+
+    Args:
+        spectrogram_path: Path to spectrogram PNG image.
+        inference: Loaded MalaikaInference instance.
+        use_binary_prompt: Use binary prompt matching fine-tuned adapter.
+
+    Returns:
+        BreathSoundAssessment with detected abnormal sounds.
+    """
+    if not spectrogram_path.exists():
+        raise FileNotFoundError(f"Spectrogram not found: {spectrogram_path}")
+
+    input_hash = _file_hash(spectrogram_path)
+
+    try:
+        if use_binary_prompt:
+            prompt = PromptRegistry.get("breathing.classify_breath_sounds_binary")
+        else:
+            prompt = PromptRegistry.get("breathing.classify_breath_sounds_from_spectrogram")
+
+        raw_output, validated, retries = inference.analyze_image(
+            spectrogram_path, prompt, input_hash=input_hash,
+        )
+    except Exception as e:
+        logger.error("spectrogram_image_analysis_failed", error=str(e))
+        return BreathSoundAssessment(
+            status=FindingStatus.UNCERTAIN,
+            confidence=0.0,
+            description=f"Spectrogram analysis failed: {e}",
+            raw_model_output="",
+        )
+
+    if use_binary_prompt:
+        return _parse_binary_breath_result(raw_output, validated)
     return _parse_breath_sound_result(raw_output, validated)
 
 
@@ -265,6 +326,37 @@ def classify_breath_sounds(
         )
 
     return _parse_breath_sound_result(raw_output, validated)
+
+
+def _parse_binary_breath_result(
+    raw_output: str,
+    validated: ValidatedOutput,
+) -> BreathSoundAssessment:
+    """Parse binary (normal/abnormal) output into BreathSoundAssessment.
+
+    The fine-tuned model returns: {"abnormal": bool, "confidence": float, "description": str}
+    We map abnormal=true to crackles=true (most common abnormal finding in training data).
+    """
+    parsed = validated.parsed
+    status = _status_from_validated(validated)
+    confidence = _confidence_from_parsed(parsed)
+
+    is_abnormal = bool(parsed.get("abnormal", False))
+
+    if status == FindingStatus.DETECTED and not is_abnormal:
+        status = FindingStatus.NOT_DETECTED
+
+    return BreathSoundAssessment(
+        status=status,
+        confidence=confidence,
+        description=_description_from_parsed(parsed),
+        raw_model_output=raw_output,
+        # Binary model: if abnormal, flag crackles (dominant class in training)
+        wheeze=False,
+        stridor=False,
+        grunting=False,
+        crackles=is_abnormal,
+    )
 
 
 def _parse_breath_sound_result(

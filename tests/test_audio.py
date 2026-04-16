@@ -597,14 +597,14 @@ class TestSpectrogramBreathSounds:
         temp_audio: Path,
         tmp_path: Path,
     ) -> None:
-        """classify_breath_sounds_from_spectrogram with mocked spectrogram generation."""
+        """classify_breath_sounds_from_spectrogram with binary prompt (matches fine-tuned adapter)."""
         spec_path = tmp_path / "spec.png"
         spec_path.write_bytes(b"fake png")
 
+        # Binary output format matching fine-tuned LoRA adapter
         parsed = {
-            "wheeze": True, "stridor": False, "grunting": False,
-            "crackles": True, "normal": False, "confidence": 0.85,
-            "description": "Wheeze and crackles in spectrogram",
+            "abnormal": True, "confidence": 0.85,
+            "description": "Abnormal: crackles detected in spectrogram",
         }
         validated = ValidatedOutput(status="valid", parsed=parsed, raw_output=json.dumps(parsed))
 
@@ -615,7 +615,7 @@ class TestSpectrogramBreathSounds:
             ):
                 result = classify_breath_sounds_from_spectrogram(temp_audio, mock_inference)
 
-        assert result.wheeze is True
+        # Binary abnormal=true maps to crackles=true (dominant class in training data)
         assert result.crackles is True
         assert result.status == FindingStatus.DETECTED
         assert result.confidence == 0.85

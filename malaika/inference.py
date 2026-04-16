@@ -149,9 +149,11 @@ class MalaikaInference:
             else:
                 self._device = "cpu"
 
+            model_name = self._config.model.model_name
+
             logger.info(
                 "loading_model",
-                model_name=self._config.model.model_name,
+                model_name=model_name,
                 device=self._device,
                 quantize_4bit=self._config.model.quantize_4bit,
             )
@@ -171,15 +173,51 @@ class MalaikaInference:
                 except ImportError:
                     logger.warning("bitsandbytes_unavailable", msg="Falling back to full precision")
 
-            self._processor = AutoProcessor.from_pretrained(
-                self._config.model.model_name,
-                trust_remote_code=True,
-            )
-            self._model = AutoModelForCausalLM.from_pretrained(
-                self._config.model.model_name,
-                trust_remote_code=True,
-                **load_kwargs,
-            )
+            # Try merged model first, fall back to base model
+            try:
+                self._processor = AutoProcessor.from_pretrained(
+                    model_name, trust_remote_code=True,
+                )
+                self._model = AutoModelForCausalLM.from_pretrained(
+                    model_name, trust_remote_code=True, **load_kwargs,
+                )
+                logger.info("model_loaded_merged", model_name=model_name)
+            except Exception as e:
+                if model_name != self._config.model.base_model_name:
+                    logger.warning(
+                        "merged_model_unavailable",
+                        error=str(e),
+                        fallback=self._config.model.base_model_name,
+                    )
+                    model_name = self._config.model.base_model_name
+                    self._processor = AutoProcessor.from_pretrained(
+                        model_name, trust_remote_code=True,
+                    )
+                    self._model = AutoModelForCausalLM.from_pretrained(
+                        model_name, trust_remote_code=True, **load_kwargs,
+                    )
+                else:
+                    raise
+
+            # Load LoRA adapter only if NOT using merged model (merged has LoRA baked in)
+            if model_name == self._config.model.base_model_name:
+                adapter_path = self._config.model.breath_sounds_adapter
+                if (
+                    self._config.model.enable_breath_sounds_adapter
+                    and adapter_path.exists()
+                    and (adapter_path / "adapter_config.json").exists()
+                ):
+                    try:
+                        from peft import PeftModel
+
+                        self._model = PeftModel.from_pretrained(self._model, str(adapter_path))
+                        logger.info("lora_adapter_loaded", adapter_path=str(adapter_path))
+                    except ImportError:
+                        logger.warning("peft_not_installed", msg="LoRA adapter skipped — install peft")
+                    except Exception as e:
+                        logger.warning("lora_adapter_failed", error=str(e))
+            else:
+                logger.info("lora_skip_merged_model", msg="Using merged model — LoRA already baked in")
 
             self._model_loaded = True
             self._cache.clear()
@@ -210,6 +248,26 @@ class MalaikaInference:
 
         logger.info("model_unloaded")
 
+    def _extract_images_from_messages(
+        self, messages: list[dict[str, Any]],
+    ) -> list[Any]:
+        """Extract image paths from multimodal messages and load as PIL Images."""
+        images: list[Any] = []
+        try:
+            from PIL import Image
+        except ImportError:
+            return images
+
+        for msg in messages:
+            content = msg.get("content")
+            if isinstance(content, list):
+                for part in content:
+                    if isinstance(part, dict) and part.get("type") == "image":
+                        image_path = part.get("image", "")
+                        if image_path and Path(image_path).exists():
+                            images.append(Image.open(image_path).convert("RGB"))
+        return images
+
     def generate(
         self,
         messages: list[dict[str, Any]],
@@ -217,6 +275,9 @@ class MalaikaInference:
         temperature: float | None = None,
     ) -> str:
         """Core generation method. Sends messages to Gemma 4 and returns raw text.
+
+        Handles text-only and multimodal (image) inputs. Images referenced
+        in messages are loaded from disk and passed through the processor.
 
         Args:
             messages: Chat messages in Gemma 4 format.
@@ -240,16 +301,31 @@ class MalaikaInference:
                 import torch
 
                 with torch.inference_mode():
-                    inputs = self._processor.apply_chat_template(
+                    # Extract images from multimodal messages
+                    images = self._extract_images_from_messages(messages)
+
+                    # Build prompt text from chat template
+                    prompt_text = self._processor.apply_chat_template(
                         messages,
-                        return_tensors="pt",
                         add_generation_prompt=True,
+                        tokenize=False,
                     )
 
-                    if isinstance(inputs, dict):
-                        inputs = {k: v.to(self._model.device) for k, v in inputs.items()}
-                    else:
-                        inputs = inputs.to(self._model.device)
+                    # Tokenize with processor — pass images if present
+                    processor_kwargs: dict[str, Any] = {
+                        "text": prompt_text,
+                        "return_tensors": "pt",
+                    }
+                    if images:
+                        processor_kwargs["images"] = images
+
+                    inputs = self._processor(**processor_kwargs)
+
+                    # Move to model device
+                    inputs = {
+                        k: v.to(self._model.device) if hasattr(v, "to") else v
+                        for k, v in inputs.items()
+                    }
 
                     gen_kwargs: dict[str, Any] = {
                         "max_new_tokens": max_tokens,
@@ -260,15 +336,13 @@ class MalaikaInference:
                     else:
                         gen_kwargs["do_sample"] = False
 
-                    if isinstance(inputs, dict):
-                        outputs = self._model.generate(**inputs, **gen_kwargs)
-                        input_len = inputs["input_ids"].shape[-1]
-                    else:
-                        outputs = self._model.generate(inputs, **gen_kwargs)
-                        input_len = inputs.shape[-1]
+                    outputs = self._model.generate(**inputs, **gen_kwargs)
+                    input_len = inputs["input_ids"].shape[-1]
 
                     generated_tokens = outputs[0][input_len:]
-                    response = self._processor.decode(generated_tokens, skip_special_tokens=True)
+                    response = self._processor.decode(
+                        generated_tokens, skip_special_tokens=True,
+                    )
 
                     cost.tokens_in = input_len
                     cost.tokens_out = len(generated_tokens)

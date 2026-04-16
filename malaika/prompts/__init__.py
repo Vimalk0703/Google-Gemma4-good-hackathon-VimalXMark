@@ -70,4 +70,17 @@ class PromptRegistry:
         cls._prompts.clear()
 
 
+# Import all prompt modules so they register on startup
+from malaika.prompts import (  # noqa: F401
+    breathing,
+    danger_signs,
+    diarrhea,
+    fever,
+    heart,
+    nutrition,
+    speech,
+    system,
+    treatment,
+)
+
 __all__ = ["PromptRegistry", "PromptTemplate"]

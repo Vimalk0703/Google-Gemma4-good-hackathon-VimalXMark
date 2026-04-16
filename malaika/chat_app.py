@@ -745,7 +745,7 @@ def create_chat_app(config: MalaikaConfig | None = None) -> Any:
                 placeholder="Type your message or upload a photo...",
                 file_count="single",
                 file_types=["image"],
-                sources=["upload", "webcam"],
+                sources=["upload"],
             ),
             title=None,
             examples=[

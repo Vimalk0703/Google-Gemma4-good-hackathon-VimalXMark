@@ -333,12 +333,12 @@ def process_message(
 
     # --- DANGER SIGNS: QUESTIONS ---
     if step == "danger_signs_questions":
-        lower = user_text.lower()
-
-        # Parse caregiver response about drinking/vomiting
-        if any(w in lower for w in ["no", "cannot", "can't", "unable", "won't"]):
+        # "Can your child drink?" — negative means unable to drink
+        if _is_negative_response(user_text):
             session.findings["unable_to_drink"] = True
-        if any(w in lower for w in ["vomit", "throw up", "throws up"]):
+        elif _has_keyword(user_text, ["cannot", "can't", "unable", "won't drink", "refuses"]):
+            session.findings["unable_to_drink"] = True
+        if _has_keyword(user_text, ["vomit", "throw up", "throws up"]):
             session.findings["vomits_everything"] = True
 
         session.advance()  # -> breathing_photo
@@ -399,14 +399,15 @@ def process_message(
 
     # --- BREATHING: QUESTIONS ---
     if step == "breathing_questions":
-        lower = user_text.lower()
-
-        if any(w in lower for w in ["cough", "yes", "fast", "noisy", "wheez", "difficult"]):
-            session.findings["has_cough"] = True
-        if any(w in lower for w in ["wheez", "whistl"]):
-            session.findings["has_wheeze"] = True
-        if any(w in lower for w in ["stridor", "harsh", "high pitch"]):
-            session.findings["has_stridor"] = True
+        if _is_negative_response(user_text):
+            pass  # No cough, no issues
+        else:
+            if _has_keyword(user_text, ["cough", "fast", "noisy", "difficult"]) or user_text.lower().strip() in ("yes", "yes."):
+                session.findings["has_cough"] = True
+            if _has_keyword(user_text, ["wheez", "whistl"]):
+                session.findings["has_wheeze"] = True
+            if _has_keyword(user_text, ["stridor", "harsh"]):
+                session.findings["has_stridor"] = True
 
         # Try to extract breathing rate if mentioned
         rate = _extract_number(user_text)
@@ -425,9 +426,7 @@ def process_message(
 
     # --- DIARRHEA: PHOTO ---
     if step == "diarrhea_photo":
-        lower = user_text.lower()
-
-        if any(w in lower for w in ["no", "not", "don't", "doesn't", "hasn't"]):
+        if _is_negative_response(user_text):
             session.findings["has_diarrhea"] = False
             session.advance()  # skip diarrhea_questions
             session.advance()  # -> fever_questions
@@ -462,12 +461,10 @@ def process_message(
 
     # --- DIARRHEA: QUESTIONS ---
     if step == "diarrhea_questions":
-        lower = user_text.lower()
-
         days = _extract_number(user_text)
         if days and days > 0:
             session.findings["diarrhea_days"] = days
-        if any(w in lower for w in ["blood", "bloody"]):
+        if _has_keyword(user_text, ["blood", "bloody"]):
             session.findings["blood_in_stool"] = True
 
         session.advance()  # -> fever_questions
@@ -481,9 +478,7 @@ def process_message(
 
     # --- FEVER: QUESTIONS ---
     if step == "fever_questions":
-        lower = user_text.lower()
-
-        if any(w in lower for w in ["no", "not", "doesn't", "hasn't", "don't"]):
+        if _is_negative_response(user_text):
             session.findings["has_fever"] = False
             session.advance()  # -> fever_followup
             session.advance()  # -> nutrition_photo
@@ -508,10 +503,12 @@ def process_message(
 
     # --- FEVER: FOLLOW-UP ---
     if step == "fever_followup":
-        lower = user_text.lower()
-        if any(w in lower for w in ["stiff", "yes"]):
+        if _has_keyword(user_text, ["stiff neck", "stiff"]) and not _is_negative_response(user_text):
             session.findings["stiff_neck"] = True
-        if any(w in lower for w in ["malaria", "risk", "area", "endemic", "yes"]):
+        if _has_keyword(user_text, ["malaria", "endemic"]):
+            session.findings["malaria_risk"] = True
+        elif "yes" in user_text.lower().split():
+            # Only set malaria if they clearly say yes
             session.findings["malaria_risk"] = True
 
         session.advance()  # -> nutrition_photo
@@ -536,8 +533,8 @@ def process_message(
             )
 
             if obs:
-                lower_obs = obs.lower()
-                if any(w in lower_obs for w in ["wasting", "malnourish", "thin", "emaciated"]):
+                # Only flag wasting if the model says it IS present (not "no wasting")
+                if _has_keyword(obs, ["wasting", "malnourish", "emaciated", "severely thin"]):
                     session.findings["visible_wasting"] = True
 
                 session.advance()
@@ -638,6 +635,37 @@ def _extract_number(text: str) -> int | None:
     if match:
         return int(match.group(1))
     return None
+
+
+def _has_keyword(text: str, keywords: list[str]) -> bool:
+    """Check if text contains keywords WITHOUT preceding negation.
+
+    Handles: 'no blood', 'not bloody', 'no stiff neck', 'hasn't vomited'
+    Returns True only if keyword appears in an affirmative context.
+    """
+    lower = text.lower()
+    negation_words = ["no ", "not ", "don't ", "doesn't ", "hasn't ", "haven't ",
+                      "isn't ", "aren't ", "won't ", "can't ", "cannot ", "without "]
+
+    for kw in keywords:
+        if kw not in lower:
+            continue
+        # Find all occurrences of keyword
+        idx = lower.find(kw)
+        while idx != -1:
+            # Check if preceded by negation within 15 chars
+            prefix = lower[max(0, idx - 15):idx]
+            negated = any(neg in prefix for neg in negation_words)
+            if not negated:
+                return True
+            idx = lower.find(kw, idx + 1)
+    return False
+
+
+def _is_negative_response(text: str) -> bool:
+    """Check if the response is a clear 'no' answer."""
+    lower = text.lower().strip()
+    return lower in ("no", "nope", "no.", "nah") or lower.startswith("no ") or lower.startswith("no,")
 
 
 # ---------------------------------------------------------------------------

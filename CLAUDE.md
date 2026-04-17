@@ -20,16 +20,22 @@
 ```
 malaika/                  # Main Python package
   __init__.py
+  skills.py               # SkillRegistry — 12 clinical skills, BeliefState, SkillResult
+  chat_engine.py          # Agentic IMCI conversation — orchestrates skills, emits events
+  voice_app.py            # FastAPI server — REST + WebSocket voice endpoints
+  voice_session.py        # Real-time voice pipeline — sentence TTS, filler audio, events
   inference.py            # MalaikaInference — single Gemma 4 model, all modalities
-  imci_engine.py          # IMCI protocol state machine (deterministic)
+  imci_engine.py          # IMCI protocol state machine (deterministic, Gradio path)
   imci_protocol.py        # WHO threshold constants and classification logic
   vision.py               # Image/video analysis via Gemma 4
   audio.py                # Audio analysis (breath sounds, speech) via Gemma 4
   tts.py                  # Piper TTS output (offline text-to-speech)
-  app.py                  # Gradio UI entry point
+  app.py                  # Gradio UI entry point (form-based)
   config.py               # Feature flags, model paths, thresholds
   types.py                # Shared type definitions (dataclasses, enums)
   utils.py                # Shared utilities (logging, file handling)
+  static/
+    index.html            # Voice UI — orb, skill cards, classification cards, progress bar
 
   prompts/                # Versioned, typed prompt templates (NEVER hardcode prompts)
     __init__.py           # PromptRegistry — central prompt discovery
@@ -61,15 +67,20 @@ malaika/                  # Main Python package
     golden_scenarios.py   # 20+ WHO IMCI test scenarios with expected outcomes
     evaluator.py          # Run model against golden set, produce accuracy report
 
-tests/                    # All tests (mirrors malaika/ structure)
+tests/                    # All tests (mirrors malaika/ structure, 104+ passing)
   test_inference.py
-  test_imci_engine.py
-  test_imci_protocol.py
+  test_imci_engine.py     # 26 tests — state machine, assessments, findings
+  test_imci_protocol.py   # 78 tests — WHO thresholds, classifications, golden scenarios
   test_vision.py
   test_audio.py
   test_prompts.py         # Prompt rendering and parsing tests
   test_guards.py          # Input/content/output guard tests
   conftest.py             # Shared fixtures
+
+notebooks/                # Colab notebooks for running + fine-tuning
+  10_voice_agent_colab.ipynb  # Launch voice agent on Colab T4 (primary demo)
+  09_chat_app_colab.ipynb     # Gradio chat app on Colab
+  08_colab_run_app.ipynb      # Full app on Colab
 
 scripts/                  # One-off scripts (data prep, benchmarks, exports)
 adapters/                 # Fine-tuned LoRA adapter weights
@@ -108,7 +119,11 @@ START -> DANGER_SIGNS -> BREATHING -> DIARRHEA -> FEVER -> NUTRITION -> [HEART_M
 
 ### Key Commands
 ```bash
-# Run the app
+# Run the voice agent (primary demo — FastAPI + voice UI)
+# Requires: model loaded via Colab notebook or local GPU
+# See notebooks/10_voice_agent_colab.ipynb
+
+# Run the Gradio app (form-based UI)
 python -m malaika.app
 
 # Run tests
@@ -138,13 +153,15 @@ enable_multilingual: true   # Multi-language support
 
 ---
 
-## Production AI Patterns (Inspired by 9-Layer Architecture)
+## Production AI Patterns
 
 These patterns elevate Malaika from hackathon code to production-grade AI:
 
-1. **Prompts as Code**: All Gemma 4 prompts are versioned `PromptTemplate` objects in `malaika/prompts/`. Never hardcode prompt strings in service logic. See [docs/PROMPT_ENGINEERING.md](docs/PROMPT_ENGINEERING.md).
+1. **Skills-Based Agent Architecture** (`malaika/skills.py`): 12 clinical skills registered in `SkillRegistry`. Each skill has typed I/O, maps to an IMCI step, and produces structured `SkillResult` with confidence scores. `BeliefState` tracks confirmed/uncertain/pending findings. `ChatEngine` orchestrates skills and emits structured events (`skill_invoked`, `skill_result`, `classification`, `step_change`, `finding`, `image_request`, `assessment_complete`, `danger_alert`). Showcases Gemma 4's 1200% improvement in agentic tool use.
 
-2. **Three-Layer Security Guards** (`malaika/guards/`): Every perception call passes through all three guards in sequence:
+2. **Prompts as Code**: All Gemma 4 prompts are versioned `PromptTemplate` objects in `malaika/prompts/`. Never hardcode prompt strings in service logic. See [docs/PROMPT_ENGINEERING.md](docs/PROMPT_ENGINEERING.md).
+
+3. **Three-Layer Security Guards** (`malaika/guards/`): Every perception call passes through all three guards in sequence:
    - `input_guard.py` — file validation, size limits, format by magic bytes (not extension)
    - `content_filter.py` — prompt injection defense, PII scrubbing before model sees input
    - `output_validator.py` — JSON schema validation, confidence gating, physiological range checks
@@ -182,25 +199,30 @@ These patterns elevate Malaika from hackathon code to production-grade AI:
 
 This boundary is sacred. Never blur it.
 
-| Gemma 4 (AI Intelligence) | Deterministic Code (Logic) |
-|---------------------------|---------------------------|
-| Understand speech in any language | Parse Gemma's response into structured data |
-| Analyze images (chest indrawing, skin color, wasting) | Compare values against WHO thresholds |
-| Classify breath sounds (wheeze, stridor, grunting) | Route IMCI state machine transitions |
-| Count breathing rate from video | Apply `if rate >= 50: classify("fast_breathing")` |
-| Generate treatment instructions in local language | Select treatment template based on classification |
+| Gemma 4 (AI Perception — via Skills) | Deterministic Code (Classification — imci_protocol.py) |
+|---------------------------------------|--------------------------------------------------------|
+| Understand speech in any language (`parse_caregiver_response`) | Parse findings into `_fields_answered` set |
+| Analyze images for alertness (`assess_alertness`) | Compare against WHO danger sign criteria (p.2) |
+| Detect chest indrawing (`detect_chest_indrawing`) | Apply `if has_indrawing: classify("severe_pneumonia")` |
+| Classify breath sounds (`classify_breath_sounds`) | Route IMCI state machine transitions |
+| Count breathing rate from video (`count_breathing_rate`) | Apply `if rate >= 50: classify("fast_breathing")` |
+| Assess dehydration from photo (`assess_dehydration_signs`) | Count dehydration signs → severity level |
+| Generate treatment instructions (`generate_treatment`) | Select treatment template based on classification |
+| Emit structured events for UI | Render skill cards, classification cards, progress bar |
 
 ---
 
 ## Sprint Timeline (36 days — May 18 deadline)
 
-| Phase | Dates | Focus |
-|-------|-------|-------|
-| 1: Foundation | Apr 12-18 | Gemma 4 running, data ready, basic pipeline |
-| 2: Core IMCI | Apr 19-25 | Full assessment with vision + audio |
-| 3: Multilingual + Polish | Apr 26-May 2 | Languages, stability, stress testing |
-| 4: Fine-tuning + Deploy | May 3-9 | LoRA adapters, live URL, phone demo |
-| 5: Video + Submit | May 10-18 | Video production, writeup, submission |
+| Phase | Dates | Focus | Status |
+|-------|-------|-------|--------|
+| 1: Foundation | Apr 12-18 | Gemma 4 running, data ready, basic pipeline | DONE |
+| 2: Core IMCI | Apr 19-25 | Full assessment with vision + audio | IN PROGRESS |
+| 3: Multilingual + Polish | Apr 26-May 2 | Languages, stability, stress testing | |
+| 4: Fine-tuning + Deploy | May 3-9 | LoRA adapters, live URL, phone demo | |
+| 5: Video + Submit | May 10-18 | Video production, writeup, submission | |
+
+**Phase 1 Completed**: 104+ tests passing, 21/21 golden scenarios, skills-based agent architecture, voice pipeline with sentence-level TTS, Colab deployment via ngrok, fine-tuning v1-v5 (spectrogram approach).
 
 ---
 

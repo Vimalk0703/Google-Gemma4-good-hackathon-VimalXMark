@@ -32,7 +32,7 @@
 - [x] 213 local tests passing
 - [x] Swahili treatment generation confirmed working
 
-### Day 4 (Apr 14) — IN PROGRESS
+### Day 4 (Apr 14) — COMPLETED
 - [x] Spectrogram pipeline: audio → mel-spectrogram PNG → Gemma 4 vision
 - [x] Fixed treatment prompt (Swahili was returning JSON instead of text)
 - [x] Spectrogram-based breath sound prompt + classification function
@@ -46,7 +46,25 @@
 - [x] LoRA fine-tuning v2: r=32, 300 steps → 50% (100% crackle detection)
 - [x] Adapter saved: 90.3 MB
 - [ ] Download jaundice dataset, test with real clinical images
-- [ ] Test Gradio app end-to-end on GPU machine
+
+### Day 5 (Apr 15) — COMPLETED
+- [x] Real-time voice pipeline — Tasha-style single WebSocket architecture
+- [x] voice_app.py (FastAPI), voice_session.py (WebSocket handler)
+- [x] Smallest AI Pulse STT + Waves TTS integration
+- [x] Browser VAD (Voice Activity Detection) + audio streaming
+- [x] static/index.html — orb UI, camera capture, text input
+
+### Day 5-6 (Apr 16) — COMPLETED
+- [x] **Agentic architecture overhaul** — skills-based clinical agent
+- [x] NEW: malaika/skills.py — 12 clinical skills, SkillRegistry, BeliefState, SkillResult
+- [x] CHANGED: chat_engine.py — process() returns structured events, findings-based step advancement + message-count fallback, per-step WHO classification, danger sign escalation
+- [x] CHANGED: voice_session.py — sentence-level TTS streaming, filler audio during thinking, event forwarding to browser
+- [x] CHANGED: static/index.html — IMCI progress bar, skill execution cards, classification cards (RED/YELLOW/GREEN), image request cards, finding chips, danger alert banner, assessment complete card, audio playback queue
+- [x] NEW: notebooks/10_voice_agent_colab.ipynb — Colab T4 deployment via ngrok
+- [x] 104 tests passing (78 protocol + 26 engine), zero regressions
+- [x] Full flow tested: 12mo child → lethargic → RED Urgent Referral, fever + malaria → YELLOW Malaria
+- [x] Graceful degradation without SMALLEST_API_KEY (text + image still work)
+- [ ] Test voice agent end-to-end on Colab with real model
 
 ---
 
@@ -77,7 +95,7 @@ Update this weekly. Score yourself honestly 1-10.
 |-----------|--------|---------------|--------|-----|
 | **Impact & Vision** (40%) | Highest | 8/10 | 9/10 | Need video showing human story |
 | **Video Pitch** (30%) | High | 1/10 | 9/10 | **BIGGEST GAP** — not started |
-| **Technical Depth** (30%) | High | 9/10 | 9/10 | Fine-tuning done (50%, 100% crackle), need phone demo |
+| **Technical Depth** (30%) | High | 9/10 | 9/10 | Agentic skills arch, fine-tuning done, need phone demo |
 
 ### Impact & Vision — How to reach 9/10
 - [x] Problem: 4.9M children/year (WHO data, March 2026)
@@ -98,12 +116,15 @@ Update this weekly. Score yourself honestly 1-10.
 - [ ] Upload to YouTube (public, unlisted ok)
 
 ### Technical Depth — How to reach 9/10
-- [x] Multimodal: vision + audio + speech + video
+- [x] Multimodal: vision + audio (spectrogram) + speech + video
 - [x] IMCI state machine with WHO citations
-- [x] 213 tests, 97% protocol coverage
+- [x] 104+ tests, 97% protocol coverage, 21/21 golden scenarios
 - [x] Production patterns: guards, observability, versioned prompts
-- [ ] Fine-tuned LoRA adapters deployed
-- [ ] Accuracy metrics on 20+ scenarios (run with real model)
+- [x] Agentic skills architecture: 12 skills, BeliefState, structured events
+- [x] Voice pipeline: sentence-level TTS, filler audio, WebSocket
+- [x] Fine-tuned LoRA adapter: breath sounds (50% accuracy, 100% crackle)
+- [x] Colab deployment: notebooks/10_voice_agent_colab.ipynb via ngrok
+- [ ] Fine-tuned adapter deployed in live demo
 - [ ] On-device proof (E2B on phone)
 - [ ] Performance benchmarks (latency, VRAM, tok/s)
 

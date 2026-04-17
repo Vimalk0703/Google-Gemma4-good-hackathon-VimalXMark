@@ -72,10 +72,12 @@ A mother's child is sick. She's scared. No clinic. No internet. She opens Malaik
 - Detects **chest indrawing** (subcostal retraction — a WHO danger sign)
 - Assesses **skin color**: cyanosis (blue = low oxygen), jaundice (yellow = liver), pallor (pale = anemia)
 
-#### Step 2 — LISTEN (Gemma 4 Native Audio)
-- Microphone analyzes **breathing sounds**: wheezing, grunting, stridor
+#### Step 2 — LISTEN (Gemma 4 Vision on Spectrograms)
+- Microphone records breathing sounds → converted to **mel-spectrogram** (50-4000 Hz, 128 bands)
+- **Fine-tuned LoRA adapter** ([`Vimal0703/malaika-breath-sounds-E4B-merged`](https://huggingface.co/Vimal0703/malaika-breath-sounds-E4B-merged)) classifies: wheezing, grunting, stridor, crackles
+- Achieves **100% crackle detection** on ICBHI dataset; 50% overall accuracy with LoRA v2
 - Each sound maps to a specific IMCI clinical indicator
-- Detects **cough patterns** and severity
+- This is a novel approach: audio → image → vision model, enabling breath sound classification on a vision-only fine-tuned model
 
 #### Step 3 — ASK (Voice Conversation)
 > "Is your child able to drink or breastfeed?"
@@ -174,36 +176,42 @@ Classification with clear next steps:
 └─────────────────────────────────────────────────────┘
 ```
 
-### Specialized Tools (10+)
+### Clinical Skills (12 registered in `SkillRegistry`)
 
-| Tool | What It Does | Gemma 4 Feature |
-|------|-------------|-----------------|
-| `count_breathing_rate()` | Real-time chest wall movement analysis from video | Vision (E4B) |
-| `detect_chest_indrawing()` | Subcostal retraction detection | Vision (E4B) |
-| `analyze_skin_color()` | Cyanosis, jaundice, pallor detection | Vision (E4B) + Unsloth fine-tuned |
-| `classify_breath_sounds()` | Wheezing, grunting, stridor classification | Native Audio (E4B) + Unsloth fine-tuned |
-| `assess_cough()` | Cough pattern analysis (duration, severity) | Native Audio (E4B) |
-| `collect_symptoms()` | Voice-based symptom questionnaire in local language | Native Audio + multilingual |
-| `assess_dehydration()` | Guided skin pinch test via camera + voice | Vision + voice guidance |
-| `classify_pneumonia()` | IMCI pneumonia decision tree | Function calling chain |
-| `classify_diarrhea()` | IMCI diarrhea/dehydration decision tree | Function calling chain |
-| `classify_fever()` | IMCI fever/malaria decision tree | Function calling chain |
-| `assess_nutrition()` | Visual MUAC estimation + guided measurement | Vision + voice |
-| `aggregate_danger_signs()` | Multi-signal fusion → overall severity | Agentic reasoning |
-| `generate_treatment_plan()` | Step-by-step voice instructions for home treatment | TTS + function calling |
-| `generate_referral()` | Urgency classification + transport guidance | Agentic reasoning |
+All skills are defined in `malaika/skills.py` with typed I/O contracts, mapped to IMCI steps.
 
-### Fine-Tuning Strategy (Mark's RTX 3060, 12GB VRAM)
+| Skill | What It Does | Gemma 4 Feature |
+|-------|-------------|-----------------|
+| `assess_alertness` | Detect alert/lethargic/unconscious from photo | Vision (E4B) |
+| `assess_skin_color` | Cyanosis, jaundice, pallor detection | Vision (E4B) |
+| `detect_chest_indrawing` | Subcostal retraction detection from chest photo | Vision (E4B) |
+| `count_breathing_rate` | Real-time chest wall movement from video | Vision (E4B) |
+| `classify_breath_sounds` | Wheezing, grunting, stridor, crackles from spectrogram | Vision (E4B) + **[Unsloth fine-tuned LoRA](https://huggingface.co/Vimal0703/malaika-breath-sounds-E4B-merged)** |
+| `assess_dehydration_signs` | Sunken eyes, skin dryness from face photo | Vision (E4B) |
+| `assess_wasting` | Visible severe wasting from body photo | Vision (E4B) |
+| `detect_edema` | Bilateral pitting edema from feet photo | Vision (E4B) |
+| `parse_caregiver_response` | Extract clinical intent + entities from speech | Text reasoning + multilingual |
+| `classify_imci_step` | Run WHO classification (deterministic code) | imci_protocol.py (no LLM) |
+| `generate_treatment` | Step-by-step caregiver instructions | Text + TTS |
+| `speak_to_caregiver` | Empathetic voice response generation | Text reasoning |
 
+### Fine-Tuning — Results
+
+Merged model: [`Vimal0703/malaika-breath-sounds-E4B-merged`](https://huggingface.co/Vimal0703/malaika-breath-sounds-E4B-merged)
+
+| LoRA Iteration | Config | Training Data | Result |
+|---------------|--------|---------------|--------|
+| v1 | r=8, 100 steps | ICBHI 2017 spectrograms | 20% accuracy (too weak) |
+| v2 | r=32, 300 steps | ICBHI 2017 spectrograms | **50% accuracy, 100% crackle detection** |
+| Adapter size | — | — | 90.3 MB |
+
+**Novel approach**: Audio → mel-spectrogram PNG (librosa, 50-4000 Hz, 128 bands) → Gemma 4 E4B vision → classification. This lets a vision model classify breath sounds without native audio processing — works offline on any device with a camera/mic.
+
+Additional adapters planned:
 | LoRA Adapter | Training Data | Purpose |
 |-------------|---------------|---------|
-| Respiratory sounds | ICBHI 2017 dataset (920 recordings, open) | Classify wheezing, crackles, stridor, normal |
 | Skin assessment | Open dermatology + neonatal datasets | Jaundice, cyanosis, pallor detection |
 | African languages | WAXAL (Google, 21 languages, 11K hours) | Speech understanding for underserved languages |
-| IMCI reasoning | WHO clinical guidelines (public domain) | Structured protocol following |
-
-Gemma 4 E2B LoRA fine-tuning requires 8-10GB VRAM — fits on the RTX 3060 (12GB).
-Multiple adapters loaded dynamically by the protocol engine.
 
 ---
 
@@ -216,14 +224,14 @@ Multiple adapters loaded dynamically by the protocol engine.
 The blog post warned against "generic AI doctor chatbot." Malaika is fundamentally different — it's a **protocol-based medical instrument** implementing WHO's proven IMCI standard. Like an AED for childhood illness. The AI doesn't hallucinate medical advice — it executes a validated decision tree enhanced by multimodal sensing.
 
 ### 3. It Uses EVERY Gemma 4 Capability
-| Capability | How Malaika Uses It |
-|-----------|-------------------|
-| Vision | Breathing rate from video, chest indrawing, skin color |
-| Native Audio | Breath sound classification, cough analysis |
-| Multilingual | Voice interface in 140+ languages |
-| Function Calling | IMCI protocol as agentic workflow chain |
-| On-device | Runs entirely on phone, no internet |
-| Reasoning | Multi-factor severity classification |
+| Capability | How Malaika Uses It | Status |
+|-----------|-------------------|--------|
+| Vision | Breathing rate from video, chest indrawing, skin color, dehydration, wasting, edema | Implemented (6 vision skills) |
+| Vision + Fine-tuning | Breath sound classification from mel-spectrograms via LoRA adapter | [Trained, 50% acc, 100% crackle](https://huggingface.co/Vimal0703/malaika-breath-sounds-E4B-merged) |
+| Multilingual | Voice interface — Gemma 4 supports 140+ languages | Confirmed (Swahili tested) |
+| Agentic Tool Use | 12 clinical skills in SkillRegistry, BeliefState, structured event pipeline | Implemented (1200% improvement demo) |
+| On-device | Runs entirely on phone via LiteRT-LM (E2B, 2.58GB) | Architecture ready |
+| Reasoning | Multi-factor severity classification with WHO citations | 21/21 golden scenarios |
 
 No other hackathon submission will use this many Gemma 4 features simultaneously.
 

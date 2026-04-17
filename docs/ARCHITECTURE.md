@@ -8,9 +8,19 @@
 
 Malaika is an offline-first, multimodal child health assessment system built on Gemma 4. It implements the WHO IMCI (Integrated Management of Childhood Illness) protocol as a deterministic state machine, using Gemma 4 for all perception (vision, audio, language understanding) and code for all clinical logic (thresholds, classifications, treatment selection).
 
+The system exposes two interfaces sharing the same medical safety boundary (`imci_protocol.py`):
+
+| Interface | Entry Point | Orchestration | Use Case |
+|-----------|-------------|---------------|----------|
+| **Gradio form UI** | `malaika/app.py` | `IMCIEngine` state machine | Step-by-step form, desktop demo |
+| **Voice-first UI** | `malaika/voice_app.py` | `ChatEngine` with skills | Conversational voice, mobile-first |
+
+The voice interface uses an **agentic skills-based architecture**: Gemma 4 reasons about which of 12 clinical skills to invoke (vision analysis, finding extraction, classification) while a deterministic protocol guard enforces IMCI step ordering. The ChatEngine emits structured events that the browser renders as skill execution cards, classification cards, and an IMCI progress bar.
+
 ### Design Philosophy
 - **Two models, one runtime**: Gemma 4 for reasoning + Whisper-small for audio transcription, both via Transformers
 - **Protocol-driven**: IMCI state machine is the backbone, Gemma 4 is the perception layer
+- **Skills as tools**: 12 clinical skills provide typed contracts for the agentic reasoning loop
 - **Modular and pluggable**: Each assessment module is independent; disable any without breaking the flow
 - **Offline-complete**: Zero network calls. Every dependency is local.
 
@@ -59,6 +69,14 @@ Malaika is an offline-first, multimodal child health assessment system built on 
 │  Output: LoRA adapter weights -> adapters/ directory          │
 │                                                               │
 │  NOT used for inference or demo.                              │
+└─────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────┐
+│                    COLAB NOTEBOOK (Voice Agent Demo)           │
+│                                                               │
+│  notebooks/10_voice_agent_colab.ipynb                         │
+│  Runs voice_app.py on free Colab GPU with ngrok tunnel.       │
+│  Uses ChatEngine + VoiceSessionHandler for live demo.         │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -145,6 +163,85 @@ Malaika is an offline-first, multimodal child health assessment system built on 
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
+### 3.1 Agentic Voice Architecture (voice_app.py)
+
+The voice-first interface replaces the Gradio form with a conversational agent backed by 12 clinical skills.
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│              Voice UI (static/index.html)                             │
+│  WebSocket connection for voice + structured events                   │
+│  IMCI progress bar | Skill execution cards | Classification cards    │
+│  Camera capture → base64 images | Mic → PCM16 audio chunks          │
+└──────────────────────────────┬──────────────────────────────────────┘
+                               │ WebSocket
+                               ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│              voice_app.py (FastAPI)                                    │
+│  REST: /api/chat, /api/voice, /api/image, /api/status                │
+│  WS:  /ws/voice → VoiceSessionHandler                                │
+└──────────────────────────────┬──────────────────────────────────────┘
+                               │
+                               ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│              VoiceSessionHandler (voice_session.py)                    │
+│                                                                       │
+│  Browser mic → PCM → Smallest AI Pulse STT → transcript              │
+│  ChatEngine response → sentence-level TTS → Smallest AI Waves        │
+│  Filler audio during Gemma 4 thinking time                            │
+│  State machine: idle → listening → thinking → speaking                │
+└──────────────────────────────┬──────────────────────────────────────┘
+                               │
+                               ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│              ChatEngine (chat_engine.py) — Agentic Core               │
+│                                                                       │
+│  Maintains: BeliefState (confirmed / uncertain / pending findings)    │
+│  Enforces: IMCI step ordering (greeting → danger_signs → ... →       │
+│            classification → complete)                                 │
+│  Selects:  Skills via Gemma 4 reasoning (tool-use pattern)           │
+│  Emits structured events:                                             │
+│    skill_invoked, skill_result, finding, step_change,                │
+│    classification, image_request, danger_alert, assessment_complete   │
+│                                                                       │
+│  Each process() call returns {"text": str, "events": list[dict]}     │
+└───────┬──────────┬────────────────────────────────────────────────┘
+        │          │
+        ▼          ▼
+┌────────────┐ ┌─────────────────────────────────────────────────────┐
+│ skills.py   │ │ imci_protocol.py (shared with IMCIEngine path)       │
+│             │ │                                                       │
+│ SkillRegistry│ │ classify_danger_signs(), classify_breathing(), ...   │
+│ 12 skills:  │ │ Same deterministic WHO logic used by both interfaces │
+│  assess_    │ │ This is the MEDICAL SAFETY BOUNDARY.                 │
+│   alertness │ └─────────────────────────────────────────────────────┘
+│  assess_    │
+│   skin_color│
+│  parse_     │
+│   caregiver │
+│  detect_    │
+│   chest_    │
+│   indrawing │
+│  count_     │
+│   breathing │
+│  classify_  │
+│   breath_   │
+│   sounds    │
+│  assess_    │
+│   dehydration│
+│  assess_    │
+│   wasting   │
+│  detect_    │
+│   edema     │
+│  classify_  │
+│   imci_step │
+│  generate_  │
+│   treatment │
+│  speak_to_  │
+│   caregiver │
+└─────────────┘
+```
+
 ---
 
 ## 4. Module Boundaries and Contracts
@@ -219,7 +316,77 @@ Output: Visual assessment display, TTS audio
 - MUST be mobile-responsive
 - MUST work without JavaScript (progressive enhancement only)
 
-### 4.6 config.py — Configuration
+### 4.6 skills.py — SkillRegistry and BeliefState
+
+**Responsibility**: Declare clinical skills as typed tools and track assessment knowledge.
+
+```
+SkillRegistry:  Registers 12 Skill objects with typed contracts.
+                Provides lookup by name and by IMCI step.
+                Generates tool descriptions for Gemma 4 system prompt.
+
+BeliefState:    Tracks confirmed findings, uncertain findings, pending questions.
+                Updated after each skill execution and caregiver response.
+                Only escalates severity (green → yellow → red), never de-escalates.
+
+SkillResult:    Typed output of skill execution (findings dict, confidence, followup).
+```
+
+- MUST NOT contain inference logic or model calls
+- MUST NOT import inference.py, vision.py, or audio.py
+- Skills define WHAT can be done; ChatEngine decides WHEN
+
+### 4.7 chat_engine.py — ChatEngine (Agentic Core)
+
+**Responsibility**: Orchestrate conversational IMCI assessment via agentic skill invocation.
+
+```
+Input:  User message (text + optional image) + current BeliefState
+Output: {"text": str, "events": list[dict]}
+```
+
+- MUST enforce IMCI step ordering via deterministic guard (not LLM)
+- MUST use imci_protocol.py for all classifications (never LLM output)
+- MUST emit structured events for UI rendering (skill_invoked, classification, etc.)
+- MUST ask one question at a time (personality constraint)
+- Gemma 4 selects which skills to invoke (agentic reasoning)
+- BeliefState tracks what is known vs. uncertain vs. pending
+
+### 4.8 voice_session.py — VoiceSessionHandler
+
+**Responsibility**: Real-time voice pipeline over a single WebSocket connection.
+
+```
+Input:  PCM16 audio chunks (browser mic) + JSON control messages
+Output: TTS audio chunks (base64) + structured events (JSON)
+```
+
+- Manages STT via Smallest AI Pulse (optional, degrades to text-only)
+- Sends ChatEngine responses as sentence-level TTS chunks
+- Plays filler audio during Gemma 4 thinking time to prevent dead air
+- State machine: idle -> listening -> thinking -> speaking
+- Single WebSocket per session (no separate audio/control channels)
+
+### 4.9 voice_app.py — FastAPI Voice Server
+
+**Responsibility**: HTTP/WebSocket server for the voice-first interface.
+
+```
+REST endpoints:
+  POST /api/chat      — text message → ChatEngine → response + events
+  POST /api/voice     — audio file → Whisper STT → ChatEngine → response
+  POST /api/image     — image upload → stored for next ChatEngine call
+  GET  /api/status    — current IMCI step, model status, session info
+
+WebSocket:
+  /ws/voice           — full-duplex voice pipeline via VoiceSessionHandler
+```
+
+- MUST NOT contain clinical logic (delegates to ChatEngine + imci_protocol)
+- Serves static/index.html for the voice UI
+- Creates one ChatEngine per session
+
+### 4.10 config.py — Configuration
 
 **Responsibility**: Single source for all configurable values.
 
@@ -228,7 +395,7 @@ Output: Visual assessment display, TTS audio
 - Audio/video recording parameters
 - UI configuration
 
-### 4.7 guards/ — Three-Layer Security Pipeline
+### 4.11 guards/ — Three-Layer Security Pipeline
 
 **Responsibility**: Validate, filter, and verify at every perception boundary.
 
@@ -255,7 +422,7 @@ Output: Model output (raw string) -> Validated structured result
 - Enforces confidence thresholds — below threshold -> `Uncertain`
 - Returns typed dataclass or triggers self-correction retry
 
-### 4.8 observability/ — Assessment Tracing
+### 4.12 observability/ — Assessment Tracing
 
 **Responsibility**: Record what happened at every step for debugging, evaluation, and writeup evidence.
 
@@ -278,7 +445,7 @@ Output: AssessmentTrace (list of StepTrace records)
 - Links corrections ("this was actually normal breathing") to specific trace entries
 - Exports correction pairs for prompt improvement and fine-tuning data
 
-### 4.9 Self-Correction Pattern (inference.py)
+### 4.13 Self-Correction Pattern (inference.py)
 
 When model output cannot be parsed by `output_validator`, the system retries with a correction prompt:
 
@@ -295,7 +462,7 @@ Final:     Return Uncertain(raw_output=..., retries_exhausted=True)
 - Self-correction never changes the clinical question — only the output format instruction
 - Never silently succeeds with wrong data — Uncertain is always safe
 
-### 4.10 Response Cache (inference.py)
+### 4.14 Response Cache (inference.py)
 
 Hash-based cache for identical inference calls within a session.
 
@@ -364,6 +531,51 @@ cache_key = hash(prompt_version + prompt_template + media_hash + temperature)
 15. Gradio displays: RED classification card + treatment steps + plays audio
 ```
 
+### 5.1 Data Flow — Voice Pipeline (voice_app.py)
+
+```
+1. Caregiver opens voice UI on phone browser (static/index.html)
+                    │
+2. WebSocket connection established to /ws/voice
+                    │
+3. Caregiver speaks into microphone
+                    │
+4. Browser captures PCM16 audio (16kHz, mono) → WebSocket binary frames
+                    │
+5. VoiceSessionHandler receives audio
+                    │
+6. Audio forwarded to Smallest AI Pulse STT (WebSocket) → transcript
+   (If STT unavailable: caregiver types text via REST /api/chat instead)
+                    │
+7. transcript → ChatEngine.process(text, image=None)
+                    │
+8. ChatEngine:
+   a. Builds system prompt with available skills for current IMCI step
+   b. Gemma 4 reasons about caregiver input, selects skills to invoke
+   c. Skills execute (vision analysis, finding extraction, classification)
+   d. imci_protocol.py applies WHO thresholds (deterministic)
+   e. Returns {"text": response, "events": [structured events]}
+                    │
+9. Events forwarded to browser via WebSocket JSON messages:
+   - {"type": "skill_invoked", "skill": "assess_alertness", ...}
+   - {"type": "skill_result", "findings": {...}, "confidence": 0.85}
+   - {"type": "finding", "key": "lethargic", "value": true}
+   - {"type": "classification", "severity": "red", ...}
+   - {"type": "step_change", "step": "breathing"}
+   - {"type": "image_request", "prompt": "Can you show me..."}
+   - {"type": "danger_alert", "message": "..."}
+   - {"type": "assessment_complete", "summary": {...}}
+                    │
+10. Response text split at sentence boundaries for streaming TTS
+                    │
+11. Each sentence → Smallest AI Waves TTS → base64 audio chunk
+    (Filler audio played during Gemma 4 thinking time)
+                    │
+12. Browser queues audio chunks, plays sequentially
+                    │
+13. UI updates: IMCI progress bar, skill cards, classification cards
+```
+
 ---
 
 ## 6. State Machine — IMCI Protocol
@@ -430,11 +642,14 @@ transformers          # Gemma 4 model loading and inference
 torch                 # PyTorch backend
 bitsandbytes          # 4-bit quantization
 accelerate            # Device mapping
-gradio                # Web UI
+gradio                # Web UI (form-based interface)
+fastapi               # Voice-first HTTP/WebSocket server
+uvicorn               # ASGI server for FastAPI
+websockets            # WebSocket client for STT/TTS services
 piper-tts             # Offline text-to-speech
 opencv-python-headless # Video frame extraction (if needed)
 structlog             # Structured logging
-pydantic              # Config validation (optional, evaluate need)
+pydantic              # Request/response validation (FastAPI models)
 ```
 
 ### Development Dependencies
@@ -457,9 +672,19 @@ datasets              # HuggingFace datasets
 ### NOT Dependencies (explicitly excluded)
 
 - No Ollama (unified Transformers runtime)
-- No external APIs (offline-only)
 - No database (local file storage only)
 - No Docker (direct Python execution for hackathon)
+
+### Optional Cloud Services (voice pipeline only, graceful degradation)
+
+```
+Smallest AI Pulse     # STT — degrades to typed text input if unavailable
+Smallest AI Waves     # TTS — degrades to text-only output if unavailable
+```
+
+These are used only by the voice pipeline (`voice_session.py`). All clinical
+intelligence (Gemma 4 inference, IMCI classification) remains fully offline.
+The Gradio form interface (`app.py`) has zero external API dependencies.
 
 ### Audio Pipeline Note
 
@@ -475,6 +700,8 @@ audio call and can be unloaded independently of Gemma 4.
 ---
 
 ## 8. Error Boundaries
+
+### Gradio Path (app.py -> IMCIEngine)
 
 ```
 ┌─────────────────────────────────────────────────────┐
@@ -497,6 +724,32 @@ audio call and can be unloaded independently of Gemma 4.
 │  Catches: CUDA OOM, model loading failures           │
 │  Does: Raises typed exceptions (ModelError, etc.)    │
 │  Never: Silently fails, returns None                 │
+└─────────────────────────────────────────────────────┘
+```
+
+### Voice Path (voice_app.py -> ChatEngine)
+
+```
+┌─────────────────────────────────────────────────────┐
+│ WebSocket Layer (voice_session.py)                   │
+│  Catches: STT/TTS connection failures, disconnects  │
+│  Does: Degrades to text-only mode, sends error msg  │
+│  Never: Drops the WebSocket, loses session state    │
+├─────────────────────────────────────────────────────┤
+│ API Layer (voice_app.py)                             │
+│  Catches: All exceptions from ChatEngine             │
+│  Does: Returns error JSON, keeps session alive       │
+│  Never: Crashes, exposes tracebacks to browser       │
+├─────────────────────────────────────────────────────┤
+│ Agent Layer (chat_engine.py)                         │
+│  Catches: Skill execution failures, parse errors     │
+│  Does: Records uncertain finding, asks followup      │
+│  Never: Skips IMCI step, classifies without evidence │
+├─────────────────────────────────────────────────────┤
+│ Skill Layer (skills.py + inference.py)               │
+│  Catches: Vision/audio failures, model timeouts      │
+│  Does: Returns SkillResult(success=False)            │
+│  Never: Returns untyped data, crashes on bad input   │
 └─────────────────────────────────────────────────────┘
 ```
 

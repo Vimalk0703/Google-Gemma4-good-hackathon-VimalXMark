@@ -60,6 +60,21 @@ class VoiceSessionHandler:
         self.state = "idle"
         self._transcript_buffer = ""
 
+    def _is_stt_closed(self) -> bool:
+        """Check if STT WebSocket is closed (compatible with websockets v13+)."""
+        if self.stt_ws is None:
+            return True
+        try:
+            # websockets v15+
+            if hasattr(self.stt_ws, 'protocol'):
+                return self.stt_ws.protocol.state != 1
+            # websockets v13-14
+            if hasattr(self.stt_ws, 'closed'):
+                return self.stt_ws.closed
+            return False
+        except Exception:
+            return True
+
     async def run(self) -> None:
         """Main session loop — runs until WebSocket closes."""
         await self.ws.accept()
@@ -144,7 +159,7 @@ class VoiceSessionHandler:
     async def _on_speech_start(self) -> None:
         """Handle speech start from browser VAD."""
         self._transcript_buffer = ""
-        if self.stt_ws is None or self.stt_ws.closed:
+        if self.stt_ws is None or self._is_stt_closed():
             await self._connect_stt()
 
         # Start reading STT responses in background
@@ -153,7 +168,7 @@ class VoiceSessionHandler:
 
     async def _feed_audio(self, pcm_data: bytes) -> None:
         """Forward PCM audio to Smallest AI STT."""
-        if self.stt_ws and not self.stt_ws.closed:
+        if self.stt_ws and not self._is_stt_closed():
             try:
                 await self.stt_ws.send(pcm_data)
             except Exception:
@@ -161,7 +176,7 @@ class VoiceSessionHandler:
 
     async def _on_speech_end(self) -> None:
         """Handle speech end — finalize STT and process."""
-        if self.stt_ws and not self.stt_ws.closed:
+        if self.stt_ws and not self._is_stt_closed():
             try:
                 await self.stt_ws.send(json.dumps({"type": "end"}))
                 # Wait briefly for final transcript
@@ -192,7 +207,12 @@ class VoiceSessionHandler:
             return
 
         try:
-            async for message in self.stt_ws:
+            while True:
+                try:
+                    message = await asyncio.wait_for(self.stt_ws.recv(), timeout=30.0)
+                except asyncio.TimeoutError:
+                    break
+
                 if isinstance(message, bytes):
                     message = message.decode("utf-8")
 
@@ -204,17 +224,14 @@ class VoiceSessionHandler:
                     if text:
                         if is_final:
                             self._transcript_buffer += " " + text
-                        # Send interim transcript to browser
                         display = (self._transcript_buffer + " " + text).strip()
                         await self._send_transcript("user", display)
 
                 except json.JSONDecodeError:
                     pass
 
-        except websockets.exceptions.ConnectionClosed:
-            pass
         except Exception as e:
-            logger.debug("stt_read_error", error=str(e))
+            logger.debug("stt_read_ended", error=str(e))
 
     # --- Process + Respond ---
 
@@ -320,7 +337,7 @@ class VoiceSessionHandler:
 
     async def _cleanup(self) -> None:
         """Clean up connections."""
-        if self.stt_ws and not self.stt_ws.closed:
+        if self.stt_ws and not self._is_stt_closed():
             try:
                 await self.stt_ws.close()
             except Exception:

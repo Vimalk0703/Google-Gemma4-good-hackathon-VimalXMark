@@ -1,0 +1,53 @@
+name: malaika_flutter
+description: >
+  Malaika — WHO IMCI Child Health AI powered by Gemma 4.
+  Fully offline on-device clinical assessment for iOS and Android.
+version: 1.0.0+1
+publish_to: 'none'
+
+environment:
+  sdk: '>=3.5.0 <4.0.0'
+  flutter: '>=3.24.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # On-device Gemma 4 inference (Google's SDK)
+  flutter_gemma: ^0.13.4
+
+  # Speech-to-text (offline via native engines)
+  speech_to_text: ^7.3.0
+
+  # Text-to-speech (offline via native engines)
+  flutter_tts: ^4.2.0
+
+  # Camera and image handling
+  image_picker: ^1.1.2
+  camera: ^0.11.0+2
+
+  # State management
+  flutter_riverpod: ^2.6.1
+
+  # Storage and paths
+  path_provider: ^2.1.5
+  shared_preferences: ^2.3.4
+
+  # Permissions
+  permission_handler: ^11.3.1
+
+  # Connectivity check (initial model download only)
+  connectivity_plus: ^6.1.0
+
+  # UI utilities
+  cupertino_icons: ^1.0.8
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/animations/

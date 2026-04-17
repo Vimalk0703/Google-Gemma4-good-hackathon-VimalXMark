@@ -552,53 +552,48 @@ class ChatEngine:
             logger.error("finding_extraction_failed", error=str(e))
 
     def _check_step_advancement(self, user_text: str, response: str) -> None:
-        """Check if the current step is complete and advance if so."""
+        """Advance step only when the user has provided substantive responses.
+
+        Each step requires at least one real user message (not the initial "Hi").
+        Steps only advance based on actual findings or explicit user answers.
+        """
+        # Count real user messages (not "Hi" or system messages)
+        user_msgs_in_step = self._count_user_msgs_since_step_start()
+
         if self.step == "greeting" and self.age_months > 0:
             self.step = "danger_signs"
-        elif self.step == "danger_signs" and self._has_danger_sign_data():
+            self._step_start_msg_count = len(self.conversation_history)
+        elif self.step == "danger_signs" and user_msgs_in_step >= 2:
+            # Need at least: photo response + drink/convulsions answer
             self.step = "breathing"
-        elif self.step == "breathing" and self._has_breathing_data():
+            self._step_start_msg_count = len(self.conversation_history)
+        elif self.step == "breathing" and user_msgs_in_step >= 1:
             self.step = "diarrhea"
-        elif self.step == "diarrhea" and self._has_diarrhea_data():
+            self._step_start_msg_count = len(self.conversation_history)
+        elif self.step == "diarrhea" and user_msgs_in_step >= 1:
             self.step = "fever"
-        elif self.step == "fever" and self._has_fever_data():
+            self._step_start_msg_count = len(self.conversation_history)
+        elif self.step == "fever" and user_msgs_in_step >= 1:
             self.step = "nutrition"
-        elif self.step == "nutrition" and self._has_nutrition_data():
+            self._step_start_msg_count = len(self.conversation_history)
+        elif self.step == "nutrition" and user_msgs_in_step >= 1:
             self.step = "classification"
+            self._step_start_msg_count = len(self.conversation_history)
         elif self.step == "classification":
             self.step = "complete"
 
-    def _has_danger_sign_data(self) -> bool:
-        """Check if we have enough danger sign data to proceed."""
-        # At minimum, we need to know about drinking ability
-        return len(self.conversation_history) >= 4  # greeting + age + photo + answer
+    _step_start_msg_count: int = 0
 
-    def _has_breathing_data(self) -> bool:
-        return self.findings["has_cough"] or len(
-            [m for m in self.conversation_history if "breath" in m.get("content", "").lower()]
-        ) >= 1
-
-    def _has_diarrhea_data(self) -> bool:
-        return any(
-            "diarrhea" in m.get("content", "").lower() or "loose" in m.get("content", "").lower()
-            for m in self.conversation_history[-4:]
-        )
-
-    def _has_fever_data(self) -> bool:
-        return any(
-            "fever" in m.get("content", "").lower() or "hot" in m.get("content", "").lower()
-            for m in self.conversation_history[-4:]
-        )
-
-    def _has_nutrition_data(self) -> bool:
-        return any(
-            "nutrition" in m.get("content", "").lower()
-            or "wasting" in m.get("content", "").lower()
-            or "thin" in m.get("content", "").lower()
-            or "skip" in m.get("content", "").lower()
-            or "nourish" in m.get("content", "").lower()
-            for m in self.conversation_history[-4:]
-        )
+    def _count_user_msgs_since_step_start(self) -> int:
+        """Count user messages since the current step started."""
+        count = 0
+        for msg in self.conversation_history[self._step_start_msg_count:]:
+            if msg.get("role") == "user":
+                content = msg.get("content", "")
+                # Don't count system-generated messages
+                if content and not content.startswith("["):
+                    count += 1
+        return count
 
     def _build_classification_context(self) -> str:
         """Build the classification report with reasoning."""

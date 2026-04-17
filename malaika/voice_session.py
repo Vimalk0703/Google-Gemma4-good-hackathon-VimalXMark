@@ -158,6 +158,7 @@ class VoiceSessionHandler:
 
     async def _on_speech_start(self) -> None:
         """Handle speech start from browser VAD."""
+        logger.info("speech_start_received")
         self._transcript_buffer = ""
         if self.stt_ws is None or self._is_stt_closed():
             await self._connect_stt()
@@ -165,14 +166,21 @@ class VoiceSessionHandler:
         # Start reading STT responses in background
         if self.stt_ws:
             asyncio.create_task(self._read_stt())
+        else:
+            logger.error("stt_not_available_for_speech")
+
+    _audio_chunks_sent: int = 0
 
     async def _feed_audio(self, pcm_data: bytes) -> None:
         """Forward PCM audio to Smallest AI STT."""
         if self.stt_ws and not self._is_stt_closed():
             try:
                 await self.stt_ws.send(pcm_data)
-            except Exception:
-                pass
+                self._audio_chunks_sent += 1
+                if self._audio_chunks_sent % 20 == 0:
+                    logger.debug("audio_streaming", chunks=self._audio_chunks_sent, bytes=len(pcm_data))
+            except Exception as e:
+                logger.error("audio_send_failed", error=str(e))
 
     async def _on_speech_end(self) -> None:
         """Handle speech end — finalize STT and process."""

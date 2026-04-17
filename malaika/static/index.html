@@ -260,20 +260,24 @@ function pcmToWav(pcmBytes,sr){
 }
 
 // ── Chat Rendering ──
-var lastUserEl=null;
+var lastUserBbl=null;
+var lastUserMsgId=0;
 function addMsg(role,text,imgUrl){
     var m=document.createElement('div');m.className='msg '+role;
     var b=document.createElement('div');b.className='bbl';
     if(imgUrl){var img=document.createElement('img');img.src=imgUrl;b.appendChild(img);}
     if(text){var d=document.createElement('div');d.innerHTML=md(text);b.appendChild(d);}
     m.appendChild(b);chat.appendChild(m);chat.scrollTop=chat.scrollHeight;
-    if(role==='user')lastUserEl=b;
+    if(role==='user'){lastUserBbl=b;lastUserMsgId++;}
+    else{lastUserBbl=null;} // Reset after bot message so next user msg is new
     return m;
 }
 
 function updateOrAddMsg(role,text){
-    if(role==='user'&&lastUserEl){
-        lastUserEl.innerHTML=md(text);
+    // Interim transcripts update the current user bubble
+    // Final transcripts should create new bubbles
+    if(role==='user'&&lastUserBbl){
+        lastUserBbl.innerHTML=md(text);
         chat.scrollTop=chat.scrollHeight;
     }else{
         addMsg(role,text);

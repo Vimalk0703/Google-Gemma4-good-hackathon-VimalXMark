@@ -420,6 +420,42 @@ async def get_status() -> SessionStatus:
     )
 
 
+@app.websocket("/api/voice-stream")
+async def voice_stream(websocket: WebSocket) -> None:
+    """Real-time voice session — single WebSocket for full duplex voice.
+
+    Browser sends: PCM16 audio + speech_start/speech_end signals
+    Server sends: transcripts + AI responses + TTS audio
+
+    This is the primary voice interaction endpoint.
+    """
+    if _state is None or _state.session is None:
+        await websocket.accept()
+        await websocket.send_json({"type": "error", "message": "Model not loaded"})
+        await websocket.close()
+        return
+
+    api_key = os.environ.get("SMALLEST_API_KEY", "")
+    if not api_key:
+        await websocket.accept()
+        await websocket.send_json({"type": "error", "message": "SMALLEST_API_KEY not set"})
+        await websocket.close()
+        return
+
+    from malaika.voice_session import VoiceSessionHandler
+
+    # Create a fresh ChatEngine for this voice session
+    from malaika.chat_engine import ChatEngine
+
+    engine = ChatEngine(_state.config)
+    engine.model = _state.session.model
+    engine.processor = _state.session.processor
+    engine.model_loaded = True
+
+    handler = VoiceSessionHandler(websocket, engine, api_key)
+    await handler.run()
+
+
 @app.websocket("/api/stt")
 async def stt_proxy(websocket: WebSocket) -> None:
     """WebSocket proxy for Smallest AI Pulse STT.

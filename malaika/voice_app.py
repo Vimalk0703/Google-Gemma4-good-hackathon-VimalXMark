@@ -95,7 +95,7 @@ class VoiceAppState:
         processor: Any,
         config: MalaikaConfig | None = None,
     ) -> None:
-        """Initialize the chat session with pre-loaded model and processor.
+        """Initialize the chat engine with pre-loaded model and processor.
 
         Args:
             model: Loaded Gemma 4 model (via Unsloth or Transformers).
@@ -104,17 +104,13 @@ class VoiceAppState:
         """
         import torch
 
-        from malaika.chat_app import ChatSession
+        from malaika.chat_engine import ChatEngine
 
         effective_config = config or self.config
-        self.session = ChatSession(effective_config)
+        self.session = ChatEngine(effective_config)
+        self.session.model = model
+        self.session.processor = processor
         self.session.model_loaded = True
-        self.session._model_ref = model
-        self.session._processor_ref = processor
-
-        # Wire up image analysis and text generation using Unsloth model
-        self.session.analyze_image_direct = self._analyze_image_direct
-        self.session.ask_gemma = self._ask_gemma
 
         # Initialize TTS
         try:
@@ -129,10 +125,6 @@ class VoiceAppState:
             logger.warning("tts_init_failed", error=str(e))
             self.tts = None
 
-        # Store model references for direct access
-        self._model = model
-        self._processor = processor
-
         logger.info(
             "session_initialized",
             device=str(model.device),
@@ -140,91 +132,6 @@ class VoiceAppState:
             if torch.cuda.is_available()
             else "N/A",
         )
-
-    def _analyze_image_direct(self, image_path: str, question: str) -> str:
-        """Analyze an image with Gemma 4 vision.
-
-        Args:
-            image_path: Path to the image file.
-            question: Clinical question about the image.
-
-        Returns:
-            Gemma 4's observation as natural language text.
-        """
-        import torch
-        from PIL import Image
-
-        try:
-            img = Image.open(image_path).convert("RGB")
-            w, h = img.size
-            if max(w, h) > 512:
-                scale = 512 / max(w, h)
-                img = img.resize((int(w * scale), int(h * scale)))
-
-            messages = [
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "image"},
-                        {"type": "text", "text": question},
-                    ],
-                }
-            ]
-            input_text = self._processor.apply_chat_template(
-                messages, add_generation_prompt=True
-            )
-            inputs = self._processor(
-                text=input_text, images=[img], return_tensors="pt"
-            ).to(self._model.device)
-
-            with torch.inference_mode():
-                outputs = self._model.generate(
-                    **inputs,
-                    max_new_tokens=100,
-                    do_sample=False,
-                    repetition_penalty=1.3,
-                )
-            generated = outputs[0][inputs["input_ids"].shape[-1] :]
-            return self._processor.decode(
-                generated, skip_special_tokens=True
-            ).strip()
-
-        except Exception as e:
-            logger.error("image_analysis_failed", error=str(e))
-            return ""
-
-    def _ask_gemma(self, question: str) -> str:
-        """Ask Gemma 4 a text-only question.
-
-        Args:
-            question: Text prompt for Gemma 4.
-
-        Returns:
-            Generated text response.
-        """
-        import torch
-
-        try:
-            inputs = self._processor(
-                text=question, return_tensors="pt"
-            ).to(self._model.device)
-
-            with torch.inference_mode():
-                outputs = self._model.generate(
-                    **inputs,
-                    max_new_tokens=150,
-                    do_sample=True,
-                    temperature=0.4,
-                    repetition_penalty=1.3,
-                )
-            generated = outputs[0][inputs["input_ids"].shape[-1] :]
-            return self._processor.decode(
-                generated, skip_special_tokens=True
-            ).strip()
-
-        except Exception as e:
-            logger.error("text_generation_failed", error=str(e))
-            return ""
 
     def generate_tts(self, text: str, language: str = "en") -> str | None:
         """Generate TTS audio and return its cache ID.
@@ -303,13 +210,7 @@ class VoiceAppState:
     def reset_session(self) -> None:
         """Reset the assessment session for a new assessment."""
         if self.session is not None:
-            self.session.step = "welcome"
-            self.session.age_months = 12
-            self.session.findings = {
-                k: (False if isinstance(v, bool) else (0 if isinstance(v, int) else None))
-                for k, v in self.session.findings.items()
-            }
-            self.session.image_observations = {}
+            self.session.reset()
             logger.info("session_reset")
 
 
@@ -354,10 +255,7 @@ async def chat(request: ChatRequest) -> ChatResponse:
     if _state is None or _state.session is None:
         raise HTTPException(status_code=503, detail="Model not loaded")
 
-    from malaika.chat_app import process_message
-
-    message = {"text": request.text, "files": []}
-    response_text = process_message(message, [], _state.session)
+    response_text = _state.session.process(user_text=request.text)
 
     audio_id = _state.generate_tts(response_text, language=request.language)
 
@@ -405,11 +303,8 @@ async def voice_input(
     if not transcript.strip():
         transcript = "(no speech detected)"
 
-    # Process through IMCI chat
-    from malaika.chat_app import process_message
-
-    message = {"text": transcript, "files": []}
-    response_text = process_message(message, [], _state.session)
+    # Process through chat engine
+    response_text = _state.session.process(user_text=transcript)
 
     audio_id = _state.generate_tts(response_text, language=language)
 
@@ -457,11 +352,11 @@ async def image_input(
     suffix = Path(image.filename or "image.jpg").suffix or ".jpg"
     image_path = _state.save_upload(content, suffix)
 
-    # Process through IMCI chat with image
-    from malaika.chat_app import process_message
-
-    message = {"text": text, "files": [str(image_path)]}
-    response_text = process_message(message, [], _state.session)
+    # Process through chat engine with image
+    response_text = _state.session.process(
+        user_text=text,
+        image_path=str(image_path),
+    )
 
     audio_id = _state.generate_tts(response_text, language=language)
 

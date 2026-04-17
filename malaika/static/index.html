@@ -465,6 +465,22 @@
         let cameraStream = null;
         let currentAudio = null;
 
+        // Smallest AI Voice Configuration
+        const SMALLEST_STT_URL = 'wss://waves-api.smallest.ai/api/v1/pulse/get_text';
+        const SMALLEST_TTS_URL = 'https://waves-api.smallest.ai/api/v1/lightning-v3.1/get_speech';
+        let smallestApiKey = '';
+        let sttSocket = null;
+        let isVoiceMode = false;
+        let sttAudioContext = null;
+        let sttProcessor = null;
+        let sttStream = null;
+        let isSpeaking = false;
+        let silenceFrames = 0;
+        let speechFrames = 0;
+        const SILENCE_THRESHOLD = 0.01;
+        const SPEECH_START_FRAMES = 3;
+        const SILENCE_END_FRAMES = 20;
+
         // ----------------------------------------------------------------
         // Status Management
         // ----------------------------------------------------------------
@@ -519,11 +535,17 @@
             }
 
             // Add audio play button for bot messages
-            if (audioId && role === 'bot') {
-                const audioBtn = document.createElement('button');
+            if (role === 'bot' && content) {
+                var audioBtn = document.createElement('button');
                 audioBtn.className = 'audio-btn';
                 audioBtn.innerHTML = '&#128266; Listen';
-                audioBtn.onclick = function() { playAudio(audioId, audioBtn); };
+                audioBtn.onclick = function() {
+                    if (smallestApiKey) {
+                        speakText(content, audioBtn);
+                    } else if (audioId) {
+                        playAudio(audioId, audioBtn);
+                    }
+                };
                 bubble.appendChild(audioBtn);
             }
 
@@ -557,20 +579,81 @@
         }
 
         // ----------------------------------------------------------------
-        // Audio Playback (TTS)
+        // Audio Playback — Smallest AI TTS or fallback to Piper
         // ----------------------------------------------------------------
 
-        function playAudio(audioId, btn) {
+        async function speakText(text, btn) {
             if (currentAudio) {
                 currentAudio.pause();
                 currentAudio = null;
-                document.querySelectorAll('.audio-btn.playing').forEach(function(b) {
-                    b.classList.remove('playing');
-                    b.innerHTML = '&#128266; Listen';
-                });
             }
 
-            const audio = new Audio('/api/tts/' + audioId);
+            // Try Smallest AI TTS first (cloud, high quality)
+            if (smallestApiKey) {
+                try {
+                    await speakWithSmallest(text, btn);
+                    return;
+                } catch (err) {
+                    console.warn('Smallest TTS failed, trying fallback:', err);
+                }
+            }
+
+            // Fallback: server-side Piper TTS
+            if (btn) {
+                btn.classList.add('playing');
+                btn.innerHTML = '&#128264; Playing...';
+            }
+        }
+
+        async function speakWithSmallest(text, btn) {
+            // Clean text for TTS (remove markdown)
+            var cleanText = text.replace(/\*\*/g, '').replace(/#{1,3}\s/g, '').replace(/---/g, '').substring(0, 500);
+
+            var response = await fetch(SMALLEST_TTS_URL, {
+                method: 'POST',
+                headers: {
+                    'Authorization': 'Bearer ' + smallestApiKey,
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    text: cleanText,
+                    voice_id: 'sophia',
+                    sample_rate: 24000,
+                    speed: 1.0,
+                }),
+            });
+
+            if (!response.ok) throw new Error('TTS request failed: ' + response.status);
+
+            var audioData = await response.arrayBuffer();
+            var audioCtx = new AudioContext({ sampleRate: 24000 });
+            var audioBuffer = await audioCtx.decodeAudioData(audioData);
+            var source = audioCtx.createBufferSource();
+            source.buffer = audioBuffer;
+            source.connect(audioCtx.destination);
+
+            if (btn) {
+                btn.classList.add('playing');
+                btn.innerHTML = '&#128264; Playing...';
+            }
+
+            source.onended = function() {
+                if (btn) {
+                    btn.classList.remove('playing');
+                    btn.innerHTML = '&#128266; Listen';
+                }
+                // In voice mode, restart listening after speaking
+                if (isVoiceMode) {
+                    startSTTListening();
+                }
+            };
+
+            source.start();
+            currentAudio = { pause: function() { source.stop(); } };
+        }
+
+        function playAudio(audioId, btn) {
+            var audio = new Audio('/api/tts/' + audioId);
             currentAudio = audio;
 
             if (btn) {
@@ -584,25 +667,134 @@
                     btn.classList.remove('playing');
                     btn.innerHTML = '&#128266; Listen';
                 }
+                if (isVoiceMode) startSTTListening();
             };
 
-            audio.onerror = function() {
-                currentAudio = null;
-                if (btn) {
-                    btn.classList.remove('playing');
-                    btn.innerHTML = '&#128266; Listen';
-                }
-            };
-
-            audio.play().catch(function() {
-                /* autoplay blocked — user must tap Listen */
-            });
+            audio.play().catch(function() {});
         }
 
-        function autoPlayAudio(audioId) {
-            if (audioId) {
+        function autoPlayResponse(text, audioId) {
+            if (smallestApiKey) {
+                speakText(text, null);
+            } else if (audioId) {
                 playAudio(audioId, null);
             }
+        }
+
+        // ----------------------------------------------------------------
+        // Smallest AI STT — Real-time speech-to-text
+        // ----------------------------------------------------------------
+
+        async function startSTTListening() {
+            if (!smallestApiKey || isProcessing) return;
+
+            try {
+                sttStream = await navigator.mediaDevices.getUserMedia({
+                    audio: { sampleRate: 16000, channelCount: 1, echoCancellation: true, noiseSuppression: true },
+                });
+
+                sttAudioContext = new AudioContext({ sampleRate: 16000 });
+                var source = sttAudioContext.createMediaStreamSource(sttStream);
+                sttProcessor = sttAudioContext.createScriptProcessor(4096, 1, 1);
+
+                // Connect to Smallest AI Pulse STT
+                sttSocket = new WebSocket(SMALLEST_STT_URL);
+                sttSocket.onopen = function() {
+                    sttSocket.send(JSON.stringify({
+                        Authorization: 'Bearer ' + smallestApiKey,
+                        language: 'en',
+                        sample_rate: 16000,
+                        encoding: 'linear16',
+                    }));
+                    micBtn.classList.add('recording');
+                    setStatus('ok', 'Listening...');
+                };
+
+                sttSocket.onmessage = function(event) {
+                    var data = JSON.parse(event.data);
+                    if (data.text && data.text.trim()) {
+                        stopSTTListening();
+                        sendText(data.text.trim());
+                    }
+                };
+
+                sttSocket.onerror = function() {
+                    stopSTTListening();
+                    setStatus('error', 'Voice error — try typing');
+                };
+
+                sttSocket.onclose = function() {
+                    micBtn.classList.remove('recording');
+                };
+
+                // Stream audio to STT
+                isSpeaking = false;
+                silenceFrames = 0;
+                speechFrames = 0;
+
+                sttProcessor.onaudioprocess = function(e) {
+                    if (!sttSocket || sttSocket.readyState !== WebSocket.OPEN) return;
+
+                    var inputData = e.inputBuffer.getChannelData(0);
+
+                    // Simple VAD
+                    var energy = 0;
+                    for (var i = 0; i < inputData.length; i++) {
+                        energy += inputData[i] * inputData[i];
+                    }
+                    energy = Math.sqrt(energy / inputData.length);
+
+                    if (energy > SILENCE_THRESHOLD) {
+                        speechFrames++;
+                        silenceFrames = 0;
+                        if (!isSpeaking && speechFrames >= SPEECH_START_FRAMES) {
+                            isSpeaking = true;
+                        }
+                    } else {
+                        silenceFrames++;
+                        speechFrames = 0;
+                        if (isSpeaking && silenceFrames >= SILENCE_END_FRAMES) {
+                            isSpeaking = false;
+                        }
+                    }
+
+                    // Send audio as PCM16
+                    if (isSpeaking) {
+                        var pcm16 = new Int16Array(inputData.length);
+                        for (var j = 0; j < inputData.length; j++) {
+                            pcm16[j] = Math.max(-32768, Math.min(32767, Math.round(inputData[j] * 32767)));
+                        }
+                        sttSocket.send(pcm16.buffer);
+                    }
+                };
+
+                source.connect(sttProcessor);
+                sttProcessor.connect(sttAudioContext.destination);
+
+            } catch (err) {
+                console.error('STT failed:', err);
+                setStatus('error', 'Microphone access denied');
+            }
+        }
+
+        function stopSTTListening() {
+            if (sttSocket) {
+                sttSocket.close();
+                sttSocket = null;
+            }
+            if (sttStream) {
+                sttStream.getTracks().forEach(function(t) { t.stop(); });
+                sttStream = null;
+            }
+            if (sttProcessor) {
+                sttProcessor.disconnect();
+                sttProcessor = null;
+            }
+            if (sttAudioContext) {
+                sttAudioContext.close();
+                sttAudioContext = null;
+            }
+            micBtn.classList.remove('recording');
         }
 
         // ----------------------------------------------------------------
@@ -631,7 +823,7 @@
                 if (res.ok) {
                     const data = await res.json();
                     addMessage('bot', data.response, null, data.audio_id);
-                    autoPlayAudio(data.audio_id);
+                    autoPlayResponse(data.response, data.audio_id);
                     checkStatus();
                 } else {
                     addMessage('bot', 'Sorry, something went wrong. Please try again.');
@@ -666,7 +858,7 @@
                 if (res.ok) {
                     const data = await res.json();
                     addMessage('bot', data.response, null, data.audio_id);
-                    autoPlayAudio(data.audio_id);
+                    autoPlayResponse(data.response, data.audio_id);
                     checkStatus();
                 } else {
                     addMessage('bot', 'I had trouble analyzing that image. Could you try again?');
@@ -705,7 +897,7 @@
                         if (lastUser) lastUser.innerHTML = renderMarkdown(data.transcript);
                     }
                     addMessage('bot', data.response, null, data.audio_id);
-                    autoPlayAudio(data.audio_id);
+                    autoPlayResponse(data.response, data.audio_id);
                     checkStatus();
                 } else {
                     addMessage('bot', 'I could not understand the audio. Could you try again or type instead?');
@@ -798,40 +990,50 @@
         }
 
         // ----------------------------------------------------------------
-        // Voice Recording (Push-to-talk)
+        // Voice Mode — Smallest AI (real-time) or Push-to-talk (fallback)
         // ----------------------------------------------------------------
 
-        micBtn.addEventListener('mousedown', startRecording);
-        micBtn.addEventListener('touchstart', function(e) { e.preventDefault(); startRecording(); });
-        micBtn.addEventListener('mouseup', stopRecording);
-        micBtn.addEventListener('touchend', function(e) { e.preventDefault(); stopRecording(); });
-        micBtn.addEventListener('mouseleave', stopRecording);
+        micBtn.addEventListener('click', function() {
+            if (smallestApiKey) {
+                // Toggle continuous voice mode
+                if (isVoiceMode) {
+                    isVoiceMode = false;
+                    stopSTTListening();
+                    micBtn.classList.remove('recording');
+                    setStatus('ok', 'Voice mode off');
+                } else {
+                    isVoiceMode = true;
+                    startSTTListening();
+                    setStatus('ok', 'Listening...');
+                }
+            } else {
+                // Fallback: push-to-talk with MediaRecorder
+                if (mediaRecorder && mediaRecorder.state === 'recording') {
+                    stopRecording();
+                } else {
+                    startRecording();
+                }
+            }
+        });
 
+        // Push-to-talk fallback (when no Smallest AI key)
         async function startRecording() {
             if (isProcessing || mediaRecorder) return;
-
             try {
-                const stream = await navigator.mediaDevices.getUserMedia({
+                var stream = await navigator.mediaDevices.getUserMedia({
                     audio: { sampleRate: 16000, channelCount: 1, echoCancellation: true, noiseSuppression: true },
                 });
-
                 audioChunks = [];
                 mediaRecorder = new MediaRecorder(stream, { mimeType: getSupportedMimeType() });
-
                 mediaRecorder.ondataavailable = function(e) {
                     if (e.data.size > 0) audioChunks.push(e.data);
                 };
-
                 mediaRecorder.onstop = function() {
-                    const blob = new Blob(audioChunks, { type: mediaRecorder.mimeType });
+                    var blob = new Blob(audioChunks, { type: mediaRecorder.mimeType });
                     stream.getTracks().forEach(function(t) { t.stop(); });
                     mediaRecorder = null;
-
-                    if (blob.size > 1000) { // Ignore very short recordings
-                        sendVoice(blob);
-                    }
+                    if (blob.size > 1000) sendVoice(blob);
                 };
-
                 mediaRecorder.start();
                 micBtn.classList.add('recording');
             } catch (err) {
@@ -861,10 +1063,19 @@
         async function init() {
             setStatus('offline', 'Connecting...');
 
+            // Load Smallest AI key from URL params or prompt
+            var params = new URLSearchParams(window.location.search);
+            smallestApiKey = params.get('voice_key') || '';
+
+            if (smallestApiKey) {
+                setStatus('ok', 'Voice AI ready');
+                micBtn.title = 'Tap to start voice mode';
+            }
+
             // Check server status
             await checkStatus();
 
-            // Send initial "Hi" to start the conversation
+            // Send initial greeting to start the conversation
             await sendText('Hi');
         }
 

@@ -219,38 +219,44 @@ function stopMic(){
 function playAudioChunk(base64Data){
     if(!playbackCtx)playbackCtx=new AudioContext({sampleRate:24000});
 
+    // Decode base64 to bytes
     var raw=atob(base64Data);
-    var buf=new ArrayBuffer(raw.length);
-    var view=new Uint8Array(buf);
-    for(var i=0;i<raw.length;i++)view[i]=raw.charCodeAt(i);
+    var bytes=new Uint8Array(raw.length);
+    for(var i=0;i<raw.length;i++)bytes[i]=raw.charCodeAt(i);
 
-    playbackCtx.decodeAudioData(buf).then(function(decoded){
+    // Check if it's already a WAV (starts with RIFF)
+    var isWav=(bytes.length>4 && bytes[0]===0x52 && bytes[1]===0x49 && bytes[2]===0x46 && bytes[3]===0x46);
+
+    var audioBytes;
+    if(isWav){
+        audioBytes=bytes.buffer.slice(0);
+    }else{
+        // Raw PCM — wrap in WAV header
+        audioBytes=pcmToWav(bytes,24000);
+    }
+
+    playbackCtx.decodeAudioData(audioBytes).then(function(decoded){
         var src=playbackCtx.createBufferSource();
         src.buffer=decoded;
         src.connect(playbackCtx.destination);
-        src.onended=function(){
-            // Audio finished — state change handled by server
-        };
         src.start();
     }).catch(function(err){
-        console.log('Audio decode error, trying PCM wrapper:',err);
-        // Try as raw PCM
-        var wavBuf=pcmToWav(buf,24000);
-        playbackCtx.decodeAudioData(wavBuf).then(function(decoded){
-            var src=playbackCtx.createBufferSource();
-            src.buffer=decoded;src.connect(playbackCtx.destination);src.start();
-        }).catch(function(){});
+        console.log('Audio playback error:',err);
     });
 }
 
-function pcmToWav(pcm,sr){
-    var b=new ArrayBuffer(44+pcm.byteLength),v=new DataView(b);
-    function s(o,t){for(var i=0;i<t.length;i++)v.setUint8(o+i,t.charCodeAt(i));}
-    s(0,'RIFF');v.setUint32(4,36+pcm.byteLength,true);s(8,'WAVE');s(12,'fmt ');
+function pcmToWav(pcmBytes,sr){
+    var pcmLen=pcmBytes.length;
+    var buf=new ArrayBuffer(44+pcmLen);
+    var v=new DataView(buf);
+    var o=new Uint8Array(buf);
+    function s(off,str){for(var i=0;i<str.length;i++)v.setUint8(off+i,str.charCodeAt(i));}
+    s(0,'RIFF');v.setUint32(4,36+pcmLen,true);s(8,'WAVE');s(12,'fmt ');
     v.setUint32(16,16,true);v.setUint16(20,1,true);v.setUint16(22,1,true);
     v.setUint32(24,sr,true);v.setUint32(28,sr*2,true);v.setUint16(32,2,true);
-    v.setUint16(34,16,true);s(36,'data');v.setUint32(40,pcm.byteLength,true);
-    new Uint8Array(b,44).set(new Uint8Array(pcm));return b;
+    v.setUint16(34,16,true);s(36,'data');v.setUint32(40,pcmLen,true);
+    o.set(pcmBytes,44);
+    return buf;
 }
 
 // ── Chat Rendering ──

@@ -398,19 +398,6 @@
         micBtn.className = 'btn mic-btn' + (state === 'listening' ? ' active' : '');
     }
 
-    /* ================================================================
-     * Toggle Voice Mode
-     * ================================================================ */
-
-    window.toggleVoice = function() {
-        if (voiceState === 'idle') {
-            startListening();
-        } else if (voiceState === 'listening') {
-            stopListening();
-            setVoiceState('idle');
-        }
-    };
-
     window.stopVoice = function() {
         stopListening();
         stopSpeaking();
@@ -423,69 +410,99 @@
 
     async function startListening() {
         if (!API_KEY) {
-            // Fallback: push-to-talk via server Whisper
             startPushToTalk();
             return;
         }
 
         try {
+            // Get mic — don't force sample rate, browser decides
             sttStream = await navigator.mediaDevices.getUserMedia({
-                audio: { sampleRate: 16000, channelCount: 1, echoCancellation: true, noiseSuppression: true },
+                audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true },
             });
 
-            sttAudioCtx = new AudioContext({ sampleRate: 16000 });
+            // Use browser's native sample rate, we'll resample to 16kHz
+            var nativeSR = sttStream.getAudioTracks()[0].getSettings().sampleRate || 44100;
+            sttAudioCtx = new AudioContext({ sampleRate: nativeSR });
             var source = sttAudioCtx.createMediaStreamSource(sttStream);
             sttProcessor = sttAudioCtx.createScriptProcessor(4096, 1, 1);
 
+            var targetSR = 16000;
+            var resampleRatio = targetSR / nativeSR;
+
+            // Connect to Smallest AI Pulse STT
             sttSocket = new WebSocket(SMALLEST_STT_URL);
 
             sttSocket.onopen = function() {
+                // Send auth + config as first JSON message
                 sttSocket.send(JSON.stringify({
                     Authorization: 'Bearer ' + API_KEY,
                     language: 'en',
-                    sample_rate: 16000,
+                    sample_rate: targetSR,
                     encoding: 'linear16',
                 }));
                 setVoiceState('listening');
+                console.log('STT connected, native SR:', nativeSR, 'target:', targetSR);
             };
 
             sttSocket.onmessage = function(event) {
-                var data = JSON.parse(event.data);
-                if (data.text && data.text.trim()) {
-                    var transcript = data.text.trim();
-                    stopListening();
-                    processUserMessage(transcript);
+                try {
+                    var data = JSON.parse(event.data);
+                    console.log('STT message:', data);
+                    if (data.text && data.text.trim()) {
+                        var transcript = data.text.trim();
+                        stopListening();
+                        processUserMessage(transcript);
+                    }
+                } catch (e) {
+                    console.log('STT non-JSON:', event.data);
                 }
             };
 
-            sttSocket.onerror = function() { stopListening(); setVoiceState('idle'); };
+            sttSocket.onerror = function(e) {
+                console.error('STT WebSocket error:', e);
+                stopListening();
+                // Fallback to push-to-talk
+                addMessage('bot', 'Voice connection issue. Switching to push-to-talk mode.');
+                setVoiceState('idle');
+            };
+
+            sttSocket.onclose = function(e) {
+                console.log('STT closed:', e.code, e.reason);
+            };
 
             isSpeechActive = false;
             silenceFrames = 0;
             speechFrames = 0;
+            var sendCount = 0;
 
             sttProcessor.onaudioprocess = function(e) {
                 if (!sttSocket || sttSocket.readyState !== WebSocket.OPEN) return;
 
                 var input = e.inputBuffer.getChannelData(0);
+
+                // Compute energy for VAD
                 var energy = 0;
                 for (var i = 0; i < input.length; i++) energy += input[i] * input[i];
                 energy = Math.sqrt(energy / input.length);
 
-                if (energy > 0.01) {
+                if (energy > 0.008) {
                     speechFrames++; silenceFrames = 0;
                     if (!isSpeechActive && speechFrames >= 3) isSpeechActive = true;
                 } else {
                     silenceFrames++; speechFrames = 0;
-                    if (isSpeechActive && silenceFrames >= 20) isSpeechActive = false;
+                    if (isSpeechActive && silenceFrames >= 25) isSpeechActive = false;
                 }
 
                 if (isSpeechActive) {
-                    var pcm = new Int16Array(input.length);
-                    for (var j = 0; j < input.length; j++) {
-                        pcm[j] = Math.max(-32768, Math.min(32767, Math.round(input[j] * 32767)));
+                    // Resample from native rate to 16kHz
+                    var outputLen = Math.round(input.length * resampleRatio);
+                    var pcm = new Int16Array(outputLen);
+                    for (var j = 0; j < outputLen; j++) {
+                        var srcIdx = Math.min(Math.round(j / resampleRatio), input.length - 1);
+                        pcm[j] = Math.max(-32768, Math.min(32767, Math.round(input[srcIdx] * 32767)));
                     }
                     sttSocket.send(pcm.buffer);
+                    sendCount++;
                 }
             };
 
@@ -494,6 +511,7 @@
 
         } catch (err) {
             console.error('STT error:', err);
+            addMessage('bot', 'Microphone access needed. Please allow and try again.');
             setVoiceState('idle');
         }
     }
@@ -693,6 +711,10 @@
         var text = textInput.value.trim();
         if (!text) return;
         textInput.value = '';
+        if (!hasStarted) {
+            hasStarted = true;
+            if (!playbackCtx) playbackCtx = new AudioContext({ sampleRate: 24000 });
+        }
         processUserMessage(text);
     };
 
@@ -746,12 +768,31 @@
      * Init
      * ================================================================ */
 
-    (async function init() {
-        if (API_KEY) orbLabel.textContent = 'Tap to start voice';
-        else orbLabel.textContent = 'Tap to record';
+    var hasStarted = false;
 
-        // Auto-start conversation
-        processUserMessage('Hi');
+    window.toggleVoice = function() {
+        // First tap: start conversation + enable audio
+        if (!hasStarted) {
+            hasStarted = true;
+            playbackCtx = new AudioContext({ sampleRate: 24000 });
+            processUserMessage('Hi');
+            return;
+        }
+
+        if (voiceState === 'idle') {
+            startListening();
+        } else if (voiceState === 'listening') {
+            stopListening();
+            setVoiceState('idle');
+        }
+    };
+
+    (function init() {
+        if (API_KEY) orbLabel.textContent = 'Tap to start';
+        else orbLabel.textContent = 'Tap to start';
+
+        // Show welcome prompt
+        addMessage('bot', 'Tap the button above to start your child health assessment.');
     })();
 
 })();

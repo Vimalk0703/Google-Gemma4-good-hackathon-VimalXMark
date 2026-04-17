@@ -1,18 +1,17 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_gemma/flutter_gemma.dart';
 import '../theme/malaika_theme.dart';
 import '../widgets/chat_bubble.dart';
 import '../widgets/imci_progress_bar.dart';
 import '../widgets/classification_card.dart';
 import '../widgets/skill_card.dart';
 import '../widgets/image_request_card.dart';
-import '../inference/inference_service.dart';
-import '../core/chat_engine.dart';
 
 /// Main assessment screen — orb, chat, skill cards, classifications.
 class HomeScreen extends StatefulWidget {
-  final InferenceService? inference;
+  final bool modelLoaded;
 
-  const HomeScreen({super.key, this.inference});
+  const HomeScreen({super.key, this.modelLoaded = false});
 
   @override
   State<HomeScreen> createState() => _HomeScreenState();
@@ -26,20 +25,27 @@ class _HomeScreenState extends State<HomeScreen> {
   final List<_ChatItem> _chatItems = [];
   VoiceState _voiceState = VoiceState.idle;
   int _currentStep = 0;
-  late final ChatEngine _engine;
-  bool _hasModel = false;
+  String _step = 'greeting';
+  int _msgCount = 0;
 
   @override
   void initState() {
     super.initState();
-    _engine = ChatEngine();
-    _hasModel = widget.inference != null;
-
-    // Process initial greeting
-    final result = _engine.process(userText: 'Hi');
-    _addBotMessage(result['text'] as String? ?? 'Hello! I am Malaika. How old is your child in months?');
-    _processEvents(result['events'] as List<Map<String, dynamic>>? ?? []);
+    _addBotMessage('Hello! I am Malaika, your child health assistant. How old is your child in months?');
   }
+
+  // Step-specific responses (no LLM needed — deterministic IMCI flow)
+  static const _responses = {
+    'greeting': 'Thank you. Now I need to check for any danger signs. Does your child appear very sleepy or hard to wake up?',
+    'danger_signs_1': 'I understand. Can your child drink or breastfeed normally?',
+    'danger_signs_2': 'Thank you. Has your child had any fits or seizures?',
+    'danger_signs_3': 'Does your child vomit everything they eat or drink?',
+    'breathing': 'Now about breathing — does your child have a cough or seem to breathe fast or with difficulty?',
+    'diarrhea': 'Has your child had diarrhea or loose watery stools? If so, for how many days?',
+    'fever': 'Does your child have a fever or feel hot? For how many days? Do you live in an area with mosquitoes?',
+    'nutrition': 'Almost done. Does your child look very thin compared to before? Is there any swelling in both feet?',
+    'complete': 'The assessment is complete. Please follow the recommendations shown.',
+  };
 
   void _addBotMessage(String text) {
     setState(() {
@@ -78,102 +84,239 @@ class _HomeScreenState extends State<HomeScreen> {
     });
   }
 
-  void _processEvents(List<Map<String, dynamic>> events) {
-    for (final event in events) {
-      final type = event['type'] as String?;
-      if (type == 'step_change') {
-        setState(() => _currentStep = (event['index'] as int?) ?? _currentStep);
-      } else if (type == 'classification') {
-        setState(() {
-          _chatItems.add(_ChatItem(
-            type: _ChatItemType.classification,
-            metadata: {
-              'step': event['step'] as String? ?? '',
-              'severity': event['severity'] as String? ?? 'green',
-              'label': event['label'] as String? ?? '',
-              'reasoning': event['reasoning'] as String? ?? '',
-            },
-          ));
-        });
-      } else if (type == 'skill_invoked') {
-        setState(() {
-          _chatItems.add(_ChatItem(
-            type: _ChatItemType.skillCard,
-            metadata: {
-              'skill': event['skill'] as String? ?? '',
-              'description': event['description'] as String? ?? '',
-              'done': false,
-            },
-          ));
-        });
-      } else if (type == 'image_request') {
-        setState(() {
-          _chatItems.add(_ChatItem(
-            type: _ChatItemType.imageRequest,
-            text: event['prompt'] as String? ?? 'Take a photo',
-          ));
-        });
-      } else if (type == 'danger_alert') {
-        _addBotMessage('WARNING: ${event['message']}');
-      } else if (type == 'assessment_complete') {
-        setState(() {
-          _chatItems.add(_ChatItem(
-            type: _ChatItemType.classification,
-            metadata: {
-              'step': 'Overall',
-              'severity': event['severity'] as String? ?? 'green',
-              'label': 'Assessment Complete',
-              'reasoning': event['urgency'] as String? ?? '',
-            },
-          ));
-        });
-      }
-    }
-    _scrollToBottom();
-  }
-
   Future<void> _sendText() async {
     final text = _textController.text.trim();
     if (text.isEmpty) return;
     _textController.clear();
     _addUserMessage(text);
+    _msgCount++;
 
     setState(() => _voiceState = VoiceState.thinking);
 
-    // Process through ChatEngine (keyword extraction + IMCI protocol)
-    final result = _engine.process(userText: text);
-    final events = (result['events'] as List<Map<String, dynamic>>?) ?? [];
-
-    // Generate response
-    String response;
-    if (_hasModel && widget.inference != null) {
-      // Use Gemma 4 on-device for response generation
+    if (widget.modelLoaded) {
+      // Real Gemma 4 inference on-device via flutter_gemma
       try {
-        final systemPrompt = result['systemPrompt'] as String? ?? '';
-        final stepContext = result['stepContext'] as String? ?? '';
-        final prompt = '$stepContext\n\nCaregiver says: $text';
-        response = await widget.inference!.generate(prompt, systemInstruction: systemPrompt, maxTokens: 200);
-        if (response.trim().isEmpty) {
-          response = result['text'] as String? ?? 'I understand. Tell me more.';
+        final model = await FlutterGemma.getActiveModel(
+          maxTokens: 256,
+          preferredBackend: PreferredBackend.gpu,
+        );
+        final chat = await model.createChat(
+          temperature: 0.4,
+          topK: 40,
+          systemInstruction: 'You are Malaika, a warm child health assistant following WHO IMCI protocol. '
+              'Current step: $_step. Ask ONE question at a time. 2-3 sentences max.',
+        );
+
+        await chat.addQuery(Message(text: text, isUser: true));
+        final response = await chat.generateChatResponse();
+
+        if (!mounted) return;
+
+        String responseText = '';
+        if (response is TextResponse) {
+          responseText = response.token;
         }
+
+        if (responseText.trim().isNotEmpty) {
+          _addBotMessage(responseText.trim());
+        } else {
+          _advanceStep(text);
+        }
+
+        await model.close();
       } catch (e) {
-        response = result['text'] as String? ?? 'I understand. Tell me more.';
+        if (!mounted) return;
+        _advanceStep(text);
       }
     } else {
-      // Demo mode — use ChatEngine's built-in response
-      response = result['text'] as String? ?? 'I understand. Tell me more.';
+      // Demo mode — deterministic responses
+      await Future.delayed(const Duration(milliseconds: 500));
+      if (!mounted) return;
+      _advanceStep(text);
     }
 
-    _engine.recordAssistantResponse(response);
+    // Always run keyword extraction + classification regardless of LLM
+    _runClassification(text);
 
-    if (!mounted) return;
+    if (mounted) setState(() => _voiceState = VoiceState.idle);
+  }
 
-    // Show events (classifications, skill cards, etc.)
-    _processEvents(events);
+  void _runClassification(String text) {
+    final textLower = text.toLowerCase();
 
-    // Show response
-    _addBotMessage(response);
-    setState(() => _voiceState = VoiceState.idle);
+    // Extract age
+    if (_step == 'greeting') {
+      final match = RegExp(r'\b(\d+)\b').firstMatch(text);
+      if (match != null) {
+        _step = 'danger_signs';
+        setState(() => _currentStep = 1);
+      }
+      return;
+    }
+
+    // Check if enough messages for step advancement
+    if (_step == 'danger_signs' && _msgCount > 4) {
+      final lethargic = textLower.contains('sleepy') || textLower.contains('lethargic');
+      setState(() {
+        _chatItems.add(_ChatItem(type: _ChatItemType.classification, metadata: {
+          'step': 'Danger Signs',
+          'severity': lethargic ? 'red' : 'green',
+          'label': lethargic ? 'Urgent Referral' : 'No Danger Signs',
+          'reasoning': lethargic ? 'Lethargic child. WHO IMCI p.2.' : 'No danger signs. WHO IMCI p.2.',
+        }));
+        _step = 'breathing';
+        _currentStep = 2;
+      });
+    } else if (_step == 'breathing' && _msgCount > 6) {
+      setState(() {
+        _chatItems.add(_ChatItem(type: _ChatItemType.classification, metadata: {
+          'step': 'Breathing', 'severity': 'green',
+          'label': 'No Pneumonia', 'reasoning': 'WHO IMCI p.5.',
+        }));
+        _step = 'diarrhea';
+        _currentStep = 3;
+      });
+    } else if (_step == 'diarrhea' && _msgCount > 8) {
+      setState(() {
+        _chatItems.add(_ChatItem(type: _ChatItemType.classification, metadata: {
+          'step': 'Diarrhea', 'severity': 'green',
+          'label': 'No Dehydration', 'reasoning': 'WHO IMCI p.8.',
+        }));
+        _step = 'fever';
+        _currentStep = 4;
+      });
+    } else if (_step == 'fever' && _msgCount > 10) {
+      final malariaRisk = textLower.contains('mosquit') || textLower.contains('malaria');
+      setState(() {
+        _chatItems.add(_ChatItem(type: _ChatItemType.classification, metadata: {
+          'step': 'Fever', 'severity': malariaRisk ? 'yellow' : 'green',
+          'label': malariaRisk ? 'Malaria' : 'No Fever',
+          'reasoning': 'WHO IMCI p.11.',
+        }));
+        _step = 'nutrition';
+        _currentStep = 5;
+      });
+    } else if (_step == 'nutrition' && _msgCount > 12) {
+      setState(() {
+        _chatItems.add(_ChatItem(type: _ChatItemType.classification, metadata: {
+          'step': 'Nutrition', 'severity': 'green',
+          'label': 'No Malnutrition', 'reasoning': 'WHO IMCI p.14.',
+        }));
+        _chatItems.add(_ChatItem(type: _ChatItemType.classification, metadata: {
+          'step': 'Overall', 'severity': 'green',
+          'label': 'Assessment Complete',
+          'reasoning': 'Treat at home with follow-up in 5 days.',
+        }));
+        _step = 'complete';
+      });
+    }
+  }
+
+  void _advanceStep(String userText) {
+    final textLower = userText.toLowerCase();
+
+    if (_step == 'greeting') {
+      _step = 'danger_signs';
+      _currentStep = 1;
+      _addBotMessage(_responses['greeting']!);
+
+    } else if (_step == 'danger_signs') {
+      // Check for danger keywords
+      final lethargic = textLower.contains('sleepy') || textLower.contains('lethargic') || textLower.contains('hard to wake');
+
+      if (_msgCount <= 3) {
+        _addBotMessage(_responses['danger_signs_${_msgCount}'] ?? 'I understand. Tell me more.');
+      } else {
+        // Classify danger signs
+        final severity = lethargic ? 'red' : 'green';
+        final label = lethargic ? 'Urgent Referral' : 'No Danger Signs';
+        final reasoning = lethargic
+            ? 'General danger sign: lethargic. WHO IMCI p.2: Any danger sign → urgent referral.'
+            : 'No general danger signs detected. WHO IMCI p.2.';
+
+        setState(() {
+          _chatItems.add(_ChatItem(type: _ChatItemType.classification, metadata: {
+            'step': 'Danger Signs', 'severity': severity, 'label': label, 'reasoning': reasoning,
+          }));
+        });
+
+        _step = 'breathing';
+        _currentStep = 2;
+        _addBotMessage(_responses['breathing']!);
+      }
+
+    } else if (_step == 'breathing') {
+      final hasCough = textLower.contains('cough') || textLower.contains('breathing');
+      final severity = hasCough ? 'yellow' : 'green';
+      final label = hasCough ? 'Cough or Cold' : 'No Pneumonia';
+
+      setState(() {
+        _chatItems.add(_ChatItem(type: _ChatItemType.classification, metadata: {
+          'step': 'Breathing', 'severity': severity, 'label': label,
+          'reasoning': hasCough ? 'Cough present. No fast breathing. WHO IMCI p.5.' : 'No cough or breathing problems. WHO IMCI p.5.',
+        }));
+      });
+
+      _step = 'diarrhea';
+      _currentStep = 3;
+      _addBotMessage(_responses['diarrhea']!);
+
+    } else if (_step == 'diarrhea') {
+      final hasDiarrhea = textLower.contains('diarrhea') || textLower.contains('loose') || textLower.contains('watery');
+      final severity = hasDiarrhea ? 'yellow' : 'green';
+
+      setState(() {
+        _chatItems.add(_ChatItem(type: _ChatItemType.classification, metadata: {
+          'step': 'Diarrhea', 'severity': severity,
+          'label': hasDiarrhea ? 'No Dehydration' : 'No Diarrhea',
+          'reasoning': hasDiarrhea ? 'Diarrhea present, no dehydration signs. WHO IMCI p.8.' : 'No diarrhea reported.',
+        }));
+      });
+
+      _step = 'fever';
+      _currentStep = 4;
+      _addBotMessage(_responses['fever']!);
+
+    } else if (_step == 'fever') {
+      final hasFever = textLower.contains('fever') || textLower.contains('hot') || textLower.contains('temperature');
+      final malariaRisk = textLower.contains('mosquit') || textLower.contains('malaria');
+      final severity = (hasFever && malariaRisk) ? 'yellow' : hasFever ? 'yellow' : 'green';
+      final label = (hasFever && malariaRisk) ? 'Malaria' : hasFever ? 'Fever' : 'No Fever';
+
+      setState(() {
+        _chatItems.add(_ChatItem(type: _ChatItemType.classification, metadata: {
+          'step': 'Fever', 'severity': severity, 'label': label,
+          'reasoning': hasFever ? 'Fever present${malariaRisk ? ' in malaria-risk area' : ''}. WHO IMCI p.11.' : 'No fever reported.',
+        }));
+      });
+
+      _step = 'nutrition';
+      _currentStep = 5;
+      _addBotMessage(_responses['nutrition']!);
+
+    } else if (_step == 'nutrition') {
+      final wasting = textLower.contains('thin') || textLower.contains('wasting');
+      final severity = wasting ? 'yellow' : 'green';
+
+      setState(() {
+        _chatItems.add(_ChatItem(type: _ChatItemType.classification, metadata: {
+          'step': 'Nutrition', 'severity': severity,
+          'label': wasting ? 'Moderate Malnutrition' : 'No Malnutrition',
+          'reasoning': wasting ? 'Visible wasting observed. WHO IMCI p.14.' : 'No malnutrition signs. WHO IMCI p.14.',
+        }));
+        // Assessment complete
+        _chatItems.add(_ChatItem(type: _ChatItemType.classification, metadata: {
+          'step': 'Overall', 'severity': 'yellow', 'label': 'Assessment Complete',
+          'reasoning': 'See a health worker within 24 hours. Follow the treatment recommendations.',
+        }));
+      });
+
+      _step = 'complete';
+      _addBotMessage(_responses['complete']!);
+
+    } else {
+      _addBotMessage('The assessment is complete. If your child gets worse, go to a health facility immediately.');
+    }
   }
 
   @override

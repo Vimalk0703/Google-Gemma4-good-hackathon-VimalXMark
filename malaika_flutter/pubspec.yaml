@@ -13,8 +13,8 @@ dependencies:
   flutter:
     sdk: flutter
 
-  # On-device LLM inference via llama.cpp (lightweight, GGUF models)
-  lcpp: ^0.1.3
+  # On-device Gemma 4 inference (Google's MediaPipe SDK)
+  flutter_gemma: ^0.13.4
 
   # Speech-to-text (offline via native engines)
   speech_to_text: ^7.3.0

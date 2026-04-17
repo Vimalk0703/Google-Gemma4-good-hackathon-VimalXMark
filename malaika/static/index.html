@@ -348,9 +348,11 @@
      * Configuration
      * ================================================================ */
 
-    var SMALLEST_STT_URL = 'wss://waves-api.smallest.ai/api/v1/pulse/get_text';
-    var SMALLEST_TTS_URL = 'https://waves-api.smallest.ai/api/v1/lightning-v3.1/get_speech';
-    var API_KEY = new URLSearchParams(window.location.search).get('voice_key') || '';
+    // Voice routes through our backend (handles auth + CORS)
+    var wsProto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    var STT_WS_URL = wsProto + '//' + location.host + '/api/stt';
+    var TTS_URL = '/api/speak';
+    var VOICE_ENABLED = new URLSearchParams(window.location.search).get('voice') === '1';
 
     /* ================================================================
      * State
@@ -409,18 +411,16 @@
      * ================================================================ */
 
     async function startListening() {
-        if (!API_KEY) {
+        if (!VOICE_ENABLED) {
             startPushToTalk();
             return;
         }
 
         try {
-            // Get mic — don't force sample rate, browser decides
             sttStream = await navigator.mediaDevices.getUserMedia({
                 audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true },
             });
 
-            // Use browser's native sample rate, we'll resample to 16kHz
             var nativeSR = sttStream.getAudioTracks()[0].getSettings().sampleRate || 44100;
             sttAudioCtx = new AudioContext({ sampleRate: nativeSR });
             var source = sttAudioCtx.createMediaStreamSource(sttStream);
@@ -429,19 +429,12 @@
             var targetSR = 16000;
             var resampleRatio = targetSR / nativeSR;
 
-            // Connect to Smallest AI Pulse STT
-            sttSocket = new WebSocket(SMALLEST_STT_URL);
+            // Connect to OUR backend WebSocket proxy (handles Smallest AI auth)
+            sttSocket = new WebSocket(STT_WS_URL);
 
             sttSocket.onopen = function() {
-                // Send auth + config as first JSON message
-                sttSocket.send(JSON.stringify({
-                    Authorization: 'Bearer ' + API_KEY,
-                    language: 'en',
-                    sample_rate: targetSR,
-                    encoding: 'linear16',
-                }));
                 setVoiceState('listening');
-                console.log('STT connected, native SR:', nativeSR, 'target:', targetSR);
+                console.log('STT proxy connected, native SR:', nativeSR);
             };
 
             sttSocket.onmessage = function(event) {
@@ -576,15 +569,13 @@
 
         setVoiceState('speaking');
 
-        if (API_KEY) {
+        if (VOICE_ENABLED) {
             try {
                 var cleanText = text.replace(/\*\*/g, '').replace(/#{1,3}\s/g, '').replace(/---/g, '').replace(/\n+/g, ' ').substring(0, 800);
 
-                var res = await fetch(SMALLEST_TTS_URL, {
-                    method: 'POST',
-                    headers: { 'Authorization': 'Bearer ' + API_KEY, 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ text: cleanText, voice_id: 'sophia', sample_rate: 24000, speed: 1.0 }),
-                });
+                var fd = new FormData();
+                fd.append('text', cleanText);
+                var res = await fetch(TTS_URL, { method: 'POST', body: fd });
 
                 if (!res.ok) throw new Error('TTS ' + res.status);
 
@@ -780,15 +771,20 @@
         }
 
         if (voiceState === 'idle') {
-            startListening();
+            if (VOICE_ENABLED) {
+                startListening();
+            } else {
+                startPushToTalk();
+            }
         } else if (voiceState === 'listening') {
             stopListening();
+            if (!VOICE_ENABLED && mediaRecorder) stopRecording();
             setVoiceState('idle');
         }
     };
 
     (function init() {
-        if (API_KEY) orbLabel.textContent = 'Tap to start';
+        if (VOICE_ENABLED) orbLabel.textContent = 'Tap to start voice';
         else orbLabel.textContent = 'Tap to start';
 
         // Show welcome prompt

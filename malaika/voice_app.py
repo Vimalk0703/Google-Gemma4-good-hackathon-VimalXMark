@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Any
 
 import structlog
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -418,6 +418,131 @@ async def get_status() -> SessionStatus:
         model_loaded=session.model_loaded,
         findings_count=findings_count,
     )
+
+
+@app.websocket("/api/stt")
+async def stt_proxy(websocket: WebSocket) -> None:
+    """WebSocket proxy for Smallest AI Pulse STT.
+
+    Browsers cannot set custom headers on WebSocket connections,
+    so this endpoint proxies audio to Smallest AI with proper auth.
+
+    Client sends: raw PCM16 audio bytes
+    Client receives: JSON {"text": "transcription"}
+    Client sends: JSON {"type": "end"} to finalize
+    """
+    import asyncio
+
+    import websockets
+
+    await websocket.accept()
+
+    smallest_key = _state.config.model.smallest_api_key if _state else ""
+    if not smallest_key:
+        # Try environment variable
+        import os
+        smallest_key = os.environ.get("SMALLEST_API_KEY", "")
+
+    if not smallest_key:
+        await websocket.send_json({"error": "No Smallest AI API key configured"})
+        await websocket.close()
+        return
+
+    pulse_url = (
+        "wss://waves-api.smallest.ai/api/v1/pulse/get_text"
+        "?language=en&sample_rate=16000&encoding=linear16"
+    )
+
+    try:
+        async with websockets.connect(
+            pulse_url,
+            additional_headers={"Authorization": f"Bearer {smallest_key}"},
+        ) as pulse_ws:
+
+            logger.info("stt_proxy_connected")
+
+            async def forward_to_pulse() -> None:
+                """Forward audio from browser to Pulse."""
+                try:
+                    while True:
+                        data = await websocket.receive()
+                        if "bytes" in data:
+                            await pulse_ws.send(data["bytes"])
+                        elif "text" in data:
+                            msg = data["text"]
+                            await pulse_ws.send(msg)
+                            if '"end"' in msg:
+                                break
+                except WebSocketDisconnect:
+                    pass
+
+            async def forward_to_browser() -> None:
+                """Forward transcriptions from Pulse to browser."""
+                try:
+                    async for message in pulse_ws:
+                        await websocket.send_text(
+                            message if isinstance(message, str) else message.decode()
+                        )
+                except Exception:
+                    pass
+
+            await asyncio.gather(forward_to_pulse(), forward_to_browser())
+
+    except Exception as e:
+        logger.error("stt_proxy_error", error=str(e))
+        try:
+            await websocket.send_json({"error": str(e)})
+        except Exception:
+            pass
+    finally:
+        try:
+            await websocket.close()
+        except Exception:
+            pass
+
+
+@app.post("/api/speak")
+async def tts_speak(
+    text: str = Form(..., description="Text to speak"),
+    voice_id: str = Form(default="sophia", description="Voice ID"),
+) -> FileResponse:
+    """Proxy TTS through Smallest AI Waves.
+
+    Avoids CORS issues when calling Smallest AI directly from browser.
+    Returns WAV audio file.
+    """
+    import os
+
+    import httpx
+
+    smallest_key = os.environ.get("SMALLEST_API_KEY", "")
+    if not smallest_key:
+        raise HTTPException(status_code=503, detail="No Smallest AI API key")
+
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(
+                "https://waves-api.smallest.ai/api/v1/lightning-v3.1/get_speech",
+                headers={"Authorization": f"Bearer {smallest_key}"},
+                json={
+                    "text": text[:800],
+                    "voice_id": voice_id,
+                    "sample_rate": 24000,
+                    "speed": 1.0,
+                },
+            )
+            response.raise_for_status()
+
+        # Save to temp file
+        audio_path = _state.save_upload(response.content, ".wav") if _state else None
+        if audio_path is None:
+            raise HTTPException(status_code=500, detail="Failed to save audio")
+
+        return FileResponse(str(audio_path), media_type="audio/wav")
+
+    except Exception as e:
+        logger.error("tts_speak_failed", error=str(e))
+        raise HTTPException(status_code=502, detail=f"TTS failed: {e}") from e
 
 
 @app.post("/api/reset", response_model=ResetResponse)

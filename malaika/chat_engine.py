@@ -719,12 +719,22 @@ class ChatEngine:
     # Step Advancement — Findings-Based
     # -------------------------------------------------------------------
 
-    def _check_step_advancement(self, events: list[dict[str, Any]]) -> None:
-        """Advance step when required findings are collected.
+    # Minimum messages before message-count fallback can trigger
+    _MSG_FALLBACK_THRESHOLDS: dict[str, int] = {
+        "danger_signs": 3,
+        "breathing": 2,
+        "diarrhea": 2,
+        "fever": 2,
+        "nutrition": 2,
+    }
 
-        Uses _fields_answered to check if all required fields for the
-        current step have been answered. Emits step_change and
-        classification events.
+    def _check_step_advancement(self, events: list[dict[str, Any]]) -> None:
+        """Advance step when required findings are collected OR enough messages exchanged.
+
+        Primary: findings-based (all required fields in _fields_answered).
+        Fallback: message-count (after N user messages, advance anyway).
+        This ensures the progress bar always moves even if LLM extraction
+        is imperfect.
         """
         if self.step == "greeting" and self.age_months > 0:
             self._advance_to("danger_signs", events)
@@ -737,18 +747,40 @@ class ChatEngine:
         if self.step not in STEP_REQUIRED_FIELDS:
             return
 
+        should_advance = False
+
+        # Primary: findings-based check
         required = STEP_REQUIRED_FIELDS[self.step]
-        if not required.issubset(self._fields_answered):
+        if required.issubset(self._fields_answered):
+            # Also check conditional fields
+            conditionals = STEP_CONDITIONAL_FIELDS.get(self.step, {})
+            conditions_met = True
+            for trigger_field, extra_fields in conditionals.items():
+                if self.findings.get(trigger_field):
+                    if not extra_fields.issubset(self._fields_answered):
+                        conditions_met = False
+                        break
+            if conditions_met:
+                should_advance = True
+
+        # Fallback: message-count based (ensures progress bar always moves)
+        if not should_advance:
+            threshold = self._MSG_FALLBACK_THRESHOLDS.get(self.step, 3)
+            msgs = self._count_user_msgs_since_step_start()
+            if msgs >= threshold:
+                should_advance = True
+                logger.info(
+                    "step_advance_fallback",
+                    step=self.step,
+                    messages=msgs,
+                    threshold=threshold,
+                    fields_answered=list(self._fields_answered),
+                )
+
+        if not should_advance:
             return
 
-        # Check conditional fields
-        conditionals = STEP_CONDITIONAL_FIELDS.get(self.step, {})
-        for trigger_field, extra_fields in conditionals.items():
-            if self.findings.get(trigger_field):
-                if not extra_fields.issubset(self._fields_answered):
-                    return
-
-        # All requirements met — determine next step
+        # Advance to next step
         step_index = ASSESSMENT_STEPS.index(self.step)
         next_step = ASSESSMENT_STEPS[step_index + 1]
         self._advance_to(next_step, events)

@@ -256,7 +256,8 @@ async def chat(request: ChatRequest) -> ChatResponse:
     if _state is None or _state.session is None:
         raise HTTPException(status_code=503, detail="Model not loaded")
 
-    response_text = _state.session.process(user_text=request.text)
+    result = _state.session.process(user_text=request.text)
+    response_text = result["text"]
 
     audio_id = _state.generate_tts(response_text, language=request.language)
 
@@ -305,7 +306,8 @@ async def voice_input(
         transcript = "(no speech detected)"
 
     # Process through chat engine
-    response_text = _state.session.process(user_text=transcript)
+    result = _state.session.process(user_text=transcript)
+    response_text = result["text"]
 
     audio_id = _state.generate_tts(response_text, language=language)
 
@@ -354,10 +356,11 @@ async def image_input(
     image_path = _state.save_upload(content, suffix)
 
     # Process through chat engine with image
-    response_text = _state.session.process(
+    result = _state.session.process(
         user_text=text,
         image_path=str(image_path),
     )
+    response_text = result["text"]
 
     audio_id = _state.generate_tts(response_text, language=language)
 
@@ -437,11 +440,6 @@ async def voice_stream(websocket: WebSocket) -> None:
         return
 
     api_key = os.environ.get("SMALLEST_API_KEY", "")
-    if not api_key:
-        await websocket.accept()
-        await websocket.send_json({"type": "error", "message": "SMALLEST_API_KEY not set"})
-        await websocket.close()
-        return
 
     from malaika.voice_session import VoiceSessionHandler
 

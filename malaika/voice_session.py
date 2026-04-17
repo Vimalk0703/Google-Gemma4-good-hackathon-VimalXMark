@@ -28,6 +28,8 @@ import asyncio
 import base64
 import json
 import os
+import random
+import re
 from typing import Any
 
 import structlog
@@ -39,6 +41,24 @@ logger = structlog.get_logger()
 # Smallest AI endpoints
 PULSE_STT_URL = "wss://waves-api.smallest.ai/api/v1/pulse/get_text"
 WAVES_TTS_URL = "https://waves-api.smallest.ai/api/v1/lightning-v3.1/get_speech"
+
+# Sentence boundary regex for TTS streaming
+_SENTENCE_BOUNDARY = re.compile(r'(?<=[.!?])\s+')
+
+# Filler phrases for dead air prevention during thinking
+_FILLER_PHRASES = [
+    "Let me think about that.",
+    "Okay, one moment.",
+    "Let me check on that.",
+    "Let me look at that.",
+]
+
+# Filler phrases specifically for image analysis
+_IMAGE_FILLER_PHRASES = [
+    "Let me look at that photo carefully.",
+    "I am analyzing the photo now.",
+    "One moment while I examine this.",
+]
 
 
 class VoiceSessionHandler:
@@ -81,7 +101,10 @@ class VoiceSessionHandler:
         await self._send_state("listening")
 
         # Send initial greeting
-        greeting = self.engine.process(user_text="Hi")
+        result = self.engine.process(user_text="Hi")
+        greeting = result["text"]
+        for event in result.get("events", []):
+            await self.ws.send_json(event)
         await self._send_transcript("assistant", greeting)
         await self._speak(greeting)
         await self._send_state("listening")
@@ -145,6 +168,9 @@ class VoiceSessionHandler:
 
     async def _connect_stt(self) -> None:
         """Connect to Smallest AI Pulse STT."""
+        if not self.api_key:
+            logger.debug("stt_skipped_no_key")
+            return
         try:
             url = f"{PULSE_STT_URL}?language=en&sample_rate=16000&encoding=linear16"
             self.stt_ws = await websockets.connect(
@@ -251,16 +277,29 @@ class VoiceSessionHandler:
         await self._send_transcript("user", text)
         await self._send_state("thinking")
 
+        # Start filler audio concurrently (plays after 1.5s if still thinking)
+        filler_task = asyncio.create_task(self._send_filler())
+
         # Run Gemma 4 inference (blocking — runs in thread pool)
         loop = asyncio.get_event_loop()
-        response = await loop.run_in_executor(
+        result = await loop.run_in_executor(
             None, self.engine.process, text, None,
         )
 
-        await self._send_transcript("assistant", response)
+        # Cancel filler if it hasn't played yet
+        filler_task.cancel()
 
-        # Speak the response
-        await self._speak(response)
+        response_text = result["text"]
+        events = result.get("events", [])
+
+        # Send structured events BEFORE transcript (UI updates first)
+        for event in events:
+            await self.ws.send_json(event)
+
+        await self._send_transcript("assistant", response_text)
+
+        # Speak the response with sentence-level streaming
+        await self._speak(response_text)
 
         # Re-connect STT and go back to listening
         await self._connect_stt()
@@ -279,13 +318,26 @@ class VoiceSessionHandler:
 
         await self._send_state("thinking")
 
+        # Image analysis filler (more specific)
+        filler_task = asyncio.create_task(
+            self._send_filler(_IMAGE_FILLER_PHRASES)
+        )
+
         loop = asyncio.get_event_loop()
-        response = await loop.run_in_executor(
+        result = await loop.run_in_executor(
             None, self.engine.process, "", tmp.name,
         )
 
-        await self._send_transcript("assistant", response)
-        await self._speak(response)
+        filler_task.cancel()
+
+        response_text = result["text"]
+        events = result.get("events", [])
+
+        for event in events:
+            await self.ws.send_json(event)
+
+        await self._send_transcript("assistant", response_text)
+        await self._speak(response_text)
 
         # Cleanup
         Path(tmp.name).unlink(missing_ok=True)
@@ -293,10 +345,14 @@ class VoiceSessionHandler:
         await self._connect_stt()
         await self._send_state("listening")
 
-    # --- TTS ---
+    # --- TTS (Sentence-Level Streaming) ---
 
     async def _speak(self, text: str) -> None:
-        """Convert text to speech via Smallest AI TTS and send to browser."""
+        """Convert text to speech with sentence-level streaming.
+
+        Splits the response into sentences and TTS each independently.
+        The browser receives multiple audio chunks for smooth playback.
+        """
         await self._send_state("speaking")
 
         # Clean text for TTS
@@ -311,35 +367,81 @@ class VoiceSessionHandler:
         if not clean:
             return
 
+        # Split into sentences and merge short fragments
+        sentences = _SENTENCE_BOUNDARY.split(clean)
+        merged: list[str] = []
+        current = ""
+        for s in sentences:
+            s = s.strip()
+            if not s:
+                continue
+            if len(current) + len(s) + 1 < 80:
+                current = (current + " " + s).strip()
+            else:
+                if current:
+                    merged.append(current)
+                current = s
+        if current:
+            merged.append(current)
+
+        if not merged:
+            merged = [clean]
+
+        # TTS each sentence independently for low-latency streaming
+        for sentence in merged:
+            if len(sentence) < 10:
+                continue
+            try:
+                await self._tts_sentence(sentence)
+            except Exception as e:
+                logger.error("tts_sentence_failed", error=str(e), sentence=sentence[:50])
+
+        await self.ws.send_json({"type": "audio_end"})
+
+    async def _tts_sentence(self, sentence: str) -> None:
+        """TTS a single sentence and send audio to browser."""
+        if not self.api_key:
+            return  # No TTS without API key — transcript is still shown
+        import httpx
+
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            response = await client.post(
+                WAVES_TTS_URL,
+                headers={
+                    "Authorization": f"Bearer {self.api_key}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "text": sentence,
+                    "voice_id": "sophia",
+                    "sample_rate": 24000,
+                    "speed": 1.0,
+                    "add_wav_header": True,
+                },
+            )
+            response.raise_for_status()
+
+        await self._send_audio(response.content)
+        logger.debug("tts_sentence", length=len(sentence), audio_size=len(response.content))
+
+    async def _send_filler(
+        self, phrases: list[str] | None = None,
+    ) -> None:
+        """Send filler audio after a delay to prevent dead air during thinking.
+
+        Only plays if the main inference takes longer than 1.5 seconds.
+        Cancelled by the caller if inference completes first.
+        """
+        await asyncio.sleep(1.5)
+        phrase = random.choice(phrases or _FILLER_PHRASES)
         try:
-            import httpx
-
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                response = await client.post(
-                    WAVES_TTS_URL,
-                    headers={
-                        "Authorization": f"Bearer {self.api_key}",
-                        "Content-Type": "application/json",
-                    },
-                    json={
-                        "text": clean,
-                        "voice_id": "sophia",
-                        "sample_rate": 24000,
-                        "speed": 1.0,
-                        "add_wav_header": True,
-                    },
-                )
-                response.raise_for_status()
-
-            # Send audio to browser
-            await self._send_audio(response.content)
-            await self.ws.send_json({"type": "audio_end"})
-
-            logger.info("tts_complete", text_length=len(clean), audio_size=len(response.content))
-
-        except Exception as e:
-            logger.error("tts_failed", error=str(e))
-            # Continue without audio — text transcript is already shown
+            await self._send_state("speaking")
+            await self._tts_sentence(phrase)
+            await self._send_state("thinking")
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            pass  # Filler is best-effort
 
     # --- Cleanup ---
 

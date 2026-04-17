@@ -14,24 +14,37 @@
         .hdr h1{font-size:1.1em;color:var(--pri);font-weight:600}
         .hdr p{font-size:.68em;color:var(--txm)}
 
-        .orb-wrap{display:flex;flex-direction:column;align-items:center;padding:14px 0 8px;flex-shrink:0}
-        .orb{width:96px;height:96px;border-radius:50%;display:flex;align-items:center;justify-content:center;cursor:pointer;transition:all .3s;border:2px solid rgba(79,195,247,.25);background:rgba(79,195,247,.08)}
+        /* -- IMCI Progress Bar -- */
+        .progress{display:none;align-items:center;justify-content:center;gap:2px;padding:6px 14px;flex-shrink:0}
+        .progress.vis{display:flex}
+        .pstep{display:flex;flex-direction:column;align-items:center;flex:1;position:relative;opacity:.35;transition:all .3s}
+        .pstep.active{opacity:1}
+        .pstep.done{opacity:.7}
+        .pstep.done .pnum{background:var(--grn);color:var(--bg)}
+        .pstep.active .pnum{background:var(--pri);color:var(--bg);transform:scale(1.15)}
+        .pnum{width:24px;height:24px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:.65em;font-weight:700;background:rgba(255,255,255,.1);color:var(--txm);transition:all .3s}
+        .plbl{font-size:.52em;color:var(--txm);margin-top:2px;white-space:nowrap;text-align:center}
+        .pstep+.pstep::before{content:'';position:absolute;left:-50%;top:12px;width:100%;height:2px;background:rgba(255,255,255,.06);z-index:-1}
+        .pstep.done+.pstep::before,.pstep.done+.pstep.active::before{background:var(--grn)}
+
+        .orb-wrap{display:flex;flex-direction:column;align-items:center;padding:10px 0 6px;flex-shrink:0}
+        .orb{width:80px;height:80px;border-radius:50%;display:flex;align-items:center;justify-content:center;cursor:pointer;transition:all .3s;border:2px solid rgba(79,195,247,.25);background:rgba(79,195,247,.08)}
         .orb:hover{border-color:var(--pri);transform:scale(1.05)}
         .orb.listening{border-color:rgba(102,187,106,.6);background:rgba(102,187,106,.12);animation:glow-g 2s infinite}
         .orb.thinking{border-color:rgba(255,202,40,.6);background:rgba(255,202,40,.12)}
         .orb.thinking .oi{animation:spin 1.5s linear infinite}
         .orb.speaking{border-color:rgba(79,195,247,.6);background:rgba(79,195,247,.12);animation:breathe 1.2s ease-in-out infinite}
-        .oi{font-size:32px}
-        .olbl{font-size:.72em;color:var(--txm);margin-top:6px}
-        .osub{display:flex;gap:8px;margin-top:6px}
-        .osub button{padding:4px 14px;border-radius:16px;border:1px solid rgba(239,83,80,.4);background:none;color:var(--red);font-size:.7em;cursor:pointer}
+        .oi{font-size:28px}
+        .olbl{font-size:.68em;color:var(--txm);margin-top:4px}
+        .osub{display:flex;gap:8px;margin-top:4px}
+        .osub button{padding:3px 12px;border-radius:16px;border:1px solid rgba(239,83,80,.4);background:none;color:var(--red);font-size:.65em;cursor:pointer}
 
         .chat{flex:1;overflow-y:auto;padding:6px 14px;-webkit-overflow-scrolling:touch}
         .chat::-webkit-scrollbar{width:3px}
         .chat::-webkit-scrollbar-thumb{background:rgba(255,255,255,.08);border-radius:2px}
         .msg{display:flex;margin-bottom:6px;animation:fadeIn .25s ease}
         .msg.user{justify-content:flex-end}
-        .bbl{max-width:85%;padding:9px 13px;border-radius:16px;font-size:.87em;line-height:1.5;word-wrap:break-word}
+        .bbl{max-width:85%;padding:9px 13px;border-radius:16px;font-size:.85em;line-height:1.5;word-wrap:break-word}
         .msg.user .bbl{background:var(--ubbl);color:#fff;border-bottom-right-radius:4px}
         .msg.bot .bbl{background:var(--bbbl);border:1px solid rgba(255,255,255,.06);color:var(--tx);border-bottom-left-radius:4px}
         .bbl img{max-width:100%;border-radius:8px;margin:4px 0}
@@ -40,6 +53,57 @@
         .dots span{width:6px;height:6px;border-radius:50%;background:var(--txm);animation:bounce 1.4s infinite both}
         .dots span:nth-child(2){animation-delay:.2s}
         .dots span:nth-child(3){animation-delay:.4s}
+
+        /* -- Skill Execution Card -- */
+        .skill-card{border-radius:12px;padding:10px 12px;margin:6px 0;animation:fadeIn .3s;border:1px solid rgba(79,195,247,.2);background:rgba(79,195,247,.04)}
+        .skill-card .sk-hdr{display:flex;align-items:center;gap:6px;font-size:.7em;color:var(--pri);font-weight:600}
+        .skill-card .sk-hdr .sk-icon{font-size:1.1em}
+        .skill-card .sk-body{font-size:.72em;color:var(--txm);margin-top:4px;line-height:1.4}
+        .skill-card .sk-confidence{font-size:.62em;color:var(--txm);margin-top:3px;opacity:.7}
+        .skill-card.done{border-color:rgba(102,187,106,.3);background:rgba(102,187,106,.04)}
+        .skill-card.done .sk-hdr{color:var(--grn)}
+        .skill-card .sk-spinner{display:inline-block;width:12px;height:12px;border:2px solid rgba(79,195,247,.3);border-top-color:var(--pri);border-radius:50%;animation:spin .8s linear infinite}
+
+        /* -- Classification Card -- */
+        .cls-card{border-radius:12px;padding:10px 12px;margin:6px 0;animation:fadeIn .3s}
+        .cls-card.sev-green{background:rgba(102,187,106,.06);border:1px solid rgba(102,187,106,.25)}
+        .cls-card.sev-yellow{background:rgba(255,202,40,.06);border:1px solid rgba(255,202,40,.25)}
+        .cls-card.sev-red{background:rgba(239,83,80,.08);border:1px solid rgba(239,83,80,.3)}
+        .cls-badge{display:inline-block;padding:2px 7px;border-radius:5px;font-size:.6em;font-weight:700;text-transform:uppercase;letter-spacing:.5px}
+        .cls-badge.sev-green{background:rgba(102,187,106,.15);color:var(--grn)}
+        .cls-badge.sev-yellow{background:rgba(255,202,40,.15);color:var(--ylw)}
+        .cls-badge.sev-red{background:rgba(239,83,80,.2);color:var(--red)}
+        .cls-title{font-size:.78em;font-weight:600;margin:4px 0 2px;color:var(--tx)}
+        .cls-reason{font-size:.68em;color:var(--txm);line-height:1.4}
+        .cls-source{font-size:.58em;color:var(--txm);margin-top:3px;opacity:.5}
+
+        /* -- Image Request Card -- */
+        .img-req{background:rgba(79,195,247,.04);border:1px dashed rgba(79,195,247,.25);border-radius:12px;padding:14px;text-align:center;cursor:pointer;transition:all .2s;margin:6px 0;animation:fadeIn .3s}
+        .img-req:hover,.img-req:active{background:rgba(79,195,247,.1);border-color:var(--pri)}
+        .img-req .ir-icon{font-size:24px;margin-bottom:4px}
+        .img-req .ir-text{font-size:.78em;font-weight:600;color:var(--pri)}
+        .img-req .ir-sub{font-size:.65em;color:var(--txm);margin-top:2px}
+
+        /* -- Finding Chips -- */
+        .findings-row{display:flex;flex-wrap:wrap;gap:3px;margin-top:5px}
+        .finding-chip{display:inline-block;padding:2px 7px;border-radius:8px;font-size:.6em;font-weight:600;background:rgba(255,255,255,.05);color:var(--txm);border:1px solid rgba(255,255,255,.08)}
+        .finding-chip.pos{color:var(--ylw);border-color:rgba(255,202,40,.2);background:rgba(255,202,40,.06)}
+        .finding-chip.neg{color:var(--grn);border-color:rgba(102,187,106,.15);background:rgba(102,187,106,.04)}
+
+        /* -- Danger Alert -- */
+        .danger-alert{background:rgba(239,83,80,.1);border:2px solid var(--red);border-radius:12px;padding:10px 12px;display:flex;align-items:center;gap:8px;margin:8px 0;animation:pulse-red 2s infinite}
+        .danger-alert .da-icon{font-size:1.3em}
+        .danger-alert .da-text{font-size:.78em;color:var(--red);font-weight:600;line-height:1.3}
+        .danger-alert .da-sub{font-size:.65em;color:var(--txm);font-weight:400}
+
+        /* -- Assessment Complete Card -- */
+        .assess-card{border-radius:12px;padding:12px;margin:8px 0;animation:fadeIn .4s}
+        .assess-card .ac-hdr{text-align:center;margin-bottom:8px}
+        .assess-card .ac-title{font-size:.95em;font-weight:700}
+        .assess-card .ac-urgency{font-size:.72em;color:var(--txm);margin-top:2px}
+        .assess-card .ac-row{display:flex;justify-content:space-between;align-items:center;padding:4px 0;border-bottom:1px solid rgba(255,255,255,.04);font-size:.7em}
+        .assess-card .ac-domain{color:var(--tx)}
+        .assess-card .ac-footer{font-size:.55em;color:var(--txm);margin-top:6px;text-align:center;opacity:.6}
 
         .bar{display:flex;align-items:center;gap:6px;padding:8px 10px;padding-bottom:max(8px,env(safe-area-inset-bottom));background:var(--sf);border-top:1px solid rgba(255,255,255,.06);flex-shrink:0}
         .bar .b{width:42px;height:42px;border:none;border-radius:12px;display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:17px;flex-shrink:0;background:rgba(255,255,255,.06);color:var(--txm);transition:all .15s}
@@ -62,11 +126,22 @@
         @keyframes glow-g{0%,100%{box-shadow:0 0 0 0 rgba(102,187,106,.3)}50%{box-shadow:0 0 0 10px rgba(102,187,106,0)}}
         @keyframes spin{to{transform:rotate(360deg)}}
         @keyframes breathe{0%,100%{transform:scale(1)}50%{transform:scale(1.05)}}
+        @keyframes pulse-red{0%,100%{box-shadow:0 0 0 0 rgba(239,83,80,.25)}50%{box-shadow:0 0 0 6px rgba(239,83,80,0)}}
         @media(min-width:600px){.chat{padding:10px 15%}.bbl{max-width:65%}}
     </style>
 </head>
 <body>
-    <div class="hdr"><h1>Malaika</h1><p>WHO IMCI Child Health AI &middot; Gemma 4</p></div>
+    <div class="hdr"><h1>Malaika</h1><p>WHO IMCI Child Health AI Agent &middot; Gemma 4</p></div>
+
+    <!-- IMCI Progress Bar -->
+    <div class="progress" id="progress">
+        <div class="pstep active" data-step="danger_signs"><span class="pnum">1</span><span class="plbl">Danger Signs</span></div>
+        <div class="pstep" data-step="breathing"><span class="pnum">2</span><span class="plbl">Breathing</span></div>
+        <div class="pstep" data-step="diarrhea"><span class="pnum">3</span><span class="plbl">Diarrhea</span></div>
+        <div class="pstep" data-step="fever"><span class="pnum">4</span><span class="plbl">Fever</span></div>
+        <div class="pstep" data-step="nutrition"><span class="pnum">5</span><span class="plbl">Nutrition</span></div>
+    </div>
+
     <div class="orb-wrap">
         <div class="orb" id="orb"><span class="oi" id="oi">&#127908;</span></div>
         <div class="olbl" id="olbl">Tap to start</div>
@@ -91,6 +166,13 @@ var orb=document.getElementById('orb'),oi=document.getElementById('oi'),olbl=doc
 var ws=null,micStream=null,audioCtx=null,processor=null,playbackCtx=null;
 var state='idle',speaking=false,speechFrames=0,silenceFrames=0;
 var camStream=null;
+
+// ── Audio Playback Queue ──
+var audioQueue=[];
+var audioPlaying=false;
+
+// ── Skill card tracking ──
+var activeSkillCards={};
 
 // ── State ──
 function setState(s){
@@ -117,9 +199,18 @@ function connect(){
                 if(msg.role==='user') updateOrAddMsg('user',msg.text);
                 else addMsg('bot',msg.text);
             }
-            else if(msg.type==='audio') playAudioChunk(msg.data);
-            else if(msg.type==='audio_end'){/* playback handled by onended */}
+            else if(msg.type==='audio') queueAudio(msg.data);
+            else if(msg.type==='audio_end'){/* handled by queue */}
             else if(msg.type==='error') addMsg('bot','Error: '+msg.message);
+            // Structured agent events
+            else if(msg.type==='step_change') handleStepChange(msg);
+            else if(msg.type==='skill_invoked') handleSkillInvoked(msg);
+            else if(msg.type==='skill_result') handleSkillResult(msg);
+            else if(msg.type==='classification') renderClassification(msg);
+            else if(msg.type==='finding') renderFinding(msg);
+            else if(msg.type==='image_request') renderImageRequest(msg);
+            else if(msg.type==='assessment_complete') renderAssessmentComplete(msg);
+            else if(msg.type==='danger_alert') renderDangerAlert(msg);
         }
     };
 
@@ -137,7 +228,6 @@ orb.onclick=function(){
         return;
     }
     if(state==='listening'){
-        // User finished speaking — send speech_end
         ws.send(JSON.stringify({type:'speech_end'}));
     } else if(state==='idle'){
         startMic();
@@ -169,7 +259,6 @@ async function startMic(){
             if(!ws||ws.readyState!==1)return;
             var input=e.inputBuffer.getChannelData(0);
 
-            // VAD
             var energy=0;
             for(var i=0;i<input.length;i++)energy+=input[i]*input[i];
             energy=Math.sqrt(energy/input.length);
@@ -188,13 +277,11 @@ async function startMic(){
                 }
             }
 
-            // Stream audio when speaking
             if(speaking){
                 var outLen=Math.round(input.length*ratio);
                 var pcm=new Int16Array(outLen);
                 for(var j=0;j<outLen;j++){
                     var si=Math.min(Math.round(j/ratio),input.length-1);
-                    // Gain boost (echo cancellation suppresses mic)
                     var sample=input[si]*4.0;
                     pcm[j]=Math.max(-32768,Math.min(32767,Math.round(sample*32767)));
                 }
@@ -215,33 +302,35 @@ function stopMic(){
     if(audioCtx){audioCtx.close().catch(function(){});audioCtx=null;}
 }
 
-// ── Audio Playback ──
-function playAudioChunk(base64Data){
+// ── Audio Playback Queue (sentence-level TTS) ──
+function queueAudio(base64Data){
+    audioQueue.push(base64Data);
+    if(!audioPlaying) playNextInQueue();
+}
+
+function playNextInQueue(){
+    if(audioQueue.length===0){audioPlaying=false;return;}
+    audioPlaying=true;
+    var base64Data=audioQueue.shift();
+
     if(!playbackCtx)playbackCtx=new AudioContext({sampleRate:24000});
 
-    // Decode base64 to bytes
     var raw=atob(base64Data);
     var bytes=new Uint8Array(raw.length);
     for(var i=0;i<raw.length;i++)bytes[i]=raw.charCodeAt(i);
 
-    // Check if it's already a WAV (starts with RIFF)
-    var isWav=(bytes.length>4 && bytes[0]===0x52 && bytes[1]===0x49 && bytes[2]===0x46 && bytes[3]===0x46);
-
-    var audioBytes;
-    if(isWav){
-        audioBytes=bytes.buffer.slice(0);
-    }else{
-        // Raw PCM — wrap in WAV header
-        audioBytes=pcmToWav(bytes,24000);
-    }
+    var isWav=(bytes.length>4&&bytes[0]===0x52&&bytes[1]===0x49&&bytes[2]===0x46&&bytes[3]===0x46);
+    var audioBytes=isWav?bytes.buffer.slice(0):pcmToWav(bytes,24000);
 
     playbackCtx.decodeAudioData(audioBytes).then(function(decoded){
         var src=playbackCtx.createBufferSource();
         src.buffer=decoded;
         src.connect(playbackCtx.destination);
+        src.onended=playNextInQueue;
         src.start();
     }).catch(function(err){
-        console.log('Audio playback error:',err);
+        console.log('Audio decode error:',err);
+        playNextInQueue();
     });
 }
 
@@ -261,21 +350,18 @@ function pcmToWav(pcmBytes,sr){
 
 // ── Chat Rendering ──
 var lastUserBbl=null;
-var lastUserMsgId=0;
 function addMsg(role,text,imgUrl){
     var m=document.createElement('div');m.className='msg '+role;
     var b=document.createElement('div');b.className='bbl';
     if(imgUrl){var img=document.createElement('img');img.src=imgUrl;b.appendChild(img);}
     if(text){var d=document.createElement('div');d.innerHTML=md(text);b.appendChild(d);}
     m.appendChild(b);chat.appendChild(m);chat.scrollTop=chat.scrollHeight;
-    if(role==='user'){lastUserBbl=b;lastUserMsgId++;}
-    else{lastUserBbl=null;} // Reset after bot message so next user msg is new
+    if(role==='user'){lastUserBbl=b;}
+    else{lastUserBbl=null;}
     return m;
 }
 
 function updateOrAddMsg(role,text){
-    // Interim transcripts update the current user bubble
-    // Final transcripts should create new bubbles
     if(role==='user'&&lastUserBbl){
         lastUserBbl.innerHTML=md(text);
         chat.scrollTop=chat.scrollHeight;
@@ -284,18 +370,153 @@ function updateOrAddMsg(role,text){
     }
 }
 
-var dotsEl=null;
-function showDots(){dotsEl=document.createElement('div');dotsEl.className='msg bot';dotsEl.innerHTML='<div class="bbl dots"><span></span><span></span><span></span></div>';chat.appendChild(dotsEl);chat.scrollTop=chat.scrollHeight;}
-function hideDots(){if(dotsEl){dotsEl.remove();dotsEl=null;}}
-
 function md(t){return t.replace(/\*\*(.*?)\*\*/g,'<strong>$1</strong>').replace(/\n\n/g,'</p><p>').replace(/\n/g,'<br>').replace(/^/,'<p>').replace(/$/,'</p>');}
+
+// ── IMCI Progress Bar ──
+function handleStepChange(data){
+    var prog=document.getElementById('progress');
+    prog.classList.add('vis');
+    var steps=prog.querySelectorAll('.pstep');
+    steps.forEach(function(el,i){
+        el.classList.remove('active','done');
+        if(i<data.index-1) el.classList.add('done');
+        else if(i===data.index-1) el.classList.add('active');
+    });
+}
+
+// ── Skill Execution Cards ──
+function handleSkillInvoked(data){
+    var card=document.createElement('div');
+    card.className='skill-card';
+    card.id='skill-'+data.skill;
+    card.innerHTML='<div class="sk-hdr"><span class="sk-spinner"></span> '+
+        '<span>'+data.description+'</span></div>';
+    chat.appendChild(card);
+    chat.scrollTop=chat.scrollHeight;
+    activeSkillCards[data.skill]=card;
+}
+
+function handleSkillResult(data){
+    var card=activeSkillCards[data.skill];
+    if(!card){
+        card=document.createElement('div');
+        chat.appendChild(card);
+    }
+    card.className='skill-card done';
+
+    var findingsHtml='';
+    if(data.findings&&Object.keys(data.findings).length>0){
+        var chips=[];
+        for(var k in data.findings){
+            var v=data.findings[k];
+            var cls=v===true?'pos':(v===false?'neg':'');
+            var icon=v===true?'\u2713':(v===false?'\u2717':v);
+            chips.push('<span class="finding-chip '+cls+'">'+k.replace(/_/g,' ')+' '+icon+'</span>');
+        }
+        findingsHtml='<div class="findings-row">'+chips.join('')+'</div>';
+    }
+
+    var confHtml=data.confidence?'<div class="sk-confidence">Confidence: '+(data.confidence*100).toFixed(0)+'%</div>':'';
+
+    card.innerHTML='<div class="sk-hdr"><span class="sk-icon">\u2713</span> '+
+        '<span>'+data.skill.replace(/_/g,' ').replace(/\b\w/g,function(c){return c.toUpperCase();})+'</span></div>'+
+        (data.description?'<div class="sk-body">'+data.description+'</div>':'')+
+        findingsHtml+confHtml;
+
+    delete activeSkillCards[data.skill];
+    chat.scrollTop=chat.scrollHeight;
+}
+
+// ── Classification Cards ──
+function renderClassification(data){
+    var card=document.createElement('div');
+    card.className='cls-card sev-'+data.severity;
+
+    var badgeLabel=data.severity==='red'?'URGENT':(data.severity==='yellow'?'CAUTION':'CLEAR');
+    var stepLabel=data.step.replace(/_/g,' ').replace(/\b\w/g,function(c){return c.toUpperCase();});
+
+    card.innerHTML='<div style="display:flex;align-items:center;justify-content:space-between">'+
+        '<span style="font-size:.65em;color:var(--txm)">'+stepLabel+'</span>'+
+        '<span class="cls-badge sev-'+data.severity+'">'+badgeLabel+'</span></div>'+
+        '<div class="cls-title">'+data.label+'</div>'+
+        '<div class="cls-reason">'+data.reasoning+'</div>'+
+        '<div class="cls-source">WHO IMCI Classification</div>';
+
+    chat.appendChild(card);
+    chat.scrollTop=chat.scrollHeight;
+}
+
+// ── Finding Chips ──
+function renderFinding(data){
+    // Append to the last bot message or skill card
+    var targets=chat.querySelectorAll('.msg.bot .bbl, .skill-card.done');
+    if(targets.length===0)return;
+    var last=targets[targets.length-1];
+    var row=last.querySelector('.findings-row');
+    if(!row){row=document.createElement('div');row.className='findings-row';last.appendChild(row);}
+    var cls=data.value===true?'pos':(data.value===false?'neg':'');
+    var icon=data.value===true?'\u2713':(data.value===false?'\u2717':data.value);
+    var chip=document.createElement('span');
+    chip.className='finding-chip '+cls;
+    chip.textContent=data.label+' '+icon;
+    row.appendChild(chip);
+    chat.scrollTop=chat.scrollHeight;
+}
+
+// ── Image Request Cards ──
+function renderImageRequest(data){
+    var card=document.createElement('div');
+    card.className='img-req';
+    card.onclick=function(){openCam();};
+    card.innerHTML='<div class="ir-icon">&#128247;</div>'+
+        '<div class="ir-text">'+data.prompt+'</div>'+
+        '<div class="ir-sub">Tap to take a photo</div>';
+    chat.appendChild(card);
+    chat.scrollTop=chat.scrollHeight;
+}
+
+// ── Danger Alert Banner ──
+function renderDangerAlert(data){
+    var card=document.createElement('div');
+    card.className='danger-alert';
+    var signs=data.signs?data.signs.map(function(s){return s.replace(/_/g,' ');}).join(', '):'';
+    card.innerHTML='<div class="da-icon">&#9888;</div>'+
+        '<div><div class="da-text">'+data.message+'</div>'+
+        (signs?'<div class="da-sub">Signs: '+signs+'</div>':'')+'</div>';
+    chat.appendChild(card);
+    chat.scrollTop=chat.scrollHeight;
+}
+
+// ── Assessment Complete Card ──
+function renderAssessmentComplete(data){
+    var sevColors={red:'var(--red)',yellow:'var(--ylw)',green:'var(--grn)'};
+    var card=document.createElement('div');
+    card.className='assess-card cls-card sev-'+data.severity;
+
+    var clsHtml='';
+    if(data.classifications){
+        data.classifications.forEach(function(c){
+            clsHtml+='<div class="ac-row"><span class="ac-domain">'+c.domain+'</span>'+
+                '<span class="cls-badge sev-'+c.severity+'">'+c.classification+'</span></div>';
+        });
+    }
+
+    card.innerHTML='<div class="ac-hdr">'+
+        '<div class="ac-title" style="color:'+(sevColors[data.severity]||'var(--tx)')+'">Assessment Complete</div>'+
+        '<div class="ac-urgency">'+data.urgency+'</div></div>'+
+        '<div style="margin-top:6px">'+clsHtml+'</div>'+
+        '<div class="ac-footer">Based on WHO IMCI Chart Booklet classifications</div>';
+
+    chat.appendChild(card);
+    chat.scrollTop=chat.scrollHeight;
+}
 
 // ── Text input ──
 window.sendTyped=function(){
     var text=ti.value.trim();if(!text)return;ti.value='';
     if(!started){started=true;connect();}
     if(ws&&ws.readyState===1){
-        addMsg('user',text);lastUserEl=null;
+        addMsg('user',text);lastUserBbl=null;
         ws.send(JSON.stringify({type:'text',text:text}));
     }
 };

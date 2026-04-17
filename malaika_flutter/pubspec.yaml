@@ -13,8 +13,8 @@ dependencies:
   flutter:
     sdk: flutter
 
-  # On-device Gemma 4 inference — add back after UI is working
-  # flutter_gemma: ^0.13.4
+  # On-device LLM inference via llama.cpp (lightweight, GGUF models)
+  lcpp: ^0.1.3
 
   # Speech-to-text (offline via native engines)
   speech_to_text: ^7.3.0
@@ -30,6 +30,9 @@ dependencies:
 
   # Permissions
   permission_handler: ^11.3.1
+
+  # HTTP for model download
+  http: ^1.2.0
 
   # UI utilities
   cupertino_icons: ^1.0.8

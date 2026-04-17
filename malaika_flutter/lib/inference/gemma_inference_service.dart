@@ -1,37 +1,27 @@
-/// Gemma 4 E2B inference via flutter_gemma (Google's on-device SDK).
+/// Gemma 4 E2B inference via llama.cpp (lcpp package).
 ///
-/// Uses LiteRT-LM format (.litertlm) for optimal on-device performance.
-/// Supports text on both iOS and Android.
-/// Supports vision (image input) on Android.
+/// Uses GGUF format — lightweight, works offline on iOS and Android.
 library;
 
 import 'dart:typed_data';
-import 'package:flutter_gemma/flutter_gemma.dart';
+import 'package:lcpp/lcpp.dart';
 import 'inference_service.dart';
 
-/// On-device Gemma 4 E2B inference using flutter_gemma.
+/// On-device Gemma 4 E2B inference using llama.cpp.
 class GemmaInferenceService implements InferenceService {
-  bool _isLoaded = false;
+  Llama? _llama;
 
   @override
-  bool get isModelLoaded => _isLoaded;
+  bool get isModelLoaded => _llama != null;
 
   @override
-  bool get supportsVision {
-    // flutter_gemma supports vision on Android but not iOS currently
-    // This can be updated as the SDK evolves
-    return false; // Conservative — enable per-platform when tested
-  }
+  bool get supportsVision => false;
 
   @override
   Future<void> loadModel(String modelPath) async {
-    await FlutterGemmaPlugin.instance.init(
-      maxTokens: 1024,
-      temperature: 0.4,
-      topK: 40,
-      topP: 0.95,
+    _llama = Llama(
+      modelParams: ModelParams(path: modelPath),
     );
-    _isLoaded = true;
   }
 
   @override
@@ -40,17 +30,20 @@ class GemmaInferenceService implements InferenceService {
     String? systemInstruction,
     int maxTokens = 512,
   }) async {
-    if (!_isLoaded) throw StateError('Model not loaded');
+    if (_llama == null) throw StateError('Model not loaded');
 
-    final fullPrompt = systemInstruction != null
-        ? '$systemInstruction\n\n$prompt'
-        : prompt;
+    final messages = <ChatMessage>[];
+    if (systemInstruction != null) {
+      messages.add(SystemChatMessage(systemInstruction));
+    }
+    messages.add(UserChatMessage(prompt));
 
-    final response = await FlutterGemmaPlugin.instance.getResponse(
-      prompt: fullPrompt,
-    );
-
-    return response ?? '';
+    final buffer = StringBuffer();
+    await for (final token in _llama!.prompt(messages)) {
+      buffer.write(token);
+      if (buffer.length > maxTokens * 4) break;
+    }
+    return buffer.toString().trim();
   }
 
   @override
@@ -59,30 +52,25 @@ class GemmaInferenceService implements InferenceService {
     String? systemInstruction,
     int maxTokens = 512,
   }) {
-    if (!_isLoaded) throw StateError('Model not loaded');
+    if (_llama == null) throw StateError('Model not loaded');
 
-    final fullPrompt = systemInstruction != null
-        ? '$systemInstruction\n\n$prompt'
-        : prompt;
+    final messages = <ChatMessage>[];
+    if (systemInstruction != null) {
+      messages.add(SystemChatMessage(systemInstruction));
+    }
+    messages.add(UserChatMessage(prompt));
 
-    return FlutterGemmaPlugin.instance.getResponseAsync(
-      prompt: fullPrompt,
-    );
+    return _llama!.prompt(messages);
   }
 
   @override
-  Future<String?> analyzeImage(
-    Uint8List imageBytes,
-    String prompt,
-  ) async {
-    if (!supportsVision) return null;
-    // Vision support via flutter_gemma multimodal API
-    // This will be implemented when flutter_gemma adds iOS vision support
+  Future<String?> analyzeImage(Uint8List imageBytes, String prompt) async {
     return null;
   }
 
   @override
   void dispose() {
-    _isLoaded = false;
+    _llama?.stop();
+    _llama = null;
   }
 }

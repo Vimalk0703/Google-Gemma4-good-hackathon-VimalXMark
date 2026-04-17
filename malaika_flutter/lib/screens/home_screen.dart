@@ -5,10 +5,14 @@ import '../widgets/imci_progress_bar.dart';
 import '../widgets/classification_card.dart';
 import '../widgets/skill_card.dart';
 import '../widgets/image_request_card.dart';
+import '../inference/inference_service.dart';
+import '../core/chat_engine.dart';
 
 /// Main assessment screen — orb, chat, skill cards, classifications.
 class HomeScreen extends StatefulWidget {
-  const HomeScreen({super.key});
+  final InferenceService? inference;
+
+  const HomeScreen({super.key, this.inference});
 
   @override
   State<HomeScreen> createState() => _HomeScreenState();
@@ -22,11 +26,19 @@ class _HomeScreenState extends State<HomeScreen> {
   final List<_ChatItem> _chatItems = [];
   VoiceState _voiceState = VoiceState.idle;
   int _currentStep = 0;
+  late final ChatEngine _engine;
+  bool _hasModel = false;
 
   @override
   void initState() {
     super.initState();
-    _addBotMessage('Tap the circle above to start your child\'s health check.');
+    _engine = ChatEngine();
+    _hasModel = widget.inference != null;
+
+    // Process initial greeting
+    final result = _engine.process(userText: 'Hi');
+    _addBotMessage(result['text'] as String? ?? 'Hello! I am Malaika. How old is your child in months?');
+    _processEvents(result['events'] as List<Map<String, dynamic>>? ?? []);
   }
 
   void _addBotMessage(String text) {
@@ -66,36 +78,102 @@ class _HomeScreenState extends State<HomeScreen> {
     });
   }
 
-  void _sendText() {
+  void _processEvents(List<Map<String, dynamic>> events) {
+    for (final event in events) {
+      final type = event['type'] as String?;
+      if (type == 'step_change') {
+        setState(() => _currentStep = (event['index'] as int?) ?? _currentStep);
+      } else if (type == 'classification') {
+        setState(() {
+          _chatItems.add(_ChatItem(
+            type: _ChatItemType.classification,
+            metadata: {
+              'step': event['step'] as String? ?? '',
+              'severity': event['severity'] as String? ?? 'green',
+              'label': event['label'] as String? ?? '',
+              'reasoning': event['reasoning'] as String? ?? '',
+            },
+          ));
+        });
+      } else if (type == 'skill_invoked') {
+        setState(() {
+          _chatItems.add(_ChatItem(
+            type: _ChatItemType.skillCard,
+            metadata: {
+              'skill': event['skill'] as String? ?? '',
+              'description': event['description'] as String? ?? '',
+              'done': false,
+            },
+          ));
+        });
+      } else if (type == 'image_request') {
+        setState(() {
+          _chatItems.add(_ChatItem(
+            type: _ChatItemType.imageRequest,
+            text: event['prompt'] as String? ?? 'Take a photo',
+          ));
+        });
+      } else if (type == 'danger_alert') {
+        _addBotMessage('WARNING: ${event['message']}');
+      } else if (type == 'assessment_complete') {
+        setState(() {
+          _chatItems.add(_ChatItem(
+            type: _ChatItemType.classification,
+            metadata: {
+              'step': 'Overall',
+              'severity': event['severity'] as String? ?? 'green',
+              'label': 'Assessment Complete',
+              'reasoning': event['urgency'] as String? ?? '',
+            },
+          ));
+        });
+      }
+    }
+    _scrollToBottom();
+  }
+
+  Future<void> _sendText() async {
     final text = _textController.text.trim();
     if (text.isEmpty) return;
     _textController.clear();
     _addUserMessage(text);
 
-    // Simulate a response
     setState(() => _voiceState = VoiceState.thinking);
-    Future.delayed(const Duration(seconds: 1), () {
-      if (!mounted) return;
-      _addBotMessage('Thank you. Let me note that down.');
 
-      // Demo: show a classification after a few messages
-      if (_chatItems.where((c) => c.type == _ChatItemType.userMessage).length == 2) {
-        setState(() {
-          _chatItems.add(_ChatItem(
-            type: _ChatItemType.classification,
-            metadata: {
-              'step': 'danger_signs',
-              'severity': 'green',
-              'label': 'No Danger Signs',
-              'reasoning': 'No general danger signs detected. WHO IMCI p.2.',
-            },
-          ));
-          _currentStep = 2;
-        });
+    // Process through ChatEngine (keyword extraction + IMCI protocol)
+    final result = _engine.process(userText: text);
+    final events = (result['events'] as List<Map<String, dynamic>>?) ?? [];
+
+    // Generate response
+    String response;
+    if (_hasModel && widget.inference != null) {
+      // Use Gemma 4 on-device for response generation
+      try {
+        final systemPrompt = result['systemPrompt'] as String? ?? '';
+        final stepContext = result['stepContext'] as String? ?? '';
+        final prompt = '$stepContext\n\nCaregiver says: $text';
+        response = await widget.inference!.generate(prompt, systemInstruction: systemPrompt, maxTokens: 200);
+        if (response.trim().isEmpty) {
+          response = result['text'] as String? ?? 'I understand. Tell me more.';
+        }
+      } catch (e) {
+        response = result['text'] as String? ?? 'I understand. Tell me more.';
       }
+    } else {
+      // Demo mode — use ChatEngine's built-in response
+      response = result['text'] as String? ?? 'I understand. Tell me more.';
+    }
 
-      setState(() => _voiceState = VoiceState.idle);
-    });
+    _engine.recordAssistantResponse(response);
+
+    if (!mounted) return;
+
+    // Show events (classifications, skill cards, etc.)
+    _processEvents(events);
+
+    // Show response
+    _addBotMessage(response);
+    setState(() => _voiceState = VoiceState.idle);
   }
 
   @override

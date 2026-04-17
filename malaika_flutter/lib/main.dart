@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'theme/malaika_theme.dart';
-import 'screens/home_screen.dart';
+import 'screens/splash_screen.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -16,7 +16,7 @@ class MalaikaApp extends StatelessWidget {
       title: 'Malaika',
       debugShowCheckedModeBanner: false,
       theme: malaikaTheme(),
-      home: const HomeScreen(),
+      home: const SplashScreen(),
     );
   }
 }

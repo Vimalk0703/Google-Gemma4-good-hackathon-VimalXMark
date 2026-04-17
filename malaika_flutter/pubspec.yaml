@@ -13,8 +13,8 @@ dependencies:
   flutter:
     sdk: flutter
 
-  # On-device Gemma 4 inference (Google's SDK)
-  flutter_gemma: ^0.13.4
+  # On-device Gemma 4 inference — add back after UI is working
+  # flutter_gemma: ^0.13.4
 
   # Speech-to-text (offline via native engines)
   speech_to_text: ^7.3.0
@@ -24,20 +24,12 @@ dependencies:
 
   # Camera and image handling
   image_picker: ^1.1.2
-  camera: ^0.11.0+2
-
-  # State management
-  flutter_riverpod: ^2.6.1
 
   # Storage and paths
   path_provider: ^2.1.5
-  shared_preferences: ^2.3.4
 
   # Permissions
   permission_handler: ^11.3.1
-
-  # Connectivity check (initial model download only)
-  connectivity_plus: ^6.1.0
 
   # UI utilities
   cupertino_icons: ^1.0.8

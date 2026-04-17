@@ -95,7 +95,7 @@ class _OrbButtonState extends State<OrbButton> with TickerProviderStateMixin {
         GestureDetector(
           onTap: widget.onTap,
           child: AnimatedBuilder(
-            animation: widget.state == VoiceState.speaking
+            listenable: widget.state == VoiceState.speaking
                 ? _pulseController
                 : widget.state == VoiceState.thinking
                     ? _spinController

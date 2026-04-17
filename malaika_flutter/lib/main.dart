@@ -1,11 +1,10 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'theme/malaika_theme.dart';
-import 'screens/splash_screen.dart';
+import 'screens/home_screen.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
-  runApp(const ProviderScope(child: MalaikaApp()));
+  runApp(const MalaikaApp());
 }
 
 class MalaikaApp extends StatelessWidget {
@@ -17,7 +16,7 @@ class MalaikaApp extends StatelessWidget {
       title: 'Malaika',
       debugShowCheckedModeBanner: false,
       theme: malaikaTheme(),
-      home: const SplashScreen(),
+      home: const HomeScreen(),
     );
   }
 }

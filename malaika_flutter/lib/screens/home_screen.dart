@@ -1,15 +1,12 @@
 import 'package:flutter/material.dart';
 import '../theme/malaika_theme.dart';
-import '../widgets/orb_button.dart';
 import '../widgets/chat_bubble.dart';
 import '../widgets/imci_progress_bar.dart';
 import '../widgets/classification_card.dart';
 import '../widgets/skill_card.dart';
-import '../widgets/finding_chip.dart';
-import '../widgets/danger_alert_banner.dart';
 import '../widgets/image_request_card.dart';
 
-/// Main assessment screen — voice orb, chat, skill cards, classifications.
+/// Main assessment screen — orb, chat, skill cards, classifications.
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
 
@@ -24,8 +21,7 @@ class _HomeScreenState extends State<HomeScreen> {
   final ScrollController _scrollController = ScrollController();
   final List<_ChatItem> _chatItems = [];
   VoiceState _voiceState = VoiceState.idle;
-  int _currentStep = 0; // 0 = not started, 1-5 = clinical steps
-  final int _totalSteps = 5;
+  int _currentStep = 0;
 
   @override
   void initState() {
@@ -43,40 +39,6 @@ class _HomeScreenState extends State<HomeScreen> {
   void _addUserMessage(String text) {
     setState(() {
       _chatItems.add(_ChatItem(type: _ChatItemType.userMessage, text: text));
-    });
-    _scrollToBottom();
-  }
-
-  void _addClassification(String step, String severity, String label, String reasoning) {
-    setState(() {
-      _chatItems.add(_ChatItem(
-        type: _ChatItemType.classification,
-        metadata: {'step': step, 'severity': severity, 'label': label, 'reasoning': reasoning},
-      ));
-    });
-    _scrollToBottom();
-  }
-
-  void _addSkillCard(String skillName, String description, {bool done = false}) {
-    setState(() {
-      _chatItems.add(_ChatItem(
-        type: _ChatItemType.skillCard,
-        metadata: {'skill': skillName, 'description': description, 'done': done},
-      ));
-    });
-    _scrollToBottom();
-  }
-
-  void _addDangerAlert(String message) {
-    setState(() {
-      _chatItems.add(_ChatItem(type: _ChatItemType.dangerAlert, text: message));
-    });
-    _scrollToBottom();
-  }
-
-  void _addImageRequest(String prompt) {
-    setState(() {
-      _chatItems.add(_ChatItem(type: _ChatItemType.imageRequest, text: prompt));
     });
     _scrollToBottom();
   }
@@ -99,16 +61,7 @@ class _HomeScreenState extends State<HomeScreen> {
         _voiceState = VoiceState.listening;
         if (_currentStep == 0) _currentStep = 1;
       } else if (_voiceState == VoiceState.listening) {
-        _voiceState = VoiceState.thinking;
-        // Simulate processing
-        Future.delayed(const Duration(seconds: 2), () {
-          if (mounted) {
-            setState(() => _voiceState = VoiceState.speaking);
-            Future.delayed(const Duration(seconds: 2), () {
-              if (mounted) setState(() => _voiceState = VoiceState.listening);
-            });
-          }
-        });
+        _voiceState = VoiceState.idle;
       }
     });
   }
@@ -119,12 +72,28 @@ class _HomeScreenState extends State<HomeScreen> {
     _textController.clear();
     _addUserMessage(text);
 
-    // TODO: Process through ChatEngine + inference service
-    // For now, simulate a response
+    // Simulate a response
     setState(() => _voiceState = VoiceState.thinking);
     Future.delayed(const Duration(seconds: 1), () {
       if (!mounted) return;
-      _addBotMessage('I understand. Let me note that down.');
+      _addBotMessage('Thank you. Let me note that down.');
+
+      // Demo: show a classification after a few messages
+      if (_chatItems.where((c) => c.type == _ChatItemType.userMessage).length == 2) {
+        setState(() {
+          _chatItems.add(_ChatItem(
+            type: _ChatItemType.classification,
+            metadata: {
+              'step': 'danger_signs',
+              'severity': 'green',
+              'label': 'No Danger Signs',
+              'reasoning': 'No general danger signs detected. WHO IMCI p.2.',
+            },
+          ));
+          _currentStep = 2;
+        });
+      }
+
       setState(() => _voiceState = VoiceState.idle);
     });
   }
@@ -140,7 +109,7 @@ class _HomeScreenState extends State<HomeScreen> {
               padding: const EdgeInsets.symmetric(vertical: 8),
               child: Column(
                 children: [
-                  Text(
+                  const Text(
                     'Malaika',
                     style: TextStyle(
                       fontSize: 18,
@@ -156,20 +125,14 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             ),
 
-            // Progress bar (visible after step 1)
+            // Progress bar
             if (_currentStep > 0)
-              ImciProgressBar(
-                currentStep: _currentStep,
-                totalSteps: _totalSteps,
-              ),
+              ImciProgressBar(currentStep: _currentStep),
 
-            // Orb
+            // Orb button
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 8),
-              child: OrbButton(
-                state: _voiceState,
-                onTap: _onOrbTap,
-              ),
+              child: _OrbButton(state: _voiceState, onTap: _onOrbTap),
             ),
 
             // Chat area
@@ -198,15 +161,8 @@ class _HomeScreenState extends State<HomeScreen> {
                         description: item.metadata!['description'] as String,
                         isDone: item.metadata!['done'] as bool,
                       );
-                    case _ChatItemType.dangerAlert:
-                      return DangerAlertBanner(message: item.text!);
                     case _ChatItemType.imageRequest:
-                      return ImageRequestCard(
-                        prompt: item.text!,
-                        onTap: () {
-                          // TODO: Open camera
-                        },
-                      );
+                      return ImageRequestCard(prompt: item.text!, onTap: () {});
                   }
                 },
               ),
@@ -215,27 +171,17 @@ class _HomeScreenState extends State<HomeScreen> {
             // Input bar
             Container(
               padding: EdgeInsets.only(
-                left: 10,
-                right: 10,
-                top: 8,
+                left: 10, right: 10, top: 8,
                 bottom: MediaQuery.of(context).padding.bottom + 8,
               ),
               decoration: BoxDecoration(
                 color: MalaikaColors.surface,
-                border: Border(top: BorderSide(color: Colors.white.withOpacity(0.06))),
+                border: Border(top: BorderSide(color: Colors.white.withValues(alpha: 0.06))),
               ),
               child: Row(
                 children: [
-                  // Camera button
-                  _BarButton(
-                    icon: Icons.camera_alt_outlined,
-                    onTap: () {
-                      // TODO: Open camera
-                    },
-                  ),
+                  _BarButton(icon: Icons.camera_alt_outlined, onTap: () {}),
                   const SizedBox(width: 6),
-
-                  // Text input
                   Expanded(
                     child: TextField(
                       controller: _textController,
@@ -249,8 +195,6 @@ class _HomeScreenState extends State<HomeScreen> {
                     ),
                   ),
                   const SizedBox(width: 6),
-
-                  // Send button
                   _BarButton(
                     icon: Icons.send,
                     color: MalaikaColors.primary,
@@ -273,23 +217,86 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 }
 
-// Internal chat item model
-enum _ChatItemType { userMessage, botMessage, classification, skillCard, dangerAlert, imageRequest }
+// Simple orb button inline (no separate file dependency issues)
+class _OrbButton extends StatelessWidget {
+  final VoiceState state;
+  final VoidCallback onTap;
+
+  const _OrbButton({required this.state, required this.onTap});
+
+  Color get _borderColor {
+    switch (state) {
+      case VoiceState.idle: return MalaikaColors.primary.withValues(alpha: 0.25);
+      case VoiceState.listening: return MalaikaColors.green.withValues(alpha: 0.6);
+      case VoiceState.thinking: return MalaikaColors.yellow.withValues(alpha: 0.6);
+      case VoiceState.speaking: return MalaikaColors.primary.withValues(alpha: 0.6);
+    }
+  }
+
+  Color get _bgColor {
+    switch (state) {
+      case VoiceState.idle: return MalaikaColors.primary.withValues(alpha: 0.08);
+      case VoiceState.listening: return MalaikaColors.green.withValues(alpha: 0.12);
+      case VoiceState.thinking: return MalaikaColors.yellow.withValues(alpha: 0.12);
+      case VoiceState.speaking: return MalaikaColors.primary.withValues(alpha: 0.12);
+    }
+  }
+
+  IconData get _icon {
+    switch (state) {
+      case VoiceState.idle:
+      case VoiceState.listening: return Icons.mic;
+      case VoiceState.thinking: return Icons.hourglass_top;
+      case VoiceState.speaking: return Icons.volume_up;
+    }
+  }
+
+  String get _label {
+    switch (state) {
+      case VoiceState.idle: return 'Tap to talk';
+      case VoiceState.listening: return 'Listening...';
+      case VoiceState.thinking: return 'Thinking...';
+      case VoiceState.speaking: return 'Speaking...';
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        GestureDetector(
+          onTap: onTap,
+          child: Container(
+            width: 80, height: 80,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              border: Border.all(color: _borderColor, width: 2),
+              color: _bgColor,
+            ),
+            child: Icon(_icon, size: 28, color: _borderColor),
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(_label, style: TextStyle(fontSize: 11, color: MalaikaColors.textMuted)),
+      ],
+    );
+  }
+}
+
+enum _ChatItemType { userMessage, botMessage, classification, skillCard, imageRequest }
 
 class _ChatItem {
   final _ChatItemType type;
   final String? text;
   final Map<String, dynamic>? metadata;
-
   _ChatItem({required this.type, this.text, this.metadata});
 }
 
-// Small bar button widget
 class _BarButton extends StatelessWidget {
   final IconData icon;
   final VoidCallback onTap;
   final Color? color;
-
   const _BarButton({required this.icon, required this.onTap, this.color});
 
   @override
@@ -297,10 +304,9 @@ class _BarButton extends StatelessWidget {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        width: 42,
-        height: 42,
+        width: 42, height: 42,
         decoration: BoxDecoration(
-          color: color ?? Colors.white.withOpacity(0.06),
+          color: color ?? Colors.white.withValues(alpha: 0.06),
           borderRadius: BorderRadius.circular(12),
         ),
         child: Icon(icon, color: color != null ? MalaikaColors.background : MalaikaColors.textMuted, size: 20),

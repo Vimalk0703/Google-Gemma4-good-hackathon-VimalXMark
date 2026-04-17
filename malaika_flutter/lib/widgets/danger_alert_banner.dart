@@ -33,7 +33,7 @@ class _DangerAlertBannerState extends State<DangerAlertBanner>
   @override
   Widget build(BuildContext context) {
     return AnimatedBuilder(
-      animation: _controller,
+      listenable: _controller,
       builder: (context, _) {
         return Padding(
           padding: const EdgeInsets.symmetric(vertical: 6),

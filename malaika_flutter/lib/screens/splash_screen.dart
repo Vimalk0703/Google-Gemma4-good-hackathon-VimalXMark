@@ -27,7 +27,7 @@ class _SplashScreenState extends State<SplashScreen> {
     try {
       setState(() => _status = 'Initializing Gemma framework...');
       await FlutterGemma.initialize(
-        huggingFaceToken: const String.fromEnvironment('HF_TOKEN'),
+        huggingFaceToken: const String.fromEnvironment('HF_TOKEN', defaultValue: ''),
       );
       setState(() => _progress = 0.1);
 
@@ -39,7 +39,7 @@ class _SplashScreenState extends State<SplashScreen> {
         fileType: ModelFileType.litertlm,
       ).fromNetwork(
         'https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/main/gemma-4-E2B-it.litertlm',
-        token: const String.fromEnvironment('HF_TOKEN'),
+        token: const String.fromEnvironment('HF_TOKEN', defaultValue: ''),
       ).withProgress((progress) {
         if (mounted) {
           setState(() {
@@ -54,7 +54,7 @@ class _SplashScreenState extends State<SplashScreen> {
         _status = 'Loading model...';
       });
 
-      // Get active model with GPU backend for fast inference
+      // Load model with GPU on Android, CPU on iOS
       await FlutterGemma.getActiveModel(
         maxTokens: 512,
         preferredBackend: PreferredBackend.gpu,

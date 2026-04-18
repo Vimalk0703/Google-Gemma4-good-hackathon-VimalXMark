@@ -1,0 +1,4 @@
+-keep class com.google.mediapipe.** { *; }
+-keep class com.google.ai.edge.** { *; }
+-dontwarn com.google.mediapipe.**
+-dontwarn com.google.ai.edge.**

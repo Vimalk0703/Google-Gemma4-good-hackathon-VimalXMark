@@ -7,6 +7,8 @@ import '../widgets/imci_progress_bar.dart';
 import '../widgets/classification_card.dart';
 import '../widgets/reasoning_card.dart';
 import '../core/imci_questionnaire.dart';
+import '../core/reconciliation_engine.dart';
+import 'camera_monitor_screen.dart';
 
 /// IMCI assessment using structured Q&A collection + LLM narration.
 ///
@@ -446,7 +448,26 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   // --------------------------------------------------------------------------
-  // Final Report — LLM narration
+  // Vision Monitoring — camera assessment after questionnaire
+  // --------------------------------------------------------------------------
+
+  /// Launch camera monitoring and return aggregated vision findings.
+  Future<CameraMonitorResult?> _launchVisionMonitoring() async {
+    if (!mounted) return null;
+    final result = await Navigator.of(context).push<CameraMonitorResult>(
+      MaterialPageRoute(
+        builder: (context) =>
+            CameraMonitorScreen(modelLoaded: widget.modelLoaded),
+      ),
+    );
+    return result;
+  }
+
+  /// Reconciliation result stored for the report.
+  ReconciliationResult? _reconciliation;
+
+  // --------------------------------------------------------------------------
+  // Final Report — LLM narration with vision reconciliation
   // --------------------------------------------------------------------------
 
   Future<void> _generateFinalReport() async {
@@ -457,46 +478,116 @@ class _HomeScreenState extends State<HomeScreen> {
       }
     }
 
+    // Q&A severity before vision
+    final qaSeverity = _q.overallSeverity;
+
+    // --- Vision Monitoring Phase ---
+    _chatItems.add(_ChatItem(
+      type: _ChatItemType.stepBanner,
+      text: 'Vision Assessment',
+      metadata: {'step': 'vision'},
+    ));
+    setState(() {});
+    _scrollToBottom();
+
+    _addBot(
+      'The questionnaire is complete. Now let\'s do a visual check. '
+      'I\'ll use the camera to look for clinical signs.',
+    );
+
+    final visionResult = await _launchVisionMonitoring();
+
+    if (visionResult != null && visionResult.framesAnalyzed > 0) {
+      // Run reconciliation
+      _reconciliation = ReconciliationEngine.reconcile(
+        qaFindings: _q.findings,
+        visionFindings: visionResult.findings,
+        qaSeverity: qaSeverity,
+      );
+
+      // Show vision findings summary
+      _chatItems.add(_ChatItem(
+        type: _ChatItemType.visionSummary,
+        metadata: {
+          'findings': visionResult.findings,
+          'framesAnalyzed': visionResult.framesAnalyzed,
+        },
+      ));
+      setState(() {});
+
+      // Show warnings if any
+      if (_reconciliation!.hasWarnings) {
+        for (final warning in _reconciliation!.warnings) {
+          _chatItems.add(_ChatItem(
+            type: _ChatItemType.reconciliationWarning,
+            metadata: {
+              'category': warning.category,
+              'qaValue': warning.qaValue,
+              'visionValue': warning.visionValue,
+              'confidence': warning.confidence,
+              'message': warning.message,
+              'recommendation': warning.recommendation,
+              'severity': warning.severity,
+            },
+          ));
+        }
+        setState(() {});
+      }
+    } else {
+      _addBot('Vision assessment skipped. Generating report from questionnaire only.');
+    }
+
+    // Determine final severity (may be upgraded by vision)
+    final finalSeverity = _reconciliation?.severityUpgraded == true
+        ? _reconciliation!.upgradedSeverity!
+        : qaSeverity;
+
     // Overall assessment card
-    final severity = _q.overallSeverity;
     const urgencyMap = {
       'red': 'URGENT: Go to a health facility IMMEDIATELY',
       'yellow': 'See a health worker within 24 hours',
       'green': 'Treat at home with follow-up in 5 days',
     };
+
+    final overallLabel = _reconciliation?.severityUpgraded == true
+        ? 'Overall: ${finalSeverity.toUpperCase()} (upgraded by vision)'
+        : 'Overall: ${finalSeverity.toUpperCase()}';
+
     _chatItems.add(_ChatItem(
       type: _ChatItemType.classification,
       metadata: {
         'step': 'Overall Assessment',
-        'severity': severity,
-        'label': 'Overall: ${severity.toUpperCase()}',
-        'reasoning': urgencyMap[severity] ?? 'Consult a health worker',
+        'severity': finalSeverity,
+        'label': overallLabel,
+        'reasoning': urgencyMap[finalSeverity] ?? 'Consult a health worker',
       },
     ));
     setState(() {});
 
-    // LLM generates caring summary sentence
+    // LLM generates caring summary
     _addTyping();
     await _initSession('report', systemPrompt: _reportPrompt);
     final reportContext = _q.buildReportContext();
+    final visionContext = _reconciliation != null
+        ? ' Vision assessment: ${_reconciliation!.warnings.length} warnings found.'
+        : '';
     final report = await _ask(
       'Write 2-3 short plain-text sentences summarizing the child\'s condition '
       'for a caregiver. No bullet points, no markdown, no asterisks, no formatting. '
-      'Just simple caring sentences.\n\n$reportContext',
+      'Just simple caring sentences.\n\n$reportContext$visionContext',
     );
     _removeTyping();
 
-    // Strip any markdown artifacts the LLM might still produce
     final cleanReport = report
         .replaceAll(RegExp(r'\*+'), '')
         .replaceAll(RegExp(r'#+\s*'), '')
         .replaceAll(RegExp(r'-\s+'), '')
         .trim();
 
-    // Build the structured report card
+    // Build the structured report card (with reconciliation data)
     _chatItems.add(_ChatItem(
       type: _ChatItemType.report,
-      metadata: _buildReportData(cleanReport),
+      metadata: _buildReportData(cleanReport, finalSeverity: finalSeverity),
     ));
     setState(() {});
     _scrollToBottom();
@@ -505,9 +596,10 @@ class _HomeScreenState extends State<HomeScreen> {
     setState(() {});
   }
 
-  Map<String, dynamic> _buildReportData(String llmSummary) {
+  Map<String, dynamic> _buildReportData(String llmSummary,
+      {String? finalSeverity}) {
     final f = _q.findings;
-    final severity = _q.overallSeverity;
+    final severity = finalSeverity ?? _q.overallSeverity;
 
     // Positive findings
     final concerns = <String>[];
@@ -739,6 +831,10 @@ class _HomeScreenState extends State<HomeScreen> {
                         label: item.metadata!['label'] as String,
                         onTakePhoto: _onTakePhoto,
                         onSkip: _onSkipPhoto),
+                    _ChatItemType.visionSummary =>
+                      _VisionSummaryCard(metadata: item.metadata!),
+                    _ChatItemType.reconciliationWarning =>
+                      _ReconciliationWarningCard(metadata: item.metadata!),
                   };
                 },
               ),
@@ -830,6 +926,8 @@ enum _ChatItemType {
   typing,
   photoPrompt,
   report,
+  visionSummary,
+  reconciliationWarning,
 }
 
 class _ChatItem {
@@ -854,6 +952,7 @@ class _StepBannerWidget extends StatelessWidget {
     'Diarrhea': Icons.water_drop_rounded,
     'Fever': Icons.thermostat_rounded,
     'Nutrition': Icons.restaurant_rounded,
+    'Vision Assessment': Icons.visibility_rounded,
   };
 
   @override
@@ -1433,5 +1532,298 @@ class _ReportCard extends StatelessWidget {
         ],
       ),
     );
+  }
+}
+
+// =============================================================================
+// Vision Summary Card — shows aggregated camera findings
+// =============================================================================
+
+class _VisionSummaryCard extends StatelessWidget {
+  final Map<String, dynamic> metadata;
+  const _VisionSummaryCard({required this.metadata});
+
+  @override
+  Widget build(BuildContext context) {
+    final findings =
+        metadata['findings'] as Map<String, VisionFinding>;
+    final framesAnalyzed = metadata['framesAnalyzed'] as int;
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: MalaikaColors.primaryLight,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(
+              color: MalaikaColors.primary.withValues(alpha: 0.15)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.visibility_rounded,
+                    size: 16, color: MalaikaColors.primary),
+                const SizedBox(width: 8),
+                const Text(
+                  'Camera Assessment',
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: MalaikaColors.primary,
+                  ),
+                ),
+                const Spacer(),
+                Text(
+                  '$framesAnalyzed frames analyzed',
+                  style: const TextStyle(
+                    fontSize: 10,
+                    color: MalaikaColors.textMuted,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            ...findings.entries.map((e) {
+              final f = e.value;
+              final label = _keyToLabel(e.key);
+              final detected = f.detected;
+              final color = detected
+                  ? MalaikaColors.yellow
+                  : MalaikaColors.green;
+              return Padding(
+                padding: const EdgeInsets.symmetric(vertical: 3),
+                child: Row(
+                  children: [
+                    Icon(
+                      detected
+                          ? Icons.warning_amber_rounded
+                          : Icons.check_circle_rounded,
+                      size: 14,
+                      color: color,
+                    ),
+                    const SizedBox(width: 8),
+                    Text(label,
+                        style: const TextStyle(
+                            fontSize: 12, color: MalaikaColors.text)),
+                    const Spacer(),
+                    Text(
+                      f.confidenceLabel,
+                      style: const TextStyle(
+                          fontSize: 10, color: MalaikaColors.textMuted),
+                    ),
+                  ],
+                ),
+              );
+            }),
+          ],
+        ),
+      ),
+    );
+  }
+
+  String _keyToLabel(String key) {
+    const labels = {
+      'lethargic': 'Alertness',
+      'chest_indrawing': 'Chest Indrawing',
+      'dehydration': 'Dehydration Signs',
+      'wasting': 'Visible Wasting',
+      'edema': 'Edema',
+    };
+    return labels[key] ?? key.replaceAll('_', ' ');
+  }
+}
+
+// =============================================================================
+// Reconciliation Warning Card — Q&A vs Vision conflict
+// =============================================================================
+
+class _ReconciliationWarningCard extends StatelessWidget {
+  final Map<String, dynamic> metadata;
+  const _ReconciliationWarningCard({required this.metadata});
+
+  @override
+  Widget build(BuildContext context) {
+    final category = metadata['category'] as String;
+    final qaValue = metadata['qaValue'] as String;
+    final visionValue = metadata['visionValue'] as String;
+    final confidence = metadata['confidence'] as double;
+    final message = metadata['message'] as String;
+    final recommendation = metadata['recommendation'] as String;
+    final severity = metadata['severity'] as String;
+
+    final isHigh = severity == 'high';
+    final borderColor =
+        isHigh ? MalaikaColors.red : MalaikaColors.yellow;
+    final bgColor = isHigh ? MalaikaColors.redLight : MalaikaColors.yellowLight;
+    final iconColor = isHigh ? MalaikaColors.red : MalaikaColors.yellow;
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: bgColor,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: borderColor.withValues(alpha: 0.3)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Header
+            Row(
+              children: [
+                Icon(Icons.compare_arrows_rounded,
+                    size: 16, color: iconColor),
+                const SizedBox(width: 8),
+                Text(
+                  'Conflict: ${_formatCategory(category)}',
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                    color: iconColor,
+                  ),
+                ),
+                const Spacer(),
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: iconColor.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Text(
+                    '${(confidence * 100).round()}% confidence',
+                    style: TextStyle(
+                      fontSize: 9,
+                      fontWeight: FontWeight.w600,
+                      color: iconColor,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+
+            // Q&A vs Vision comparison
+            Row(
+              children: [
+                Expanded(
+                  child: _sourceBox(
+                    'Questionnaire',
+                    qaValue,
+                    Icons.chat_bubble_outline_rounded,
+                    MalaikaColors.textSecondary,
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  child: Icon(Icons.sync_problem_rounded,
+                      size: 20, color: iconColor),
+                ),
+                Expanded(
+                  child: _sourceBox(
+                    'Camera',
+                    visionValue,
+                    Icons.visibility_rounded,
+                    iconColor,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+
+            // Message
+            Text(
+              message,
+              style: const TextStyle(
+                fontSize: 12,
+                color: MalaikaColors.text,
+                height: 1.4,
+              ),
+            ),
+            const SizedBox(height: 8),
+
+            // Recommendation
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.6),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(Icons.lightbulb_outline_rounded,
+                      size: 14, color: iconColor),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      recommendation,
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: MalaikaColors.text,
+                        fontWeight:
+                            isHigh ? FontWeight.w600 : FontWeight.normal,
+                        height: 1.4,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _sourceBox(
+      String label, String value, IconData icon, Color color) {
+    return Container(
+      padding: const EdgeInsets.all(8),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.5),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Column(
+        children: [
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: 10, color: color),
+              const SizedBox(width: 4),
+              Text(label,
+                  style: TextStyle(
+                      fontSize: 9,
+                      fontWeight: FontWeight.w600,
+                      color: color)),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Text(
+            value,
+            style: TextStyle(
+                fontSize: 10,
+                color: color,
+                fontWeight: FontWeight.w500),
+            textAlign: TextAlign.center,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _formatCategory(String category) {
+    return category
+        .split('_')
+        .map((w) =>
+            w.isEmpty ? w : '${w[0].toUpperCase()}${w.substring(1)}')
+        .join(' ');
   }
 }

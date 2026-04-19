@@ -75,8 +75,8 @@ STEP_REQUIREMENTS: dict[str, dict[str, str]] = {
         "age_months": "Child's age in months (2-59)",
     },
     "danger_signs": {
-        "is_alert": "Is the child alert and responsive? (from photo)",
-        "can_drink": "Can the child drink or breastfeed?",
+        "is_alert": "Is the child very sleepy or hard to wake up?",
+        "can_drink": "Is the child unable to drink or breastfeed?",
         "vomits_everything": "Does the child vomit everything?",
         "has_convulsions": "Has the child had convulsions/fits?",
     },
@@ -150,6 +150,13 @@ RULES:
 - Keep each response to 2-3 sentences unless generating the final report
 - Do NOT say things like "use the clip button" or "type results" — speak naturally
 - Do NOT repeat the caregiver's words back to them unnecessarily
+
+QUESTION PHRASING:
+- Always phrase symptom questions so that "yes" means the symptom IS PRESENT
+- Alertness: ask "Is your child very sleepy or hard to wake up?" (not "Is your child alert?")
+- Drinking: ask "Is your child unable to drink?" (not "Can your child drink?")
+- This ensures caregiver "yes"/"no" answers are unambiguous
+- For age: "How old is your child in months?" is fine as-is
 
 PHOTO ANALYSIS:
 - When you receive a photo, describe your specific observations to the caregiver
@@ -232,6 +239,10 @@ class ChatEngine:
 
         # Image observations for the report
         self.observations: list[str] = []
+
+        # Requirement field name of the question most recently posed by the LLM.
+        # Used for yes/no disambiguation when caregiver gives a brief response.
+        self._pending_question_topic: str | None = None
 
     def process(
         self,
@@ -484,6 +495,13 @@ class ChatEngine:
             else:
                 needed.append(f"  - {description}: STILL NEEDED")
 
+        # Track what we're about to ask about (for yes/no disambiguation next turn)
+        self._pending_question_topic = None
+        for field_key in requirements:
+            if field_key not in self._fields_answered and not self._is_field_collected(field_key):
+                self._pending_question_topic = field_key
+                break
+
         if collected:
             context += "Already collected:\n" + "\n".join(collected) + "\n"
         if needed:
@@ -570,6 +588,31 @@ class ChatEngine:
                     self.age_months = age
                     self.belief.confirm_finding("age_months", age)
             return
+
+        # --- Yes/No context disambiguation ---
+        # When the caregiver gives a brief yes/no, map it to the finding
+        # that was most recently asked about. This handles bare "yes"/"no"
+        # which the LLM extraction might not see in isolation.
+        if user_text and self._pending_question_topic:
+            user_lower = user_text.strip().lower()
+            is_yes = bool(self._YES_PATTERN.match(user_lower))
+            is_no = bool(self._NO_PATTERN.match(user_lower))
+            if is_yes or is_no:
+                mapping = self._YES_NO_MAPPINGS.get(self._pending_question_topic)
+                if mapping:
+                    finding_key, yes_val, no_val, satisfies = mapping
+                    value = yes_val if is_yes else no_val
+                    self.findings[finding_key] = value
+                    self._fields_answered.add(finding_key)
+                    self.belief.confirm_finding(finding_key, value)
+                    for field in satisfies:
+                        self._fields_answered.add(field)
+                    events.append({
+                        "type": "finding",
+                        "key": finding_key,
+                        "value": value,
+                        "label": finding_key.replace("_", " ").title(),
+                    })
 
         combined = ""
         if user_text:
@@ -718,6 +761,32 @@ class ChatEngine:
     # -------------------------------------------------------------------
     # Step Advancement — Findings-Based
     # -------------------------------------------------------------------
+
+    # Yes/No disambiguation: maps requirement field -> (finding_key, yes_value, no_value, satisfies)
+    # All questions are phrased so "yes" = symptom present (see QUESTION PHRASING in system prompt).
+    _YES_NO_MAPPINGS: dict[str, tuple[str, bool, bool, list[str]]] = {
+        "is_alert": ("lethargic", True, False, ["is_alert"]),
+        "can_drink": ("unable_to_drink", True, False, ["can_drink"]),
+        "vomits_everything": ("vomits_everything", True, False, ["vomits_everything"]),
+        "has_convulsions": ("has_convulsions", True, False, ["has_convulsions"]),
+        "has_cough": ("has_cough", True, False, ["has_cough"]),
+        "has_diarrhea": ("has_diarrhea", True, False, ["has_diarrhea"]),
+        "blood_in_stool": ("blood_in_stool", True, False, ["blood_in_stool"]),
+        "has_fever": ("has_fever", True, False, ["has_fever"]),
+        "stiff_neck": ("stiff_neck", True, False, ["stiff_neck"]),
+        "malaria_risk": ("malaria_risk", True, False, ["malaria_risk"]),
+        "visible_wasting": ("visible_wasting", True, False, ["visible_wasting"]),
+        "edema": ("edema", True, False, ["edema"]),
+    }
+
+    _YES_PATTERN = re.compile(
+        r"^(yes|yeah|yep|ya|yah|correct|right|sure|ok|uh[ -]?huh|definitely|absolutely)\b",
+        re.IGNORECASE,
+    )
+    _NO_PATTERN = re.compile(
+        r"^(no|nah|nope|not really|never|none|not at all|neither)\b",
+        re.IGNORECASE,
+    )
 
     # Minimum messages before message-count fallback can trigger
     _MSG_FALLBACK_THRESHOLDS: dict[str, int] = {
@@ -1248,6 +1317,7 @@ class ChatEngine:
         self._fields_answered.clear()
         self._image_received_this_step = False
         self._step_start_msg_count = 0
+        self._pending_question_topic = None
         self.belief = BeliefState()
         self.findings = {
             k: (False if isinstance(v, bool) else (0 if isinstance(v, int) else None))

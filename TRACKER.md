@@ -71,19 +71,18 @@
 ## Submission Checklist (May 18)
 
 ### Mandatory — No submission without these
+- [ ] **Android app** — complete IMCI assessment running on-device with Gemma 4 E2B
 - [ ] **Kaggle writeup** — 1,500 words max, Track: Health & Sciences
-- [ ] **YouTube video** — 3 min, public, emotional narrative + technical demo
+- [ ] **YouTube video** — 3 min, public. Android phone demo is the hero.
 - [ ] **Public GitHub repo** — documented, reproducible, no secrets
-- [ ] **Live demo URL** — Gradio share=True, no login, mobile-friendly
-- [ ] **Media gallery** — cover image, screenshots, architecture diagram
+- [ ] **Media gallery** — cover image, phone app screenshots, architecture diagram
 
 ### Winning Edge — Differentiators
-- [ ] Fine-tuned LoRA adapters (Unsloth prize $10K)
-- [ ] Phone demo in video (AI Edge Gallery + E2B)
-- [ ] 20+ validated test scenarios with accuracy metrics
-- [ ] 3+ languages demonstrated (English + Swahili + Hindi minimum)
-- [ ] Heart MEMS module working (or cleanly disabled)
-- [ ] Kaggle notebook showing fine-tuning process
+- [ ] Multi-language demo on phone: English + Swahili + Hindi
+- [ ] Photo analysis working on-device (dehydration, nutrition signs)
+- [ ] Referral card generation after assessment
+- [ ] Kaggle notebook: Unsloth fine-tuning + before/after accuracy metrics ($10K prize)
+- [ ] 20+ validated test scenarios with accuracy metrics in writeup
 
 ---
 
@@ -93,70 +92,71 @@ Update this weekly. Score yourself honestly 1-10.
 
 | Criterion | Weight | Current Score | Target | Gap |
 |-----------|--------|---------------|--------|-----|
-| **Impact & Vision** (40%) | Highest | 8/10 | 9/10 | Need video showing human story |
-| **Video Pitch** (30%) | High | 1/10 | 9/10 | **BIGGEST GAP** — not started |
-| **Technical Depth** (30%) | High | 9/10 | 9/10 | Agentic skills arch, fine-tuning done, need phone demo |
+| **Innovation** (30%) | High | 7/10 | 9/10 | Need phone demo polished, show "why only Gemma 4" clearly |
+| **Impact** (30%) | High | 8/10 | 9/10 | Need video with human story, referral card |
+| **Technical Execution** (25%) | High | 7/10 | 9/10 | Android app needs to be bulletproof, fine-tuning notebook |
+| **Accessibility** (15%) | High | 9/10 | 10/10 | Already offline + phone + multilingual — just need to show it |
 
-### Impact & Vision — How to reach 9/10
+### Innovation — How to reach 9/10
+- [x] Only submission with real medical protocol (WHO IMCI) on a phone
+- [x] Deterministic classification — LLM perceives, code decides
+- [ ] Android app running complete assessment end-to-end
+- [ ] Multi-language: same assessment in EN + SW + HI
+- [ ] Answer "why only Gemma 4" clearly: no other model fits on a phone with vision
+
+### Impact — How to reach 9/10
 - [x] Problem: 4.9M children/year (WHO data, March 2026)
 - [x] Solution: WHO IMCI protocol on phone via Gemma 4
-- [x] Offline-first architecture
-- [x] Multilingual (Swahili confirmed working)
-- [ ] Real user story in video (mother + child scenario)
-- [ ] Partnership/deployment plan mentioned in writeup
+- [x] Offline-first — works where children die
+- [ ] Referral card — extends value beyond the phone screen
+- [ ] Real user persona in video (Maria the CHW in Kilifi County)
+- [ ] Emotional video showing the phone saving a child
 
-### Video Pitch — How to reach 9/10
-- [x] Script written (MALAIKA_PROPOSAL.md)
-- [ ] Opening hook: mother at 2am, sick child, no clinic
-- [ ] Live demo footage: Gradio assessment running
-- [ ] Phone demo footage: AI Edge Gallery on Android
-- [ ] Emotional B-roll: children, clinics, health workers
-- [ ] Narration recorded
-- [ ] Music + editing
-- [ ] Upload to YouTube (public, unlisted ok)
-
-### Technical Depth — How to reach 9/10
-- [x] Multimodal: vision + audio (spectrogram) + speech + video
-- [x] IMCI state machine with WHO citations
+### Technical Execution — How to reach 9/10
+- [x] Flutter app with structured IMCI Q&A + photo analysis + classification
+- [x] IMCI protocol engine: deterministic WHO classification
 - [x] 104+ tests, 97% protocol coverage, 21/21 golden scenarios
-- [x] Production patterns: guards, observability, versioned prompts
-- [x] Agentic skills architecture: 12 skills, BeliefState, structured events
-- [x] Voice pipeline: sentence-level TTS, filler audio, WebSocket
-- [x] Fine-tuned LoRA adapter: breath sounds (50% accuracy, 100% crackle)
-- [x] Colab deployment: notebooks/10_voice_agent_colab.ipynb via ngrok
-- [ ] Fine-tuned adapter deployed in live demo
-- [ ] On-device proof (E2B on phone)
-- [ ] Performance benchmarks (latency, VRAM, tok/s)
+- [x] Reasoning cards showing extracted findings
+- [ ] Android build running smoothly on real device
+- [ ] Kaggle notebook: Unsloth fine-tuning with before/after metrics
+- [ ] Performance benchmarks on-device (latency, tok/s)
+
+### Accessibility — How to reach 10/10
+- [x] Runs on $150 phone (2.58GB, 676MB RAM)
+- [x] Fully offline — no internet needed
+- [x] 140+ languages built into model
+- [ ] Demonstrate Swahili assessment in video
 
 ---
 
-## Critical Path
+## Critical Path (MOBILE FIRST)
 
 ```
-Week 1 (Apr 12-18): Foundation + Real GPU Testing
-  ✅ Code complete (227 tests)
-  → GPU end-to-end testing
-  → Prompt refinement
-  → Download datasets
+Week 1 (Apr 12-18): Foundation ✅
+  ✅ Python codebase (227 tests, 21/21 golden)
+  ✅ Flutter app with IMCI Q&A + vision + classification
+  ✅ Gemma 4 E2B running on phone via flutter_gemma
 
-Week 2 (Apr 19-25): Core IMCI with Real Data
-  → Test all 21 golden scenarios with real model
-  → Accuracy metrics for writeup
-  → Fix prompts based on real outputs
+Week 2 (Apr 19-25): Android App Polish
+  → Get Android build running end-to-end on real device
+  → Polish Flutter UI (looks like a product, not a prototype)
+  → Test multi-language (Swahili, Hindi)
+  → Add referral card generation
 
-Week 3 (Apr 26-May 2): Fine-tuning + Multilingual
-  → LoRA training on Kaggle (breath sounds, jaundice)
-  → Test Swahili, Hindi, Hausa
-  → Stress test 20+ scenarios
+Week 3 (Apr 26-May 2): Fine-Tuning + Accuracy
+  → Unsloth fine-tuning notebook (Kaggle)
+  → Before/after accuracy metrics
+  → Test 20+ scenarios on phone
+  → Fix prompts based on real E2B outputs
 
-Week 4 (May 3-9): Deploy + Phone
-  → Live demo URL (Gradio share=True)
-  → Phone demo (AI Edge Gallery + E2B)
-  → MEMS GO/NO-GO (May 6)
+Week 4 (May 3-9): Polish + Content
+  → Final UI polish
+  → Record phone demo footage
+  → Draft Kaggle writeup
 
 Week 5 (May 10-18): Video + Submit
-  → Film video (3 min)
-  → Kaggle writeup (1,500 words)
+  → Film video (3 min, phone demo is hero)
+  → Kaggle writeup final
   → Final review
   → SUBMIT May 18
 ```
@@ -167,25 +167,25 @@ Week 5 (May 10-18): Video + Submit
 
 | Risk | Impact | Status | Mitigation |
 |------|--------|--------|------------|
-| No GPU machine for demo | CRITICAL | Open | Use Kaggle/Colab for testing, rent GPU for demo day |
-| Gemma 4 accuracy too low | HIGH | Unknown | Prompt refinement + fine-tuning |
-| Video not compelling | HIGH | Not started | Follow script in MALAIKA_PROPOSAL.md |
-| Audio quality poor (Whisper) | MEDIUM | Tested | Whisper-small good for Swahili, fallback to text |
-| Fine-tuning fails | MEDIUM | Notebook ready | Use strong prompting as fallback |
-| Scope creep | HIGH | Managed | NO new features after Week 4 |
-| Time runs out | MEDIUM | On track | Video + writeup start Week 5, not later |
+| Android build doesn't work | **CRITICAL** | Testing needed | Flutter app exists, need to test on real Android device |
+| E2B accuracy too low for clinical use | HIGH | Unknown | Prompt refinement, structured Q&A compensates |
+| Video not compelling | HIGH | Not started | Phone demo IS the video — film the app working |
+| Fine-tuning notebook fails | MEDIUM | Notebook exists | Use base model metrics, show architecture instead |
+| Scope creep | HIGH | Managed | NO new features after Week 3. Polish only. |
+| Time runs out | MEDIUM | On track | Video + writeup start Week 4, not later |
 
 ---
 
 ## Context Anchors (Read these to stay aligned)
 
-1. **We are building a MEDICAL INSTRUMENT, not a chatbot.** Every decision must serve child survival.
-2. **Gemma 4 perceives, code decides.** The model got the breathing threshold wrong (40 vs 50). Protocol code is the safety boundary.
-3. **The video is 30% of the score.** Technical depth means nothing if the pitch doesn't land.
-4. **Offline is non-negotiable.** Every feature works without internet.
-5. **Fine-tuning targets the Unsloth $10K prize.** The notebook IS the submission evidence.
+1. **THE PHONE IS THE PRODUCT.** The Android app is the primary demo. Everything else is supplementary.
+2. **"Why only Gemma 4?"** Because no other model runs on a phone with text + vision in <3GB. That's the ENTIRE argument.
+3. **Gemma 4 perceives, code decides.** WHO thresholds are deterministic code, never LLM output. This is the medical safety story.
+4. **Offline is non-negotiable.** Every feature works without internet on the phone.
+5. **Don't claim what we can't show on-device.** No breath counting from video, no spectrogram analysis on phone. Be honest.
+6. **Fine-tuning is the UPGRADE PATH.** Base model works on phone. Fine-tuned model is for clinics with compute. Shows Unsloth capability for $10K prize.
 
 ---
 
-*Last updated: April 14, 2026 (Session 2 start)*
-*Next update: End of Day 4*
+*Last updated: April 18, 2026 (Mobile-first pivot)*
+*Next update: End of Week 2*

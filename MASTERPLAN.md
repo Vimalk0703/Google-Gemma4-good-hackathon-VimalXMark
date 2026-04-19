@@ -1,8 +1,9 @@
-# Malaika — Master Execution Plan v3
+# Malaika — Master Execution Plan v4
 
-> **Rule 1: EVERYTHING runs on the edge. No internet. No exceptions.**
-> **Rule 2: ALL intelligence comes from Gemma 4. It IS the solution, not a tool we use.**
-> **Rule 3: Every claim must be implementable. No hand-waving.**
+> **Rule 1: MOBILE FIRST. The phone IS the product. Everything else is supplementary.**
+> **Rule 2: EVERYTHING runs offline. No internet. No exceptions.**
+> **Rule 3: ALL intelligence comes from Gemma 4. It IS the solution, not a tool we use.**
+> **Rule 4: Every claim must be implementable. No hand-waving. If it's in the writeup, it works on the phone.**
 >
 > **Related files**:
 > - [MALAIKA_PROPOSAL.md](./MALAIKA_PROPOSAL.md) — Idea, video script, why-it-wins
@@ -11,111 +12,147 @@
 
 ---
 
+## 0. Why Mobile-First Wins
+
+Running on a GPU is not special. Any model (GPT-4, Claude, Llama) can do IMCI on a GPU.
+The ONLY thing that makes this a Gemma 4 story is the phone. Gemma 4 E2B doing a real
+IMCI assessment on a $150 Android phone, offline, in Swahili — no other model can do this.
+
+**The phone is not a proof-of-concept. The phone IS the product.**
+
+---
+
 ## 1. Hardware — What Does What
 
-Three distinct hardware roles. Do NOT confuse them.
+Two distinct hardware roles. The phone is PRIMARY.
 
-| Hardware | Role | What Runs On It |
-|----------|------|----------------|
-| **Mark's RTX 3060 (12GB)** | TRAINING ONLY | Unsloth QLoRA fine-tuning of Gemma 4 E4B. NOT used for demo inference. |
-| **Demo machine (laptop/desktop with GPU)** | LIVE DEMO | Fine-tuned Gemma 4 E4B via Transformers. Serves the Gradio web app judges interact with. |
-| **Android phone (flagship 2024+)** | VIDEO PROOF | Gemma 4 E2B via LiteRT-LM / AI Edge Gallery. Proves "it runs on a phone" in our 3-min video. |
+| Hardware | Role | Priority |
+|----------|------|----------|
+| **Android phone (any 2024+, $150+)** | **PRIMARY DEMO** | Gemma 4 E2B via flutter_gemma. Full IMCI assessment: text + vision + classification + treatment. This is what judges see. |
+| **RTX 3060 / Colab GPU** | TRAINING + SUPPLEMENTARY | Unsloth QLoRA fine-tuning of E4B. Kaggle notebook shows training process + before/after metrics. Wins Unsloth $10K prize. |
 
-### Why Two Models (E2B + E4B)
+### Why E2B on Phone IS the Hero
 
-| Model | Where | Why |
-|-------|-------|-----|
-| **E4B** (4.5B active) | Demo machine (Transformers) | Better reasoning (+12 pts avg), better vision, better for medical assessment. Judges interact with this. |
-| **E2B** (2.3B active) | Phone (LiteRT-LM) | Proven on-phone: 50+ tok/s, 2.58GB, vision + audio + function calling. Shown in video to prove on-device. |
+| Fact | Why It Matters |
+|------|---------------|
+| Gemma 4 E2B runs real IMCI on a $150 phone | No other model in the world can do this |
+| 2.58 GB disk, 676 MB RAM | Fits on phones already in pockets of 4 billion people |
+| 50+ tok/s on-device | Fast enough for real-time conversation |
+| Text + vision multimodal | Understands speech AND analyzes photos on-device |
+| 140+ languages built-in | Swahili, Hindi, Hausa — no translation layer needed |
+| Apache 2.0 license | Free to deploy in any country, any clinic |
+| Fully offline | Works where there is no internet — which is where children die |
 
-Both are Gemma 4. Both are offline. Both are multimodal. The live demo uses the stronger model for accuracy. The video proves it also runs on a $200 phone. This is honest and impressive.
+### Fine-Tuned E4B = Upgrade Path (Not Core Demo)
 
-### Confirmed Phone Performance (E2B via LiteRT-LM)
+The fine-tuned E4B on GPU shows: *"When a clinic has a computer, fine-tuning improves
+clinical accuracy from X% to Y%."* This is supplementary — it demonstrates the
+fine-tuning capability and wins the Unsloth prize. It is NOT the main demo.
+
+The narrative: *"Works out-of-the-box on any phone. Even better with fine-tuning where compute allows."*
+
+### Confirmed Phone Performance (E2B)
 
 | Device | Backend | Speed | RAM | Disk |
 |--------|---------|-------|-----|------|
 | Samsung S26 Ultra | GPU | 52.1 tok/s | 676 MB | 2.58 GB |
-| iPhone 17 Pro | GPU | 56.5 tok/s | 1,450 MB | 2.58 GB |
 | Samsung S26 Ultra | CPU | 46.9 tok/s | 1,733 MB | 2.58 GB |
+| iPhone 17 Pro | GPU | 56.5 tok/s | 1,450 MB | 2.58 GB |
 
 Source: [LiteRT-LM E2B benchmarks on HuggingFace](https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm)
 
+**Primary demo device**: Android (any flagship 2024+). Flutter app via flutter_gemma.
+iPhone support exists in codebase but Android is the demo target.
+
 ---
 
-## 2. How Gemma 4 IS the Solution
+## 2. How Gemma 4 IS the Solution — And Why ONLY Gemma 4
 
-### What Gemma 4 does that makes Malaika possible
+### The core question judges will ask: "Why not GPT-4 / Llama / Claude?"
 
-This is NOT "we used Gemma 4 as a chatbot." Gemma 4 enables capabilities that **did not exist before** on a phone:
+Answer: **None of them can run on a phone.** That's it. That's the whole argument.
 
-| Gemma 4 Capability | What It Enables in Malaika | Why Only Gemma 4 |
+If Malaika ran on a GPU, any model could do it. Running on a $150 phone, offline, in
+Swahili, with vision — that's what makes Gemma 4 the ONLY model that enables this.
+
+### What Gemma 4 E2B does ON THE PHONE (what we demo)
+
+| Gemma 4 Capability | What It Does in Malaika | Why Only Gemma 4 |
 |--------------------|-----------------------------|-----------------|
-| **Native vision on-device** | Camera sees chest indrawing, jaundice, wasting, dehydration signs | No other open model does multimodal vision on a phone at this quality |
-| **Native audio on-device** | Mic hears breath sounds (wheezing, stridor, grunting), understands speech in any language | E2B/E4B have built-in audio encoder — not a separate pipeline |
-| **Native function calling** | IMCI protocol steps as tool calls — model decides which assessment to run next | 1200% improvement over Gemma 3 in agentic tool use |
-| **140+ languages** | Caregiver speaks Swahili, Hausa, Hindi — AI understands and responds | Built into the model, not an add-on translation layer |
-| **Apache 2.0 license** | Free to deploy in any country, any clinic, any phone | Previous Gemma versions had restrictive license |
-| **Runs in <3GB on phone** | Works on phones already in pockets of billions | E2B Q4: 2.58GB disk, 676MB RAM on GPU |
+| **Text understanding on-device** | Understands caregiver responses in natural language, extracts clinical findings | No other open model fits in 2.58GB and reasons this well |
+| **Vision on-device** | Camera analyzes photos for dehydration signs, nutrition status, skin color | No other open model does multimodal vision on a phone |
+| **140+ languages** | Caregiver speaks Swahili, Hindi, Hausa — AI understands and responds in their language | Built into the model, not an add-on translation layer |
+| **Conversational reasoning** | Rephrases clinical questions warmly, generates caring health reports | The model IS the health worker's communication ability |
+| **Apache 2.0 license** | Free to deploy in any country, any clinic, any phone | No usage restrictions, no API costs, no internet needed |
+| **Runs in <3GB on phone** | Works on phones already in pockets of 4 billion people | E2B: 2.58GB disk, 676MB RAM |
+
+### What we do NOT claim on-device (be honest)
+
+These capabilities exist in the Python/Colab version with E4B but are NOT in the phone app:
+- Breathing rate counting from video
+- Breath sound classification from audio/spectrograms
+- Chest indrawing detection from video
+- Advanced agentic function calling with 12 skills
+
+The phone app does: structured IMCI Q&A + photo analysis + deterministic classification
++ report generation. That is real and sufficient.
 
 ### What is NOT Gemma 4 (and why that's fine)
 
 | Component | What It Is | Why It's Not AI |
 |-----------|-----------|----------------|
-| IMCI State Machine | Python code: `if breathing_rate > 50: classify = "pneumonia"` | This is a calculator, not intelligence. Like `2+2=4`. |
-| TTS (Piper) | Plays audio of text Gemma generated | Like a speaker playing music. The intelligence is in the composition (Gemma). |
-| OpenCV frame extraction | Pulls frames from video to feed to Gemma 4 | Like opening a file to read it. The reading (analysis) is Gemma. |
-| Gradio UI | Displays results, captures camera/mic input | Like a window — what you see through it is Gemma's intelligence. |
+| IMCI State Machine | Dart code: `if findings['has_cough'] == true: classify(...)` | This is a calculator, not intelligence. Like `2+2=4`. |
+| WHO Classification | Deterministic severity rules from the IMCI protocol | Medical safety: we never let the LLM diagnose |
+| Flutter UI | Displays results, captures camera input, shows progress | Like a window — what you see through it is Gemma's intelligence |
 
 ---
 
 ## 3. Architecture — Clear and Implementable
 
-### The Complete Flow
+### The Complete Flow — Mobile First
 
 ```
-PHONE (Video proof)                    DEMO MACHINE (Live demo)
-┌────────────────────┐                ┌─────────────────────────────┐
-│  Gemma 4 E2B       │                │  Gemma 4 E4B (fine-tuned)   │
-│  via LiteRT-LM     │                │  via Transformers           │
-│                    │                │                             │
-│  • 2.58 GB on disk │                │  • ~5-6 GB Q4 in VRAM      │
-│  • 50+ tok/s       │                │  • All modalities:          │
-│  • Vision ✓        │                │    text + image + audio     │
-│  • Audio ✓         │                │  • Fine-tuned LoRA adapters │
-│  • Function call ✓ │                │    for medical domain       │
-│  • Offline ✓       │                │  • Offline ✓                │
-│                    │                │                             │
-│  Shown in VIDEO    │                │  Served via Gradio          │
-│  to prove on-device│                │  (share=True for public URL)│
-└────────────────────┘                └──────────────┬──────────────┘
-                                                     │
-                                                     ▼
-                                      ┌──────────────────────────────┐
-                                      │  IMCI Protocol Engine         │
-                                      │  (Python state machine)       │
-                                      │                              │
-                                      │  Orchestrates assessment:     │
-                                      │  1. Danger signs (voice+vision│
-                                      │  2. Breathing (vision+audio) │
-                                      │  3. Diarrhea (voice+vision)  │
-                                      │  4. Fever (voice)            │
-                                      │  5. Nutrition (vision+voice) │
-                                      │  6. Heart rate [MEMS,optional│
-                                      │  7. Classification+Treatment │
-                                      │                              │
-                                      │  At each step, calls Gemma 4 │
-                                      │  for perception + reasoning.  │
-                                      │  Applies WHO thresholds in    │
-                                      │  deterministic code.          │
-                                      └──────────────┬──────────────┘
-                                                     │
-                                                     ▼
-                                      ┌──────────────────────────────┐
-                                      │  OUTPUT                       │
-                                      │  • Piper TTS speaks results  │
-                                      │  • Gradio UI shows assessment│
-                                      │  • 🔴🟡🟢 classification      │
-                                      └──────────────────────────────┘
+ANDROID PHONE (PRIMARY DEMO)              GPU / COLAB (SUPPLEMENTARY)
+┌─────────────────────────────┐          ┌──────────────────────────────┐
+│  Flutter App + Gemma 4 E2B  │          │  Fine-tuned E4B (Unsloth)    │
+│  via flutter_gemma          │          │  via Transformers            │
+│                             │          │                              │
+│  • 2.58 GB on disk          │          │  • Shows fine-tuning metrics │
+│  • 50+ tok/s                │          │  • Before/after accuracy     │
+│  • Text + Vision ✓          │          │  • Kaggle notebook           │
+│  • 140+ languages ✓         │          │  • Wins Unsloth $10K prize   │
+│  • Fully offline ✓          │          │                              │
+│                             │          │  NOT the main demo.          │
+│  THIS is the product.       │          │  Shows the upgrade path.     │
+│  THIS is what judges see.   │          └──────────────────────────────┘
+│                             │
+│  ┌────────────────────────┐ │
+│  │  IMCI Questionnaire    │ │
+│  │  (Structured Q&A)      │ │
+│  │                        │ │
+│  │  1. Danger signs       │ │
+│  │  2. Breathing          │ │
+│  │  3. Diarrhea           │ │
+│  │  4. Fever              │ │
+│  │  5. Nutrition          │ │
+│  │  + Photo analysis      │ │
+│  │  + Classification      │ │
+│  │  + Treatment + Report  │ │
+│  └────────────────────────┘ │
+│                             │
+│  Gemma 4 E2B does:          │
+│  • Rephrase questions warmly│
+│  • Understand answers (any  │
+│    language)                │
+│  • Analyze photos (vision)  │
+│  • Generate health report   │
+│                             │
+│  Deterministic code does:   │
+│  • WHO IMCI classification  │
+│  • Severity (🔴🟡🟢)        │
+│  • Treatment selection      │
+│  • Referral card generation │
+└─────────────────────────────┘
 ```
 
 ### Skills-Based Agentic Architecture (Implemented)
@@ -230,49 +267,48 @@ Disable: `ENABLE_HEART_RATE = False`. Zero code changes. IMCI continues without 
 
 ---
 
-## 4. Fine-Tuning Strategy
+## 4. Fine-Tuning Strategy — Supplementary, Not Core
 
-### What Gets Fine-Tuned, On What, How
+### Role of Fine-Tuning
 
-| What | Hardware | Base Model | Method | Data | Time |
-|------|----------|-----------|--------|------|------|
-| Breath sound classification | Mark's RTX 3060 | Gemma 4 E4B | Unsloth QLoRA 4-bit | ICBHI 2017 (920 recordings) | ~3 hrs |
-| Skin color (jaundice/cyanosis) | Mark's RTX 3060 | Gemma 4 E4B | Unsloth QLoRA 4-bit | Mendeley (600) + NJN (670) images | ~3 hrs |
-| African language speech | Mark's RTX 3060 | Gemma 4 E4B | Unsloth QLoRA 4-bit | WAXAL subset (Swahili, Hausa, Yoruba) | ~3 hrs |
-| Heart sounds (MEMS) | Mark's RTX 3060 | Gemma 4 E4B | Unsloth QLoRA 4-bit | CirCor (5,272 recordings) | ~3 hrs |
+Fine-tuning is NOT what makes Malaika work. The phone app runs base E2B and delivers
+a complete IMCI assessment. Fine-tuning shows:
+1. Domain adaptation improves accuracy (before/after metrics)
+2. Unsloth makes fine-tuning accessible (wins $10K Unsloth prize)
+3. The upgrade path for clinics with compute
 
-### Fine-Tuning → Deployment Flow
+### What Gets Fine-Tuned
+
+| What | Base Model | Method | Data | Purpose |
+|------|-----------|--------|------|---------|
+| Breath sound classification | Gemma 4 E4B | Unsloth QLoRA 4-bit | ICBHI 2017 (920 recordings) | Show fine-tuning improves clinical perception |
+| Skin color (jaundice/cyanosis) | Gemma 4 E4B | Unsloth QLoRA 4-bit | Mendeley (600) + NJN (670) images | Vision fine-tuning for clinical domain |
+
+### How Fine-Tuning Is Shown to Judges
 
 ```
-Mark's RTX 3060 (TRAINING)
+Kaggle Notebook (PUBLIC)
     │
     │  1. Load Gemma 4 E4B in 4-bit via Unsloth
-    │  2. Train LoRA adapter (~150-300 instruction pairs)
-    │  3. Export merged model or adapter weights
+    │  2. Train LoRA adapter on clinical data
+    │  3. Show before/after accuracy metrics
+    │  4. Export adapter weights
     │
     ▼
-Exported Model / Adapters
+Writeup + Video
     │
-    │  4. Transfer to demo machine
-    │  5. Load fine-tuned model via Transformers
-    │
-    ▼
-Demo Machine (INFERENCE)
-    │
-    │  6. Serve via Gradio (share=True for public URL)
-    │  7. Judges interact with fine-tuned model
+    │  "Base model: X% accuracy on breath sounds"
+    │  "After Unsloth fine-tuning: Y% accuracy"
+    │  "The phone runs base E2B. Clinics can deploy
+    │   fine-tuned E4B for higher accuracy."
     │
     ▼
-Phone (VIDEO PROOF)
-    │
-    │  8. AI Edge Gallery with BASE E2B (not fine-tuned)
-    │  9. Proves on-device capability for the video
-    │
-    ▼
-Judges see: fine-tuned quality in live demo + on-device proof in video
+Judges see: fine-tuning capability + honest deployment story
 ```
 
-**Note**: The phone runs BASE Gemma 4 E2B (fine-tuned models can't easily load into AI Edge Gallery). The live demo runs FINE-TUNED Gemma 4 E4B. This is honest — we show both, explain the difference in the writeup, and demonstrate that the architecture works end-to-end on-device.
+**Important**: The phone runs BASE Gemma 4 E2B. The fine-tuned E4B is demonstrated
+in a Kaggle notebook with metrics. This is honest — the phone works out-of-the-box,
+fine-tuning is the upgrade path.
 
 ### Unsloth Training Code (Confirmed for RTX 3060 12GB)
 
@@ -444,7 +480,7 @@ PHASE 5 (May 10-18): Video + Writeup + Submit
 
 ### What most teams will do
 - Use Gemma 4 as a text chatbot ("ask health questions")
-- Run it on a laptop, claim it "could" run on a phone
+- Run it on a laptop or Colab, claim it "could" run on a phone
 - Use off-the-shelf model, no fine-tuning
 - Single modality (text only)
 - Generic health/education/agriculture chatbot
@@ -453,23 +489,33 @@ PHASE 5 (May 10-18): Video + Writeup + Submit
 
 | Dimension | Most Teams | Malaika |
 |-----------|-----------|---------|
-| **Modalities** | Text only | Vision + Audio + Voice + Video — ALL through Gemma 4 |
-| **On-device proof** | "It could run on a phone" | VIDEO of it running on a phone (AI Edge Gallery + E2B) |
-| **Fine-tuning** | Off-the-shelf prompting | Unsloth QLoRA: breath sounds, skin color, African languages |
-| **Medical validity** | AI opinion | WHO IMCI protocol — validated across 100+ countries |
+| **Runs on a phone** | "It could run on a phone" | **Android app running live** — complete IMCI assessment on-device |
+| **Offline** | Needs internet / API calls | **Zero internet.** Everything on-device. Works where children die. |
+| **Real medical protocol** | AI opinion / chatbot advice | **WHO IMCI protocol** — validated in 100+ countries, deterministic classification |
+| **Vision on-device** | Text only | Camera analyzes photos for dehydration, nutrition, skin color — on the phone |
+| **Multilingual** | English only | 140+ languages. Demo in English + Swahili + Hindi |
+| **Medical safety** | LLM diagnoses | **LLM perceives, code classifies.** WHO thresholds are deterministic, never AI output |
+| **Fine-tuning** | Off-the-shelf prompting | Unsloth QLoRA on clinical data. Before/after metrics in notebook |
 | **Problem scale** | Vague "helps people" | 4.9 million children die/year (WHO, March 2026) |
-| **Agentic** | Simple Q&A | Multi-step protocol with function calling across modalities |
-| **Languages** | English | 140+ languages, fine-tuned for African languages via WAXAL |
-| **Technical depth** | Prompt engineering | 14+ tools, LoRA adapters, multimodal fusion, state machine |
-| **Emotional video** | Screen recording | Narrative: mother saving child at 2am, no internet, no clinic |
+| **Not a chatbot** | Q&A with an LLM | Structured clinical assessment following a published protocol |
+
+### Why "only Gemma 4" — the question judges will ask
+
+> "Why not use GPT-4 or Claude for this?"
+>
+> Because GPT-4 needs internet. Claude needs an API key. Llama doesn't fit on a phone
+> with vision. Gemma 4 E2B runs a complete multimodal medical assessment in 2.58GB,
+> offline, in 140+ languages. Where this matters — rural clinics with no internet —
+> no other model can do this.
 
 ### Competition Alignment Scorecard
 
-| Judging Criterion | Points | How We Score Maximum |
+| Judging Criterion | Weight | How We Score Maximum |
 |-------------------|--------|---------------------|
-| **Impact & Vision (40 pts)** | 4.9M children/year. WHO data from 3 weeks ago. Video shows specific human story. | 38-40 |
-| **Video Pitch (30 pts)** | Emotional narrative, live demo, on-phone proof, compelling music/pacing | 26-30 |
-| **Technical Depth (30 pts)** | 4 LoRA fine-tuned adapters, all Gemma 4 modalities used, WHO protocol engine, on-device deployment | 26-30 |
+| **Innovation (30%)** | Novel approach | Only submission with a real medical protocol as structured assessment on a phone |
+| **Impact (30%)** | Scale of problem | 4.9M children/year. WHO IMCI. Offline where it matters most. |
+| **Technical Execution (25%)** | Quality of implementation | Flutter app, deterministic classification, vision on-device, fine-tuning with Unsloth |
+| **Accessibility (15%)** | Resource-constrained | $150 phone, 2.58GB, no internet, any language |
 
 ---
 
@@ -536,42 +582,43 @@ PHASE 5 (May 10-18): Video + Writeup + Submit
 ### Mandatory (May 18)
 
 - [ ] **Kaggle Writeup** — 1,500 words max, Track: Health & Sciences
-- [ ] **YouTube Video** — 3 min, public, emotional narrative + technical demo
+- [ ] **YouTube Video** — 3 min, public. Android app demo is the hero.
 - [ ] **Public GitHub Repo** — documented, reproducible, no secrets
-- [ ] **Live Demo URL** — Gradio (share=True), no login, mobile-friendly
-- [ ] **Media Gallery** — cover image, screenshots, architecture diagram
+- [ ] **Android App APK / Demo** — the primary demo artifact
+- [ ] **Media Gallery** — cover image, screenshots of phone app, architecture diagram
 - [ ] **Writeup SUBMITTED** (not just draft)
 
-### Bonus (Winning Edge)
+### Winning Edge
 
-- [ ] Fine-tuned LoRA adapters (Unsloth) → targets Unsloth $10K prize
-- [ ] Heart rate MEMS module working
-- [ ] 3+ languages demonstrated
-- [ ] Phone demo in video (AI Edge Gallery + E2B) → proves on-device
-- [ ] 20+ validated test scenarios with accuracy metrics
-- [ ] Kaggle notebook showing fine-tuning process
+- [ ] Android app running complete IMCI assessment end-to-end on-device
+- [ ] Multi-language demo: English + Swahili (+ Hindi if possible)
+- [ ] Photo analysis working on-device (dehydration, nutrition)
+- [ ] Referral card generation after assessment
+- [ ] Kaggle notebook showing Unsloth fine-tuning + before/after metrics
+- [ ] 20+ validated test scenarios with accuracy metrics in writeup
 
 ---
 
 ## 12. Definition of Done
 
 ### Must Ship (Minimum Viable)
-1. Full IMCI: danger signs → breathing → diarrhea → fever → nutrition → classify → treat
-2. Gemma 4 vision: chest indrawing + skin color + wasting
-3. Gemma 4 audio: breath sounds + speech understanding
-4. Gemma 4 language: treatment in English + 1 other language
-5. TTS spoken output (Piper)
-6. ALL offline, ALL Gemma 4
-7. Video, repo, demo, writeup submitted
+1. Android app running complete IMCI assessment on-device with Gemma 4 E2B
+2. All 5 clinical steps: danger signs → breathing → diarrhea → fever → nutrition
+3. Photo analysis on-device (dehydration, nutrition signs)
+4. Deterministic WHO classification (red/yellow/green)
+5. Treatment summary + referral card
+6. English + Swahili working
+7. ALL offline, ALL Gemma 4, ALL on phone
+8. Video, repo, demo, writeup submitted
 
-### Must Ship to Win
+### Must Ship to Win First Prize
 All above PLUS:
-1. Fine-tuned LoRA adapters deployed (Unsloth)
-2. 3+ languages working (including African via WAXAL)
-3. Phone demo in video (E2B on AI Edge Gallery)
-4. Professional video with emotional story
-5. Heart rate MEMS working (or cleanly disabled with explanation)
-6. 20+ test scenarios with accuracy data in writeup
+1. Polished Flutter UI that looks like a real product (not a hackathon prototype)
+2. Multi-language demo in video (EN + SW + HI)
+3. Kaggle notebook with Unsloth fine-tuning + before/after accuracy metrics
+4. Professional video: emotional story + live phone demo
+5. 20+ validated test scenarios with accuracy data in writeup
+6. Referral card that a mother can show at a clinic
 
 ---
 
@@ -607,7 +654,10 @@ All work is pooled — any task can be picked up by any team member. Priority or
 
 ---
 
-*Plan v5: April 16, 2026*
-*Changes from v4: Phase 1 completed — skills-based agent architecture, voice pipeline, spectrogram approach, 5 fine-tuning iterations. Updated architecture section with implemented patterns.*
-*Deadline: May 18, 2026 (32 days remaining)*
-*Team: Vimal Kumar + Mark D. Hei Long*
+*Plan v6: April 18, 2026*
+*Changes from v5: MOBILE-FIRST pivot. Phone is the primary demo, not GPU. Android app
+with Gemma 4 E2B is the product. GPU/fine-tuning is supplementary (Unsloth prize +
+upgrade path story). Removed claims about on-device capabilities we don't have (breath
+counting from video, spectrogram analysis on phone). Honest about what E2B does on-device
+vs. what E4B does on GPU.*
+*Deadline: May 18, 2026 (30 days remaining)*

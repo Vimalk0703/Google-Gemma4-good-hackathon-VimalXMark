@@ -61,12 +61,16 @@ const Map<String, Set<String>> stepRequiredFields = {
 };
 
 /// Conditional fields -- required only if a trigger finding is true.
+/// These BLOCK step advancement until answered (no fallback override).
 const Map<String, Map<String, Set<String>>> stepConditionalFields = {
+  'breathing': {
+    'has_cough': {'chest_indrawing', 'breathing_description'},
+  },
   'diarrhea': {
-    'has_diarrhea': {'diarrhea_days', 'blood_in_stool'},
+    'has_diarrhea': {'diarrhea_days', 'blood_in_stool', 'dehydration_signs'},
   },
   'fever': {
-    'has_fever': {'fever_days', 'malaria_risk'},
+    'has_fever': {'fever_days', 'stiff_neck', 'malaria_risk'},
   },
 };
 
@@ -76,29 +80,30 @@ const Map<String, Map<String, String>> stepRequirements = {
     'age_months': "Child's age in months (2-59)",
   },
   'danger_signs': {
-    'is_alert': 'Is the child alert and responsive? (from photo)',
-    'can_drink': 'Can the child drink or breastfeed?',
+    'is_alert': 'Is the child very sleepy or hard to wake up?',
+    'can_drink': 'Is the child unable to drink or breastfeed?',
     'vomits_everything': 'Does the child vomit everything?',
     'has_convulsions': 'Has the child had convulsions/fits?',
   },
   'breathing': {
-    'has_cough': 'Does the child have a cough?',
-    'breathing_description': 'How does the breathing sound?',
+    'has_cough': 'Does the child have a cough or difficulty breathing?',
     'chest_indrawing':
-        'Is there chest indrawing? (from photo if available)',
+        'When the child breathes in, does the lower chest pull inward?',
+    'breathing_description':
+        'Does the child make any unusual breathing sounds like wheezing or stridor?',
   },
   'diarrhea': {
-    'has_diarrhea': 'Does the child have diarrhea?',
-    'diarrhea_days': 'How many days?',
-    'blood_in_stool': 'Is there blood in the stool?',
+    'has_diarrhea': 'Does the child have diarrhea or loose watery stools?',
+    'diarrhea_days': 'How many days has the diarrhea lasted?',
+    'blood_in_stool': 'Is there any blood in the stool?',
     'dehydration_signs':
-        'Signs of dehydration? (from photo if available)',
+        'Does the child have sunken eyes, or does the skin go back slowly when you pinch it?',
   },
   'fever': {
-    'has_fever': 'Does the child have fever?',
-    'fever_days': 'How many days?',
+    'has_fever': 'Does the child have a fever or feel hot?',
+    'fever_days': 'How many days has the fever lasted?',
     'stiff_neck': 'Does the child have a stiff neck?',
-    'malaria_risk': 'Is the family in a malaria-risk area?',
+    'malaria_risk': 'Do you live in an area with mosquitoes or malaria?',
   },
   'nutrition': {
     'visible_wasting':
@@ -161,6 +166,13 @@ RULES:
 - Keep each response to 2-3 sentences unless generating the final report
 - Do NOT say things like "use the clip button" or "type results" -- speak naturally
 - Do NOT repeat the caregiver's words back to them unnecessarily
+
+QUESTION PHRASING:
+- Always phrase symptom questions so that "yes" means the symptom IS PRESENT
+- Alertness: ask "Is your child very sleepy or hard to wake up?" (not "Is your child alert?")
+- Drinking: ask "Is your child unable to drink?" (not "Can your child drink?")
+- This ensures caregiver "yes"/"no" answers are unambiguous
+- For age: "How old is your child in months?" is fine as-is
 
 PHOTO ANALYSIS:
 - When you receive a photo, describe your specific observations to the caregiver
@@ -291,9 +303,21 @@ final Map<String, List<_KeywordRule>> _keywordRules = {
       satisfiesFields: ['breathing_description'],
     ),
     _KeywordRule(
-      pattern: RegExp(r'\b(chest.*indraw|indrawing|pulling.*in)\b'),
+      pattern: RegExp(r'\b(normal.*breathi|breathi.*(fine|ok|normal)|no.*noise|no.*wheez|quiet.*breathi|breath.*(fine|ok|normal))\b'),
+      findingKey: 'has_wheeze',
+      value: false,
+      satisfiesFields: ['breathing_description'],
+    ),
+    _KeywordRule(
+      pattern: RegExp(r'\b(chest.*indraw|indrawing|pulling.*in|chest.*pull|suck.*in)\b'),
       findingKey: 'has_indrawing',
       value: true,
+      satisfiesFields: ['chest_indrawing'],
+    ),
+    _KeywordRule(
+      pattern: RegExp(r'\b(no.*indraw|no.*pull|chest.*(fine|ok|normal)|not.*pulling)\b'),
+      findingKey: 'has_indrawing',
+      value: false,
       satisfiesFields: ['chest_indrawing'],
     ),
   ],
@@ -330,9 +354,15 @@ final Map<String, List<_KeywordRule>> _keywordRules = {
       satisfiesFields: ['dehydration_signs'],
     ),
     _KeywordRule(
-      pattern: RegExp(r'\b(skin.*pinch.*slow|slow.*skin.*pinch)\b'),
+      pattern: RegExp(r'\b(skin.*pinch.*slow|slow.*skin.*pinch|skin.*goes?.*back.*slow)\b'),
       findingKey: 'skin_pinch_slow',
       value: true,
+      satisfiesFields: ['dehydration_signs'],
+    ),
+    _KeywordRule(
+      pattern: RegExp(r'\b(no.*sunken|eyes?.*(fine|ok|normal)|no.*dehydrat|not.*dehydrat|skin.*(fine|ok|normal|fast)|skin.*goes?.*back.*(quick|fast|normal))\b'),
+      findingKey: 'sunken_eyes',
+      value: false,
       satisfiesFields: ['dehydration_signs'],
     ),
   ],
@@ -405,6 +435,50 @@ final Map<String, List<_KeywordRule>> _keywordRules = {
 };
 
 // ============================================================================
+// Yes/No Context Disambiguation
+// ============================================================================
+
+/// Mapping for yes/no disambiguation when user gives brief responses.
+///
+/// All questions are phrased so "yes" = symptom present, "no" = symptom absent.
+/// See system prompt QUESTION PHRASING section.
+class _YesNoMapping {
+  final String findingKey;
+  final bool yesValue;
+  final bool noValue;
+  final List<String> satisfiesFields;
+  const _YesNoMapping({
+    required this.findingKey,
+    required this.yesValue,
+    required this.noValue,
+    required this.satisfiesFields,
+  });
+}
+
+/// Maps requirement field name -> finding key + yes/no semantics.
+const Map<String, _YesNoMapping> _yesNoMappings = {
+  'is_alert': _YesNoMapping(findingKey: 'lethargic', yesValue: true, noValue: false, satisfiesFields: ['is_alert']),
+  'can_drink': _YesNoMapping(findingKey: 'unable_to_drink', yesValue: true, noValue: false, satisfiesFields: ['can_drink']),
+  'vomits_everything': _YesNoMapping(findingKey: 'vomits_everything', yesValue: true, noValue: false, satisfiesFields: ['vomits_everything']),
+  'has_convulsions': _YesNoMapping(findingKey: 'has_convulsions', yesValue: true, noValue: false, satisfiesFields: ['has_convulsions']),
+  'has_cough': _YesNoMapping(findingKey: 'has_cough', yesValue: true, noValue: false, satisfiesFields: ['has_cough']),
+  'chest_indrawing': _YesNoMapping(findingKey: 'has_indrawing', yesValue: true, noValue: false, satisfiesFields: ['chest_indrawing']),
+  'breathing_description': _YesNoMapping(findingKey: 'has_wheeze', yesValue: true, noValue: false, satisfiesFields: ['breathing_description']),
+  'has_diarrhea': _YesNoMapping(findingKey: 'has_diarrhea', yesValue: true, noValue: false, satisfiesFields: ['has_diarrhea']),
+  'blood_in_stool': _YesNoMapping(findingKey: 'blood_in_stool', yesValue: true, noValue: false, satisfiesFields: ['blood_in_stool']),
+  'dehydration_signs': _YesNoMapping(findingKey: 'sunken_eyes', yesValue: true, noValue: false, satisfiesFields: ['dehydration_signs']),
+  'has_fever': _YesNoMapping(findingKey: 'has_fever', yesValue: true, noValue: false, satisfiesFields: ['has_fever']),
+  'stiff_neck': _YesNoMapping(findingKey: 'stiff_neck', yesValue: true, noValue: false, satisfiesFields: ['stiff_neck']),
+  'malaria_risk': _YesNoMapping(findingKey: 'malaria_risk', yesValue: true, noValue: false, satisfiesFields: ['malaria_risk']),
+  'visible_wasting': _YesNoMapping(findingKey: 'visible_wasting', yesValue: true, noValue: false, satisfiesFields: ['visible_wasting']),
+  'edema': _YesNoMapping(findingKey: 'edema', yesValue: true, noValue: false, satisfiesFields: ['edema']),
+};
+
+/// Regex patterns for detecting affirmative/negative responses.
+final _yesPattern = RegExp(r'^(yes|yeah|yep|ya|yah|correct|right|sure|ok|uh[ -]?huh|definitely|absolutely)\b', caseSensitive: false);
+final _noPattern = RegExp(r'^(no|nah|nope|not really|never|none|not at all|neither)\b', caseSensitive: false);
+
+// ============================================================================
 // Word-Number Map for Age Extraction
 // ============================================================================
 
@@ -464,13 +538,17 @@ class ChatEngine {
   /// Image observations collected during the assessment (for the report).
   final List<String> observations;
 
+  /// Requirement field name of the question most recently posed by the LLM.
+  /// Used for yes/no disambiguation when caregiver gives a brief response.
+  String? _pendingQuestionTopic;
+
   /// Minimum user messages before fallback step advancement can trigger.
   static const Map<String, int> _msgFallbackThresholds = {
-    'danger_signs': 3,
-    'breathing': 2,
-    'diarrhea': 2,
-    'fever': 2,
-    'nutrition': 2,
+    'danger_signs': 5,
+    'breathing': 3,
+    'diarrhea': 4,
+    'fever': 5,
+    'nutrition': 3,
   };
 
   ChatEngine({
@@ -646,7 +724,45 @@ class ChatEngine {
     // Extract numeric values for duration fields
     _extractNumericFields(combined, events);
 
-    // Apply keyword rules for the current step
+    // --- Yes/No context disambiguation ---
+    // When the caregiver gives a brief yes/no response, map it to the
+    // finding that was most recently asked about. This prevents bare "yes"
+    // or "no" from being missed by keyword rules.
+    final contextDetermined = <String>{};
+    if (_pendingQuestionTopic != null) {
+      final userLower = userText.toLowerCase().trim();
+      final isYes = _yesPattern.hasMatch(userLower);
+      final isNo = _noPattern.hasMatch(userLower);
+      if (isYes || isNo) {
+        final mapping = _yesNoMappings[_pendingQuestionTopic!];
+        if (mapping != null) {
+          final value = isYes ? mapping.yesValue : mapping.noValue;
+          findings[mapping.findingKey] = value;
+          _fieldsAnswered.add(mapping.findingKey);
+          belief.confirmFinding(mapping.findingKey, value);
+          for (final field in mapping.satisfiesFields) {
+            _fieldsAnswered.add(field);
+          }
+          contextDetermined.add(mapping.findingKey);
+          events.add({
+            'type': 'finding',
+            'key': mapping.findingKey,
+            'value': value,
+            'label': mapping.findingKey
+                .replaceAll('_', ' ')
+                .split(' ')
+                .map((w) =>
+                    w.isEmpty ? w : '${w[0].toUpperCase()}${w.substring(1)}')
+                .join(' '),
+          });
+        }
+      }
+    }
+
+    // Apply keyword rules for the current step.
+    // Keyword rules OVERRIDE yes/no context when they find a specific match,
+    // because keywords are more precise (e.g., "yes he can drink well" →
+    // yes/no says unable=true, but keyword "can drink" says unable=false).
     final rules = _keywordRules[step];
     if (rules == null) return;
 
@@ -812,6 +928,15 @@ class ChatEngine {
       }
     }
 
+    // Track what we're about to ask about (for yes/no disambiguation next turn)
+    _pendingQuestionTopic = null;
+    for (final entry in requirements.entries) {
+      if (!_fieldsAnswered.contains(entry.key) && !_isFieldCollected(entry.key)) {
+        _pendingQuestionTopic = entry.key;
+        break;
+      }
+    }
+
     if (collected.isNotEmpty) {
       buf.writeln('Already collected:');
       buf.writeln(collected.join('\n'));
@@ -919,12 +1044,27 @@ class ChatEngine {
       if (conditionsMet) shouldAdvance = true;
     }
 
-    // Fallback: message-count based (ensures progress bar always moves)
+    // Fallback: message-count based (ensures progress bar always moves).
+    // BUT: never fallback when conditional fields are still pending —
+    // those need explicit answers (e.g., malaria risk, fever duration).
     if (!shouldAdvance) {
-      final threshold = _msgFallbackThresholds[step] ?? 3;
-      final msgs = _countUserMsgsSinceStepStart();
-      if (msgs >= threshold) {
-        shouldAdvance = true;
+      final conditionals = stepConditionalFields[step] ?? {};
+      var conditionalsPending = false;
+      for (final entry in conditionals.entries) {
+        if (findings[entry.key] == true) {
+          if (!entry.value.every((f) => _fieldsAnswered.contains(f))) {
+            conditionalsPending = true;
+            break;
+          }
+        }
+      }
+
+      if (!conditionalsPending) {
+        final threshold = _msgFallbackThresholds[step] ?? 3;
+        final msgs = _countUserMsgsSinceStepStart();
+        if (msgs >= threshold) {
+          shouldAdvance = true;
+        }
       }
     }
 
@@ -952,6 +1092,15 @@ class ChatEngine {
     _stepStartMsgCount = conversationHistory.length;
     _imageReceivedThisStep = false;
     belief.resetForStep();
+
+    // Pre-set pending topic to the first question of the new step,
+    // so the user's first yes/no answer gets mapped correctly.
+    _pendingQuestionTopic = null;
+    final newReqs = stepRequirements[newStep] ?? {};
+    for (final entry in newReqs.entries) {
+      _pendingQuestionTopic = entry.key;
+      break;
+    }
 
     // Emit step change event
     if (clinicalSteps.contains(newStep)) {
@@ -1460,6 +1609,7 @@ class ChatEngine {
     _fieldsAnswered.clear();
     _imageReceivedThisStep = false;
     _stepStartMsgCount = 0;
+    _pendingQuestionTopic = null;
     belief = BeliefState();
 
     // Reset all findings to defaults
@@ -1467,5 +1617,30 @@ class ChatEngine {
     for (final key in findings.keys.toList()) {
       findings[key] = defaults[key];
     }
+  }
+
+  /// Description of the next clinical question to ask, or null if step is done.
+  String? get nextQuestionHint {
+    final requirements = stepRequirements[step] ?? {};
+    for (final entry in requirements.entries) {
+      if (!_fieldsAnswered.contains(entry.key) &&
+          !_isFieldCollected(entry.key)) {
+        return entry.value;
+      }
+    }
+    return null;
+  }
+
+  /// Get data needed to generate the final assessment presentation.
+  ///
+  /// Call this when the assessment is complete to get the system prompt
+  /// with classification data for the LLM to present naturally.
+  Map<String, dynamic> getFinalAssessment() {
+    final classCtx = _buildClassificationContext();
+    return {
+      'systemPrompt': '$systemPrompt\n\n$classCtx',
+      'conversationHistory':
+          List<Map<String, String>>.from(conversationHistory),
+    };
   }
 }

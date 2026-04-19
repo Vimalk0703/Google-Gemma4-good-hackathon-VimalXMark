@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../theme/malaika_theme.dart';
 
 /// WHO IMCI classification card — RED/YELLOW/GREEN severity.
+/// Enhanced with icon, better layout, and WHO protocol attribution.
 class ClassificationCard extends StatelessWidget {
   final String step;
   final String severity;
@@ -21,34 +22,41 @@ class ClassificationCard extends StatelessWidget {
     final color = MalaikaColors.forSeverity(severity);
     final bgColor = MalaikaColors.forSeverityBackground(severity);
     final badgeLabel = MalaikaColors.severityLabel(severity);
+    final icon = MalaikaColors.severityIcon(severity);
 
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
+      padding: const EdgeInsets.symmetric(vertical: 6),
       child: Container(
-        padding: const EdgeInsets.all(12),
+        padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
           color: bgColor,
-          border: Border.all(color: color.withOpacity(0.25)),
-          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: color.withValues(alpha: 0.3)),
+          borderRadius: BorderRadius.circular(16),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Header: step name + badge
+            // Header: icon + step + severity badge
             Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text(
-                  step.replaceAll('_', ' ').split(' ').map((w) =>
-                    w.isNotEmpty ? '${w[0].toUpperCase()}${w.substring(1)}' : w
-                  ).join(' '),
-                  style: TextStyle(fontSize: 11, color: MalaikaColors.textMuted),
+                Icon(icon, size: 20, color: color),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    step,
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: MalaikaColors.textSecondary,
+                    ),
+                  ),
                 ),
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                   decoration: BoxDecoration(
-                    color: color.withOpacity(0.15),
-                    borderRadius: BorderRadius.circular(5),
+                    color: color.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(20),
                   ),
                   child: Text(
                     badgeLabel,
@@ -62,34 +70,41 @@ class ClassificationCard extends StatelessWidget {
                 ),
               ],
             ),
-            const SizedBox(height: 4),
+            const SizedBox(height: 10),
             // Classification label
             Text(
               label,
-              style: TextStyle(
-                fontSize: 13,
+              style: const TextStyle(
+                fontSize: 15,
                 fontWeight: FontWeight.w600,
                 color: MalaikaColors.text,
               ),
             ),
-            const SizedBox(height: 2),
+            const SizedBox(height: 4),
             // Reasoning
             Text(
               reasoning,
-              style: TextStyle(
-                fontSize: 11,
-                color: MalaikaColors.textMuted,
-                height: 1.4,
+              style: const TextStyle(
+                fontSize: 13,
+                color: MalaikaColors.textSecondary,
+                height: 1.5,
               ),
             ),
-            const SizedBox(height: 3),
-            // Source
-            Text(
-              'WHO IMCI Classification',
-              style: TextStyle(
-                fontSize: 9,
-                color: MalaikaColors.textMuted.withOpacity(0.5),
-              ),
+            const SizedBox(height: 10),
+            // WHO attribution
+            Row(
+              children: [
+                Icon(Icons.verified_rounded,
+                    size: 12, color: MalaikaColors.textMuted),
+                const SizedBox(width: 4),
+                Text(
+                  'WHO IMCI Protocol',
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: MalaikaColors.textMuted,
+                  ),
+                ),
+              ],
             ),
           ],
         ),

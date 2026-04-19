@@ -7,11 +7,12 @@
 
 ## Absolute Rules
 
-1. **EVERYTHING runs offline. No internet. No exceptions.** Every feature must work without connectivity.
-2. **ALL intelligence comes from Gemma 4.** It IS the solution, not a tool we use. No other LLMs.
-3. **Every claim must be implementable.** No hand-waving. If it's in the writeup, it works in the demo.
-4. **Medical safety first.** This is decision SUPPORT, not diagnosis. WHO IMCI thresholds are deterministic code, never LLM output.
-5. **Single developer model.** No assumptions about who does what — any task can be picked up by anyone.
+1. **MOBILE FIRST. The phone IS the product.** The Android app with Gemma 4 E2B is the primary demo. GPU/Colab is supplementary.
+2. **EVERYTHING runs offline. No internet. No exceptions.** Every feature must work without connectivity on the phone.
+3. **ALL intelligence comes from Gemma 4.** It IS the solution, not a tool we use. No other LLMs. The reason only Gemma 4 works: no other model runs on a phone with text + vision in <3GB.
+4. **Every claim must be implementable ON THE PHONE.** No hand-waving. If it's in the writeup, it works on-device. Do NOT claim capabilities that only work on GPU (e.g., breath counting from video, spectrogram analysis).
+5. **Medical safety first.** This is decision SUPPORT, not diagnosis. WHO IMCI thresholds are deterministic code, never LLM output.
+6. **Single developer model.** No assumptions about who does what — any task can be picked up by anyone.
 
 ---
 

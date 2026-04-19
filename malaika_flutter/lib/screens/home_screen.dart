@@ -1,22 +1,24 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_gemma/flutter_gemma.dart';
+import 'package:image_picker/image_picker.dart';
 import '../theme/malaika_theme.dart';
 import '../widgets/chat_bubble.dart';
 import '../widgets/imci_progress_bar.dart';
 import '../widgets/classification_card.dart';
-import '../widgets/skill_card.dart';
-import '../widgets/image_request_card.dart';
-import '../core/imci_protocol.dart';
+import '../widgets/reasoning_card.dart';
+import '../core/imci_questionnaire.dart';
 
-/// IMCI assessment driven by Dart code with Gemma 4 for natural language.
+/// IMCI assessment using structured Q&A collection + LLM narration.
 ///
-/// Flow per question:
-///   1. Dart picks the next IMCI question
-///   2. Gemma 4 rephrases it naturally (single fresh LLM call)
-///   3. User answers
-///   4. Dart extracts finding via keywords
-///   5. When step is complete → deterministic WHO classification card
-///   6. Repeat for next step
+/// Phase 1: COLLECT — Walk through predefined IMCI questions in order.
+///   LLM rephrases each question naturally. User answers.
+///   Reasoning card shows extracted findings after each answer.
+///
+/// Phase 2: CLASSIFY — After each step completes, run deterministic WHO
+///   classification (imci_protocol.dart). Show classification card.
+///
+/// Phase 3: NARRATE — After all questions, LLM generates a comprehensive
+///   report from all Q&A pairs + classifications.
 
 class HomeScreen extends StatefulWidget {
   final bool modelLoaded;
@@ -32,439 +34,1366 @@ class _HomeScreenState extends State<HomeScreen> {
   final ScrollController _scrollController = ScrollController();
   final List<_ChatItem> _chatItems = [];
   VoiceState _voiceState = VoiceState.idle;
-  int _currentStep = 0;
 
-  // IMCI state machine
-  int _stepIndex = 0; // 0=greeting, 1=danger, 2=breathing, 3=diarrhea, 4=fever, 5=nutrition, 6=complete
-  int _questionIndex = 0; // Which question within the current step
-  bool _waitingForAnswer = false; // True when we've asked a question and waiting for user reply
+  /// The questionnaire manages all IMCI Q&A state.
+  final ImciQuestionnaire _q = ImciQuestionnaire();
 
-  // Clinical findings
-  int _ageMonths = 0;
-  bool _lethargic = false;
-  bool _unableToDrink = false;
-  bool _vomitsEverything = false;
-  bool _convulsions = false;
-  bool _hasCough = false;
-  bool _hasDiarrhea = false;
-  int _diarrheaDays = 0;
-  bool _bloodInStool = false;
-  bool _hasFever = false;
-  int _feverDays = 0;
-  bool _stiffNeck = false;
-  bool _malariaRisk = false;
-  bool _visibleWasting = false;
-  bool _edema = false;
+  /// Progress bar step (0-5).
+  int _progressStep = 0;
 
-  // All IMCI questions in order
-  static const _steps = [
-    'greeting',
-    'danger_signs',
-    'breathing',
-    'diarrhea',
-    'fever',
-    'nutrition',
-    'complete',
-  ];
+  /// LLM chat session.
+  dynamic _chat;
+  String _chatStep = '';
 
-  // Questions per step with fallback text
-  static const _questions = <String, List<Map<String, String>>>{
-    'greeting': [
-      {'id': 'age', 'ask': 'Hello! I am Malaika, your child health assistant. How old is your child in months?'},
-    ],
-    'danger_signs': [
-      {'id': 'alertness', 'ask': 'Is your child very sleepy or hard to wake up?'},
-      {'id': 'drinking', 'ask': 'Can your child drink or breastfeed normally?'},
-      {'id': 'vomiting', 'ask': 'Does your child vomit everything they eat or drink?'},
-      {'id': 'convulsions', 'ask': 'Has your child had any fits or seizures during this illness?'},
-    ],
-    'breathing': [
-      {'id': 'cough', 'ask': 'Does your child have a cough or any difficulty breathing?'},
-    ],
-    'diarrhea': [
-      {'id': 'diarrhea', 'ask': 'Has your child had diarrhea or loose watery stools?'},
-      {'id': 'diarrhea_days', 'ask': 'How many days has the diarrhea lasted?'},
-      {'id': 'blood_stool', 'ask': 'Is there any blood in the stool?'},
-    ],
-    'fever': [
-      {'id': 'fever', 'ask': 'Does your child have a fever or feel hot?'},
-      {'id': 'fever_days', 'ask': 'How many days has the fever lasted?'},
-      {'id': 'stiff_neck', 'ask': 'Does your child have a stiff neck?'},
-      {'id': 'malaria', 'ask': 'Do you live in an area with mosquitoes or malaria?'},
-    ],
-    'nutrition': [
-      {'id': 'wasting', 'ask': 'Does your child look very thin? Are ribs or bones visible?'},
-      {'id': 'edema', 'ask': 'Is there any swelling in both of your child\'s feet?'},
-    ],
-  };
+  /// Track the previous step for transition banners.
+  String _lastDisplayedStep = 'greeting';
 
-  String get _currentStepName => _steps[_stepIndex.clamp(0, _steps.length - 1)];
+  /// System prompt for the LLM — just persona and tone.
+  static const _systemPrompt =
+      'You are Malaika, a warm and caring child health assistant. '
+      'You help caregivers check on their child\'s health.\n'
+      'RULES:\n'
+      '- Keep responses to 1-2 short sentences\n'
+      '- Be warm and reassuring\n'
+      '- ONLY ask the question you are told to ask\n'
+      '- Do NOT add extra questions or ask about other topics\n'
+      '- Do NOT assume any symptoms\n'
+      '- Acknowledge what the caregiver says briefly, then ask the given question\n'
+      '- Never diagnose';
+
+  /// Report-specific system prompt (no "only ask questions" rule).
+  static const _reportPrompt =
+      'You are Malaika, a caring child health assistant. '
+      'Generate a clear, practical health report. '
+      'Explain findings simply. Be caring but direct. '
+      'Never diagnose — recommend seeing a health worker.';
 
   @override
   void initState() {
     super.initState();
-    // Ask first question (greeting/age)
-    _askCurrentQuestion();
+    _startAssessment();
   }
 
-  /// Generate the question using LLM or fallback
-  Future<void> _askCurrentQuestion() async {
-    final stepName = _currentStepName;
-    final questions = _questions[stepName];
+  // --------------------------------------------------------------------------
+  // LLM Session
+  // --------------------------------------------------------------------------
 
-    if (stepName == 'complete' || questions == null) return;
-    if (_questionIndex >= questions.length) return;
-
-    final q = questions[_questionIndex];
-    final fallbackText = q['ask']!;
-    final qId = q['id']!;
-
-    // Try LLM to make it natural, otherwise use fallback
-    if (widget.modelLoaded) {
-      setState(() => _voiceState = VoiceState.thinking);
-      final response = await _singleLLMCall(
-        'Rephrase this question warmly in 1 sentence. '
-        'Do NOT introduce yourself. Do NOT say your name. '
-        'Do NOT assume symptoms. Just ask: "$fallbackText"'
-      );
-      if (mounted) {
-        final cleanResponse = response.replaceAll(RegExp(r'^\s*[,.:;]\s*$'), '').trim();
-        final displayText = cleanResponse.isNotEmpty ? cleanResponse : fallbackText;
-        _addBotMessage(displayText);
-        debugPrint('[MALAIKA] Step=$stepName Q=$qId Asked via ${cleanResponse.isNotEmpty ? "LLM" : "FALLBACK"}: "$displayText"');
-      }
-    } else {
-      _addBotMessage(fallbackText);
-      debugPrint('[MALAIKA] Step=$stepName Q=$qId Asked via FALLBACK: "$fallbackText"');
-    }
-
-    _waitingForAnswer = true;
-    if (mounted) setState(() => _voiceState = VoiceState.idle);
-  }
-
-  /// Single LLM call with fresh context (avoids context overflow)
-  Future<String> _singleLLMCall(String prompt) async {
+  Future<bool> _initSession(String step, {String? systemPrompt}) async {
+    if (!widget.modelLoaded) return false;
+    await _closeChat();
     try {
       final model = await FlutterGemma.getActiveModel(maxTokens: 200);
-      final chat = await model.createChat(temperature: 0.4, topK: 40,
-          systemInstruction: 'You are a caring health assistant. Rephrase questions warmly in 1 sentence. Never introduce yourself.');
-      await chat.addQuery(Message(text: prompt, isUser: true));
-      final response = await chat.generateChatResponse();
-      return response is TextResponse ? response.token.trim() : '';
+      _chat = await model.createChat(
+        temperature: 0.4,
+        topK: 40,
+        systemInstruction: systemPrompt ?? _systemPrompt,
+      );
+      _chatStep = step;
+      debugPrint('[MALAIKA] Session: $step');
+      return true;
     } catch (e) {
-      debugPrint('[MALAIKA] LLM error: $e');
+      debugPrint('[MALAIKA] Session error: $e');
+      return false;
+    }
+  }
+
+  Future<void> _closeChat() async {
+    if (_chat != null) {
+      try {
+        await (_chat as dynamic).close();
+      } catch (_) {}
+      _chat = null;
+    }
+  }
+
+  Future<String> _ask(String instruction) async {
+    if (_chat == null) return '';
+    debugPrint('[MALAIKA] Ask: "$instruction"');
+    try {
+      await _chat!.addQuery(Message(text: instruction, isUser: true));
+      final response = await _chat!.generateChatResponse();
+      final text = response is TextResponse ? response.token.trim() : '';
+      if (text.isNotEmpty) {
+        debugPrint(
+            '[MALAIKA] Got (${text.length}): "${text.substring(0, text.length.clamp(0, 100))}"');
+        return text;
+      }
+      // Retry once on empty
+      debugPrint('[MALAIKA] Empty, retrying...');
+      await _closeChat();
+      await Future.delayed(const Duration(milliseconds: 500));
+      if (!await _initSession(_chatStep)) return '';
+      await _chat!.addQuery(Message(text: instruction, isUser: true));
+      final retry = await _chat!.generateChatResponse();
+      return retry is TextResponse ? retry.token.trim() : '';
+    } catch (e) {
+      debugPrint('[MALAIKA] Error: $e');
       return '';
     }
   }
+
+  // --------------------------------------------------------------------------
+  // Assessment Start
+  // --------------------------------------------------------------------------
+
+  Future<void> _startAssessment() async {
+    setState(() => _voiceState = VoiceState.thinking);
+    _addTyping();
+
+    if (await _initSession('greeting')) {
+      final greeting = await _ask(
+        'Greet the caregiver warmly and ask: ${_q.currentQuestion!.question}',
+      );
+      _removeTyping();
+      _addBot(greeting.isNotEmpty
+          ? greeting
+          : 'Hello! I am Malaika. ${_q.currentQuestion!.question}');
+    } else {
+      _removeTyping();
+      _addBot('Hello! I am Malaika, your child health assistant. '
+          '${_q.currentQuestion!.question}');
+    }
+
+    if (mounted) setState(() => _voiceState = VoiceState.idle);
+  }
+
+  // --------------------------------------------------------------------------
+  // Main Send — Q&A Collection with Reasoning
+  // --------------------------------------------------------------------------
 
   Future<void> _sendText() async {
     final text = _textController.text.trim();
     if (text.isEmpty) return;
     _textController.clear();
-    _addUserMessage(text);
-    debugPrint('[MALAIKA] User said: "$text" | Step=$_currentStepName Q=$_questionIndex');
+    FocusScope.of(context).unfocus();
+    _addUser(text);
+    setState(() => _voiceState = VoiceState.thinking);
 
-    if (!_waitingForAnswer) return;
-    _waitingForAnswer = false;
+    // Handle "skip" for photo questions
+    if (_q.currentQuestion?.type == AnswerType.photo &&
+        (text.toLowerCase() == 'skip' ||
+            text.toLowerCase() == 'no photo')) {
+      await _onSkipPhoto();
+      if (mounted) setState(() => _voiceState = VoiceState.idle);
+      return;
+    }
+
+    // If assessment is already complete, handle follow-up
+    if (_q.isComplete) {
+      _addTyping();
+      final response = await _ask(
+        'Caregiver asks: "$text". Answer briefly. Remind them to see a health worker.',
+      );
+      _removeTyping();
+      _addBot(response.isNotEmpty
+          ? response
+          : 'Please show the results to a health worker.');
+      if (mounted) setState(() => _voiceState = VoiceState.idle);
+      return;
+    }
+
+    // --- REASONING: Snapshot before recording ---
+    final currentQ = _q.currentQuestion!;
+    final prevRawKeys = Set<String>.from(_q.rawAnswers.keys);
+    final prevStep = _q.currentStep;
+
+    // Record the answer and check if a step completed
+    final completedStep = _q.recordAnswer(text);
+
+    // --- REASONING: Compute what was extracted ---
+    final newKeys = _q.rawAnswers.keys
+        .where((k) => !prevRawKeys.contains(k))
+        .toList();
+    final directKey = currentQ.id;
+    final autoFilledKeys =
+        newKeys.where((k) => k != directKey).toList();
+
+    // Build findings map for reasoning card
+    final reasoningFindings = <String, dynamic>{};
+    for (final key in newKeys) {
+      reasoningFindings[key] = _q.findings[key];
+    }
+
+    debugPrint(
+        '[MALAIKA] Extracted: $reasoningFindings (auto: $autoFilledKeys)');
+
+    // Show reasoning card if findings were extracted
+    if (reasoningFindings.isNotEmpty) {
+      _chatItems.add(_ChatItem(
+        type: _ChatItemType.reasoning,
+        metadata: {
+          'findings': reasoningFindings,
+          'autoFilled': autoFilledKeys,
+          'stepName': _formatStep(prevStep),
+          'stepIndex': _q.stepProgress,
+        },
+      ));
+      setState(() {});
+    }
+
+    // If a step just completed, classify and show card
+    if (completedStep != null && completedStep != 'greeting') {
+      _classifyAndShowCard(completedStep);
+    }
+
+    // Step transition banner
+    final nextStepName = _q.currentStep;
+    if (nextStepName != _lastDisplayedStep &&
+        nextStepName != 'complete' &&
+        nextStepName != 'greeting') {
+      _addStepBanner(nextStepName);
+      _lastDisplayedStep = nextStepName;
+    }
+
+    // Update progress
+    _progressStep = _q.stepProgress;
+
+    // Check if all questions are done
+    if (_q.isComplete) {
+      await _generateFinalReport();
+      if (mounted) setState(() => _voiceState = VoiceState.idle);
+      return;
+    }
+
+    // Get the next question
+    final nextQ = _q.currentQuestion!;
+
+    // If next question is a photo, handle it specially
+    if (nextQ.type == AnswerType.photo) {
+      await _handlePhotoQuestion(nextQ, text);
+      if (mounted) setState(() => _voiceState = VoiceState.idle);
+      return;
+    }
+
+    // New step? Create fresh session
+    if (nextQ.step != _chatStep) {
+      await _initSession(nextQ.step);
+    }
+
+    // Ask the next question via LLM
+    _addTyping();
+    final prompt = completedStep != null
+        ? 'Ask the caregiver: ${nextQ.question}'
+        : 'Caregiver said: "$text". Acknowledge briefly, then ask: ${nextQ.question}';
+    final response = await _ask(prompt);
+    _removeTyping();
+    _addBot(response.isNotEmpty ? response : nextQ.question);
+
+    if (mounted) setState(() => _voiceState = VoiceState.idle);
+  }
+
+  // --------------------------------------------------------------------------
+  // Photo Question — vision analysis with targeted clinical prompt
+  // --------------------------------------------------------------------------
+
+  Future<void> _handlePhotoQuestion(
+      ImciQuestion q, String previousAnswer) async {
+    final vp = _q.currentVisionPrompt;
+    if (vp == null) {
+      _q.skipPhoto();
+      return;
+    }
+
+    if (_chatStep != q.step) await _initSession(q.step);
+    _addTyping();
+    final askResponse = await _ask(
+      'Caregiver said: "$previousAnswer". Acknowledge briefly, then say: ${vp.askText} '
+      'Also mention they can type "skip" if they don\'t have a camera.',
+    );
+    _removeTyping();
+    _addBot(askResponse.isNotEmpty ? askResponse : vp.askText);
+
+    _chatItems.add(_ChatItem(
+      type: _ChatItemType.photoPrompt,
+      metadata: {'step': q.step, 'label': q.label},
+    ));
+    setState(() => _voiceState = VoiceState.idle);
+  }
+
+  Future<void> _onTakePhoto() async {
+    final vp = _q.currentVisionPrompt;
+    if (vp == null) return;
 
     setState(() => _voiceState = VoiceState.thinking);
 
-    // 1. Extract finding from user's answer
-    _extractFinding(text);
+    try {
+      await _closeChat();
+      final picker = ImagePicker();
+      final image = await picker.pickImage(
+        source: ImageSource.gallery,
+        maxWidth: 256,
+        maxHeight: 256,
+        imageQuality: 50,
+      );
 
-    // 2. Move to next question or classify step
-    _questionIndex++;
+      if (image == null) {
+        if (mounted) setState(() => _voiceState = VoiceState.idle);
+        return;
+      }
 
-    // Handle conditional questions (skip if parent answer is no)
-    _skipConditionalQuestions();
+      final imageBytes = await image.readAsBytes();
+      _addBot('Analyzing the photo...');
 
-    final questions = _questions[_currentStepName];
-    if (questions != null && _questionIndex >= questions.length) {
-      // Step complete → classify and advance
-      await _classifyAndAdvance();
+      await _closeChat();
+      final model = await FlutterGemma.getActiveModel(maxTokens: 200);
+      _chat = await model.createChat(
+        temperature: 0.2,
+        topK: 40,
+        systemInstruction:
+            'You are a clinical health assistant. '
+            'Analyze the image with the specific checklist given. '
+            'Be precise and only report what you can see.',
+      );
+      _chatStep = 'vision';
+
+      await _chat!.addQuery(Message(
+        text: vp.analysisPrompt,
+        isUser: true,
+        imageBytes: imageBytes,
+      ));
+
+      final response = await _chat!.generateChatResponse();
+      final analysisText =
+          response is TextResponse ? response.token.trim() : '';
+
+      if (analysisText.isNotEmpty) {
+        debugPrint('[MALAIKA] Vision analysis: $analysisText');
+        _q.recordVisionAnalysis(analysisText);
+        _addBot('Photo analysis: $analysisText');
+      } else {
+        debugPrint('[MALAIKA] Vision empty, skipping');
+        _q.skipPhoto();
+        _addBot(
+            'I couldn\'t analyze the photo clearly. Let me continue with questions.');
+      }
+    } catch (e) {
+      debugPrint('[MALAIKA] Vision error: $e');
+      _q.skipPhoto();
+      _addBot(
+          'I had trouble with the photo. Let me continue with questions.');
+    }
+
+    _progressStep = _q.stepProgress;
+
+    if (_q.isComplete) {
+      await _generateFinalReport();
     } else {
-      // Ask next question in same step
-      await _askCurrentQuestion();
+      final nextQ = _q.currentQuestion!;
+      if (nextQ.type == AnswerType.photo) {
+        await _handlePhotoQuestion(nextQ, '');
+      } else {
+        if (nextQ.step != _chatStep) await _initSession(nextQ.step);
+        _addTyping();
+        final response =
+            await _ask('Ask the caregiver: ${nextQ.question}');
+        _removeTyping();
+        _addBot(response.isNotEmpty ? response : nextQ.question);
+      }
     }
 
     if (mounted) setState(() => _voiceState = VoiceState.idle);
   }
 
-  void _skipConditionalQuestions() {
-    final stepName = _currentStepName;
-    final questions = _questions[stepName];
-    if (questions == null) return;
+  Future<void> _onSkipPhoto() async {
+    final completedStep = _q.skipPhoto();
+    if (completedStep != null) {
+      _classifyAndShowCard(completedStep);
+    }
+    _progressStep = _q.stepProgress;
 
-    // Skip diarrhea sub-questions if no diarrhea
-    if (stepName == 'diarrhea' && !_hasDiarrhea && _questionIndex >= 1) {
-      _questionIndex = questions.length;
+    setState(() => _voiceState = VoiceState.thinking);
+
+    if (_q.isComplete) {
+      await _generateFinalReport();
+    } else {
+      final nextQ = _q.currentQuestion!;
+      if (nextQ.step != _chatStep) await _initSession(nextQ.step);
+      _addTyping();
+      final response =
+          await _ask('Ask the caregiver: ${nextQ.question}');
+      _removeTyping();
+      _addBot(response.isNotEmpty ? response : nextQ.question);
     }
-    // Skip fever sub-questions if no fever
-    if (stepName == 'fever' && !_hasFever && _questionIndex >= 1) {
-      _questionIndex = questions.length;
-    }
+
+    if (mounted) setState(() => _voiceState = VoiceState.idle);
   }
 
-  void _extractFinding(String text) {
-    final t = text.toLowerCase();
-    final isYes = t == 'yes' || t.contains('yes') || t == 'yeah' || t == 'ya';
-    final stepName = _currentStepName;
-    final questions = _questions[stepName];
-    if (questions == null || _questionIndex >= questions.length) return;
-    final qId = questions[_questionIndex]['id']!;
+  // --------------------------------------------------------------------------
+  // Classification — deterministic, per step
+  // --------------------------------------------------------------------------
 
-    debugPrint('[MALAIKA] Extracting: qId=$qId text="$t" isYes=$isYes');
+  void _classifyAndShowCard(String step) {
+    final result = _q.classifyStep(step);
+    if (result == null) return;
 
-    switch (qId) {
-      case 'age':
-        final m = RegExp(r'(\d+)').firstMatch(text);
-        if (m != null) _ageMonths = int.tryParse(m.group(1)!) ?? 0;
-        const words = {'one':1,'two':2,'three':3,'four':4,'five':5,'six':6,'seven':7,'eight':8,'nine':9,'ten':10,
-          'eleven':11,'twelve':12,'eighteen':18,'twenty-four':24};
-        for (final e in words.entries) {
-          if (t.contains(e.key)) { _ageMonths = e.value; break; }
-        }
-        debugPrint('[MALAIKA] Age extracted: $_ageMonths months');
-      case 'alertness':
-        _lethargic = isYes || t.contains('sleepy') || t.contains('lethargic') || t.contains('drowsy') || t.contains('hard to wake');
-        debugPrint('[MALAIKA] Lethargic: $_lethargic');
-      case 'drinking':
-        // Question: "Can your child drink?" — positive answers mean CAN drink
-        final canDrink = isYes || t.contains('normal') || t.contains('fine') || t.contains('well') || t.contains('drink') || t.contains('breast');
-        final cantDrink = t.contains('cannot') || t.contains("can't") || t.contains('unable') || t.contains('refuse');
-        _unableToDrink = cantDrink && !canDrink;
-        debugPrint('[MALAIKA] Unable to drink: $_unableToDrink (canDrink=$canDrink cantDrink=$cantDrink)');
-      case 'vomiting':
-        _vomitsEverything = isYes || t.contains('vomit') || t.contains('throw up');
-        debugPrint('[MALAIKA] Vomits everything: $_vomitsEverything');
-      case 'convulsions':
-        _convulsions = isYes || t.contains('seizure') || t.contains('fit') || t.contains('convulsion') || t.contains('shaking');
-        debugPrint('[MALAIKA] Convulsions: $_convulsions');
-      case 'cough':
-        _hasCough = isYes || t.contains('cough') || t.contains('cold') || t.contains('breathing') || t.contains('wheez') || t.contains('noise');
-        debugPrint('[MALAIKA] Has cough: $_hasCough');
-      case 'diarrhea':
-        _hasDiarrhea = isYes || t.contains('diarrhea') || t.contains('loose') || t.contains('watery');
-        debugPrint('[MALAIKA] Has diarrhea: $_hasDiarrhea');
-      case 'diarrhea_days':
-        final m = RegExp(r'(\d+)').firstMatch(text);
-        _diarrheaDays = m != null ? (int.tryParse(m.group(1)!) ?? 0) : 0;
-        debugPrint('[MALAIKA] Diarrhea days: $_diarrheaDays');
-      case 'blood_stool':
-        _bloodInStool = isYes || t.contains('blood');
-        debugPrint('[MALAIKA] Blood in stool: $_bloodInStool');
-      case 'fever':
-        _hasFever = isYes || t.contains('fever') || t.contains('hot') || t.contains('temperature');
-        debugPrint('[MALAIKA] Has fever: $_hasFever');
-      case 'fever_days':
-        final m = RegExp(r'(\d+)').firstMatch(text);
-        _feverDays = m != null ? (int.tryParse(m.group(1)!) ?? 0) : 0;
-        debugPrint('[MALAIKA] Fever days: $_feverDays');
-      case 'stiff_neck':
-        _stiffNeck = isYes || t.contains('stiff');
-        debugPrint('[MALAIKA] Stiff neck: $_stiffNeck');
-      case 'malaria':
-        _malariaRisk = isYes || t.contains('mosquit') || t.contains('malaria');
-        debugPrint('[MALAIKA] Malaria risk: $_malariaRisk');
-      case 'wasting':
-        _visibleWasting = isYes || t.contains('thin') || t.contains('ribs') || t.contains('bones');
-        debugPrint('[MALAIKA] Visible wasting: $_visibleWasting');
-      case 'edema':
-        _edema = isYes || t.contains('swell') || t.contains('edema');
-        debugPrint('[MALAIKA] Edema: $_edema');
-    }
+    final label = result.classification.value
+        .replaceAll('_', ' ')
+        .split(' ')
+        .map((w) =>
+            w.isEmpty ? w : '${w[0].toUpperCase()}${w.substring(1)}')
+        .join(' ');
+
+    _chatItems.add(_ChatItem(
+      type: _ChatItemType.classification,
+      metadata: {
+        'step': _formatStep(step),
+        'severity': result.severity.value,
+        'label': label,
+        'reasoning': result.reasoning,
+      },
+    ));
+    setState(() {});
   }
 
-  Future<void> _classifyAndAdvance() async {
-    final stepName = _currentStepName;
-    debugPrint('[MALAIKA] === CLASSIFYING STEP: $stepName ===');
+  // --------------------------------------------------------------------------
+  // Final Report — LLM narration
+  // --------------------------------------------------------------------------
 
-    switch (stepName) {
-      case 'greeting':
-        // No message — just advance to first step
-        break;
-      case 'danger_signs':
-        final result = classifyDangerSigns(lethargic: _lethargic, unableToDrink: _unableToDrink,
-            vomitsEverything: _vomitsEverything, convulsions: _convulsions);
-        _addClassification('Danger Signs',
-            result?.severity.value ?? 'green',
-            _formatLabel(result?.classification.value ?? 'no_danger_signs'),
-            result?.reasoning ?? 'No general danger signs detected. WHO IMCI p.2.');
-        debugPrint('[MALAIKA] Danger Signs: ${result?.severity.value ?? "green"} - ${result?.classification.value ?? "none"}');
-      case 'breathing':
-        final age = _ageMonths > 0 ? _ageMonths.clamp(2, 59) : 12;
-        final result = classifyBreathing(ageMonths: age, hasCough: _hasCough);
-        // Make the label human-readable
-        final breathLabel = _hasCough ? 'Cough or Cold (No Pneumonia)' : 'Normal Breathing';
-        final breathReason = _hasCough
-            ? 'Cough present but no fast breathing or chest indrawing detected. WHO IMCI p.5.'
-            : 'No cough or breathing problems reported. WHO IMCI p.5.';
-        _addClassification('Breathing', result.severity.value, breathLabel, breathReason);
-        debugPrint('[MALAIKA] Breathing: ${result.severity.value} - hasCough=$_hasCough');
-      case 'diarrhea':
-        if (_hasDiarrhea) {
-          final result = classifyDiarrhea(hasDiarrhea: true, durationDays: _diarrheaDays,
-              bloodInStool: _bloodInStool, lethargic: _lethargic);
-          if (result != null) {
-            _addClassification('Diarrhea', result.severity.value, _formatLabel(result.classification.value), result.reasoning);
-          }
-        } else {
-          _addClassification('Diarrhea', 'green', 'No Diarrhea', 'No diarrhea reported.');
-        }
-      case 'fever':
-        if (_hasFever) {
-          final result = classifyFever(hasFever: true, durationDays: _feverDays,
-              stiffNeck: _stiffNeck, malariaRisk: _malariaRisk);
-          if (result != null) {
-            _addClassification('Fever', result.severity.value, _formatLabel(result.classification.value), result.reasoning);
-          }
-        } else {
-          _addClassification('Fever', 'green', 'No Fever', 'No fever reported.');
-        }
-      case 'nutrition':
-        final result = classifyNutrition(visibleWasting: _visibleWasting, edema: _edema);
-        _addClassification('Nutrition', result.severity.value, _formatLabel(result.classification.value), result.reasoning);
-        // Show final assessment
-        _showFinalAssessment();
-        return; // Don't advance further
+  Future<void> _generateFinalReport() async {
+    // Show all remaining classification cards
+    for (final step in imciSteps) {
+      if (!_q.classifications.containsKey(step)) {
+        _classifyAndShowCard(step);
+      }
     }
 
-    // Move to next step
-    _stepIndex++;
-    _questionIndex = 0;
-    _currentStep = _stepIndex.clamp(0, 5);
+    // Overall assessment card
+    final severity = _q.overallSeverity;
+    const urgencyMap = {
+      'red': 'URGENT: Go to a health facility IMMEDIATELY',
+      'yellow': 'See a health worker within 24 hours',
+      'green': 'Treat at home with follow-up in 5 days',
+    };
+    _chatItems.add(_ChatItem(
+      type: _ChatItemType.classification,
+      metadata: {
+        'step': 'Overall Assessment',
+        'severity': severity,
+        'label': 'Overall: ${severity.toUpperCase()}',
+        'reasoning': urgencyMap[severity] ?? 'Consult a health worker',
+      },
+    ));
     setState(() {});
 
-    if (_currentStepName != 'complete') {
-      await _askCurrentQuestion();
-    }
-  }
+    // LLM generates caring summary sentence
+    _addTyping();
+    await _initSession('report', systemPrompt: _reportPrompt);
+    final reportContext = _q.buildReportContext();
+    final report = await _ask(
+      'Write 2-3 short plain-text sentences summarizing the child\'s condition '
+      'for a caregiver. No bullet points, no markdown, no asterisks, no formatting. '
+      'Just simple caring sentences.\n\n$reportContext',
+    );
+    _removeTyping();
 
-  void _showFinalAssessment() {
-    debugPrint('[MALAIKA] === FINAL ASSESSMENT ===');
-    final severities = _chatItems
-        .where((c) => c.type == _ChatItemType.classification && c.metadata?['step'] != 'Assessment Complete')
-        .map((c) => c.metadata?['severity'] as String? ?? 'green')
-        .toList();
-    final overall = severities.contains('red') ? 'red' : severities.contains('yellow') ? 'yellow' : 'green';
-    final urgency = overall == 'red'
-        ? 'URGENT: Take your child to the nearest health facility IMMEDIATELY.'
-        : overall == 'yellow'
-            ? 'See a health worker within 24 hours. Keep giving fluids.'
-            : 'Treat at home. Continue feeding, give fluids. Return in 5 days if not better.';
+    // Strip any markdown artifacts the LLM might still produce
+    final cleanReport = report
+        .replaceAll(RegExp(r'\*+'), '')
+        .replaceAll(RegExp(r'#+\s*'), '')
+        .replaceAll(RegExp(r'-\s+'), '')
+        .trim();
 
-    debugPrint('[MALAIKA] Overall: $overall');
-    _addClassification('Assessment Complete', overall, 'Overall: ${overall.toUpperCase()}', urgency);
-
-    _stepIndex = 6; // complete
-    _currentStep = 5;
+    // Build the structured report card
+    _chatItems.add(_ChatItem(
+      type: _ChatItemType.report,
+      metadata: _buildReportData(cleanReport),
+    ));
     setState(() {});
+    _scrollToBottom();
 
-    // Generate final summary via LLM
-    final findings = <String>[];
-    if (_lethargic) findings.add('LETHARGIC (danger sign)');
-    if (_unableToDrink) findings.add('Unable to drink');
-    if (_vomitsEverything) findings.add('Vomits everything');
-    if (_convulsions) findings.add('Convulsions');
-    if (_hasCough) findings.add('Cough/breathing difficulty');
-    if (_hasDiarrhea) findings.add('Diarrhea ${_diarrheaDays}d');
-    if (_bloodInStool) findings.add('Blood in stool');
-    if (_hasFever) findings.add('Fever ${_feverDays}d');
-    if (_stiffNeck) findings.add('Stiff neck');
-    if (_malariaRisk) findings.add('Malaria risk');
-    if (_visibleWasting) findings.add('Visible wasting');
-    if (_edema) findings.add('Edema');
-
-    // Always show the practical summary (don't rely on LLM for this critical info)
-    final summaryParts = <String>[urgency];
-    if (_hasDiarrhea) summaryParts.add('Give ORS (oral rehydration salts) mixed with clean water. Give small sips often.');
-    if (_hasFever) summaryParts.add('Give paracetamol for fever if available. Keep child lightly dressed.');
-    if (_hasCough) summaryParts.add('Keep child warm. Watch for fast or difficult breathing.');
-    summaryParts.add('Continue breastfeeding or giving fluids.');
-    summaryParts.add('Return IMMEDIATELY if: child stops drinking, has seizures, or gets worse.');
-    summaryParts.add('\nPlease show this assessment to a health worker.');
-
-    _addBotMessage(summaryParts.join('\n\n'));
-    debugPrint('[MALAIKA] Final summary shown with ${findings.length} findings');
+    _progressStep = imciSteps.length;
+    setState(() {});
   }
 
-  String _formatLabel(String value) => value.replaceAll('_', ' ').split(' ').map((w) =>
-      w.isNotEmpty ? '${w[0].toUpperCase()}${w.substring(1)}' : w).join(' ');
+  Map<String, dynamic> _buildReportData(String llmSummary) {
+    final f = _q.findings;
+    final severity = _q.overallSeverity;
 
-  void _addBotMessage(String text) {
-    setState(() => _chatItems.add(_ChatItem(type: _ChatItemType.botMessage, text: text)));
+    // Positive findings
+    final concerns = <String>[];
+    final clear = <String>[];
+    for (final q in imciQuestions) {
+      if (q.type != AnswerType.yesNo) continue;
+      final val = f[q.id];
+      if (val == true) {
+        concerns.add(q.label);
+      } else if (val == false && q.triggerKey == null) {
+        clear.add(q.label);
+      }
+    }
+
+    // Treatment actions
+    final actions = <Map<String, String>>[];
+    if (severity == 'red') {
+      actions.add({
+        'icon': 'hospital',
+        'text': 'Go to a health facility IMMEDIATELY',
+      });
+    } else if (severity == 'yellow') {
+      actions.add({
+        'icon': 'schedule',
+        'text': 'See a health worker within 24 hours',
+      });
+    } else {
+      actions.add({
+        'icon': 'home',
+        'text': 'Treat at home. Return in 5 days if not better',
+      });
+    }
+    if (f['has_diarrhea'] == true) {
+      actions.add({
+        'icon': 'water',
+        'text': 'Give ORS mixed with clean water — small sips often',
+      });
+    }
+    if (f['has_fever'] == true) {
+      actions.add({
+        'icon': 'medication',
+        'text': 'Give paracetamol if available. Keep child lightly dressed',
+      });
+    }
+    if (f['has_cough'] == true) {
+      actions.add({
+        'icon': 'air',
+        'text': 'Keep child warm. Watch for fast or difficult breathing',
+      });
+    }
+    actions.add({
+      'icon': 'breastfeeding',
+      'text': 'Continue breastfeeding or giving fluids',
+    });
+    actions.add({
+      'icon': 'warning',
+      'text': 'Return IMMEDIATELY if child stops drinking, has seizures, or gets worse',
+    });
+
+    return {
+      'severity': severity,
+      'ageMonths': _q.ageMonths,
+      'summary': llmSummary,
+      'concerns': concerns,
+      'clear': clear,
+      'actions': actions,
+      'classifications': _q.classifications.entries
+          .where((e) => e.value != null)
+          .map((e) => {
+                'step': _formatStep(e.key),
+                'severity': e.value!.severity.value,
+                'label': e.value!.classification.value
+                    .replaceAll('_', ' ')
+                    .split(' ')
+                    .map((w) => w.isEmpty
+                        ? w
+                        : '${w[0].toUpperCase()}${w.substring(1)}')
+                    .join(' '),
+              })
+          .toList(),
+    };
+  }
+
+  // --------------------------------------------------------------------------
+  // UI Helpers
+  // --------------------------------------------------------------------------
+
+  void _addBot(String text) {
+    setState(
+        () => _chatItems.add(_ChatItem(type: _ChatItemType.bot, text: text)));
     _scrollToBottom();
   }
 
-  void _addUserMessage(String text) {
-    setState(() => _chatItems.add(_ChatItem(type: _ChatItemType.userMessage, text: text)));
+  void _addUser(String text) {
+    setState(() =>
+        _chatItems.add(_ChatItem(type: _ChatItemType.user, text: text)));
     _scrollToBottom();
   }
 
-  void _addClassification(String step, String severity, String label, String reasoning) {
-    setState(() => _chatItems.add(_ChatItem(type: _ChatItemType.classification,
-        metadata: {'step': step, 'severity': severity, 'label': label, 'reasoning': reasoning})));
+  void _addTyping() {
+    _chatItems.add(_ChatItem(type: _ChatItemType.typing));
+    setState(() {});
+    _scrollToBottom();
+  }
+
+  void _removeTyping() {
+    _chatItems.removeWhere((item) => item.type == _ChatItemType.typing);
+    setState(() {});
+  }
+
+  void _addStepBanner(String step) {
+    _chatItems.add(_ChatItem(
+      type: _ChatItemType.stepBanner,
+      text: _formatStep(step),
+      metadata: {'step': step},
+    ));
+    setState(() {});
     _scrollToBottom();
   }
 
   void _scrollToBottom() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (_scrollController.hasClients) {
-        _scrollController.animateTo(_scrollController.position.maxScrollExtent,
-            duration: const Duration(milliseconds: 300), curve: Curves.easeOut);
+        _scrollController.animateTo(
+            _scrollController.position.maxScrollExtent,
+            duration: const Duration(milliseconds: 300),
+            curve: Curves.easeOut);
       }
     });
   }
 
-  void _onOrbTap() => setState(() {
-    _voiceState = _voiceState == VoiceState.idle ? VoiceState.listening : VoiceState.idle;
-  });
+  String _formatStep(String step) {
+    return step
+        .replaceAll('_', ' ')
+        .split(' ')
+        .map((w) =>
+            w.isEmpty ? w : '${w[0].toUpperCase()}${w.substring(1)}')
+        .join(' ');
+  }
+
+  // --------------------------------------------------------------------------
+  // Build
+  // --------------------------------------------------------------------------
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      appBar: AppBar(
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back_rounded),
+          onPressed: () => Navigator.of(context).pop(),
+        ),
+        title: const Column(
+          children: [
+            Text('IMCI Assessment',
+                style: TextStyle(
+                    fontSize: 16, fontWeight: FontWeight.w600)),
+            Text('Powered by Gemma 4',
+                style: TextStyle(
+                    fontSize: 11, color: MalaikaColors.textMuted)),
+          ],
+        ),
+        actions: [
+          Container(
+            margin: const EdgeInsets.only(right: 12),
+            padding:
+                const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            decoration: BoxDecoration(
+              color: MalaikaColors.greenLight,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: const Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.wifi_off_rounded,
+                    size: 12, color: MalaikaColors.green),
+                SizedBox(width: 4),
+                Text('Offline',
+                    style: TextStyle(
+                        fontSize: 10,
+                        color: MalaikaColors.green,
+                        fontWeight: FontWeight.w600)),
+              ],
+            ),
+          ),
+        ],
+      ),
       body: SafeArea(
         child: Column(
           children: [
-            Padding(padding: const EdgeInsets.symmetric(vertical: 8), child: Column(children: [
-              const Text('Malaika', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: MalaikaColors.primary)),
-              Text('WHO IMCI Child Health AI \u00b7 Gemma 4 On-Device', style: TextStyle(fontSize: 10, color: MalaikaColors.textMuted)),
-            ])),
-            if (_currentStep > 0) ImciProgressBar(currentStep: _currentStep),
-            Padding(padding: const EdgeInsets.symmetric(vertical: 8), child: _OrbButton(state: _voiceState, onTap: _onOrbTap)),
+            // Progress bar (always visible)
+            ImciProgressBar(currentStep: _progressStep),
+            // Chat messages
             Expanded(
               child: ListView.builder(
                 controller: _scrollController,
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                 itemCount: _chatItems.length,
                 itemBuilder: (context, index) {
                   final item = _chatItems[index];
                   return switch (item.type) {
-                    _ChatItemType.userMessage => ChatBubble(text: item.text!, isUser: true),
-                    _ChatItemType.botMessage => ChatBubble(text: item.text!, isUser: false),
+                    _ChatItemType.user =>
+                      ChatBubble(text: item.text!, isUser: true),
+                    _ChatItemType.bot =>
+                      ChatBubble(text: item.text!, isUser: false),
                     _ChatItemType.classification => ClassificationCard(
-                        step: item.metadata!['step'] as String, severity: item.metadata!['severity'] as String,
-                        label: item.metadata!['label'] as String, reasoning: item.metadata!['reasoning'] as String),
-                    _ChatItemType.skillCard => SkillCard(skillName: item.metadata!['skill'] as String,
-                        description: item.metadata!['description'] as String, isDone: item.metadata!['done'] as bool),
-                    _ChatItemType.imageRequest => ImageRequestCard(prompt: item.text!, onTap: () {}),
+                        step: item.metadata!['step'] as String,
+                        severity: item.metadata!['severity'] as String,
+                        label: item.metadata!['label'] as String,
+                        reasoning:
+                            item.metadata!['reasoning'] as String),
+                    _ChatItemType.reasoning => ReasoningCard(
+                        findings: item.metadata!['findings']
+                            as Map<String, dynamic>,
+                        autoFilled: (item.metadata!['autoFilled']
+                                as List<String>?) ??
+                            [],
+                        stepName:
+                            item.metadata!['stepName'] as String,
+                        stepIndex:
+                            item.metadata!['stepIndex'] as int),
+                    _ChatItemType.stepBanner =>
+                      _StepBannerWidget(text: item.text!),
+                    _ChatItemType.typing => const _TypingIndicator(),
+                    _ChatItemType.report =>
+                      _ReportCard(data: item.metadata!),
+                    _ChatItemType.photoPrompt => _PhotoPromptCard(
+                        label: item.metadata!['label'] as String,
+                        onTakePhoto: _onTakePhoto,
+                        onSkip: _onSkipPhoto),
                   };
                 },
               ),
             ),
+            // Input bar
+            _buildInputBar(),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildInputBar() {
+    final isThinking = _voiceState == VoiceState.thinking;
+    return Container(
+      padding: EdgeInsets.only(
+          left: 16,
+          right: 8,
+          top: 8,
+          bottom: MediaQuery.of(context).padding.bottom + 8),
+      decoration: const BoxDecoration(
+        color: MalaikaColors.surface,
+        border:
+            Border(top: BorderSide(color: MalaikaColors.border)),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: TextField(
+              controller: _textController,
+              enabled: !isThinking,
+              style: const TextStyle(
+                  fontSize: 15, color: MalaikaColors.text),
+              decoration: InputDecoration(
+                hintText: isThinking
+                    ? 'Malaika is thinking...'
+                    : 'Type your answer...',
+                isDense: true,
+              ),
+              onSubmitted: (_) => _sendText(),
+            ),
+          ),
+          const SizedBox(width: 8),
+          GestureDetector(
+            onTap: isThinking ? null : _sendText,
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 200),
+              width: 44,
+              height: 44,
+              decoration: BoxDecoration(
+                color: isThinking
+                    ? MalaikaColors.textMuted
+                    : MalaikaColors.primary,
+                borderRadius: BorderRadius.circular(22),
+              ),
+              child: Icon(
+                isThinking
+                    ? Icons.hourglass_top_rounded
+                    : Icons.send_rounded,
+                size: 20,
+                color: Colors.white,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  void dispose() {
+    _closeChat();
+    _textController.dispose();
+    _scrollController.dispose();
+    super.dispose();
+  }
+}
+
+// =============================================================================
+// Chat Item Types & Data
+// =============================================================================
+
+enum _ChatItemType {
+  user,
+  bot,
+  classification,
+  reasoning,
+  stepBanner,
+  typing,
+  photoPrompt,
+  report,
+}
+
+class _ChatItem {
+  final _ChatItemType type;
+  final String? text;
+  final Map<String, dynamic>? metadata;
+  _ChatItem({required this.type, this.text, this.metadata});
+}
+
+// =============================================================================
+// Inline Widgets
+// =============================================================================
+
+/// Step transition banner — shows when moving to a new IMCI section.
+class _StepBannerWidget extends StatelessWidget {
+  final String text;
+  const _StepBannerWidget({required this.text});
+
+  static const _stepIcons = {
+    'Danger Signs': Icons.warning_amber_rounded,
+    'Breathing': Icons.air_rounded,
+    'Diarrhea': Icons.water_drop_rounded,
+    'Fever': Icons.thermostat_rounded,
+    'Nutrition': Icons.restaurant_rounded,
+  };
+
+  @override
+  Widget build(BuildContext context) {
+    final icon = _stepIcons[text] ?? Icons.arrow_forward_rounded;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 12),
+      child: Row(
+        children: [
+          Expanded(
+              child: Container(
+                  height: 1, color: MalaikaColors.primary.withValues(alpha: 0.15))),
+          const SizedBox(width: 12),
+          Container(
+            padding:
+                const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+            decoration: BoxDecoration(
+              color: MalaikaColors.primaryLight,
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(
+                  color: MalaikaColors.primary.withValues(alpha: 0.15)),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(icon, size: 14, color: MalaikaColors.primary),
+                const SizedBox(width: 6),
+                Text(
+                  text,
+                  style: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: MalaikaColors.primary,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+              child: Container(
+                  height: 1, color: MalaikaColors.primary.withValues(alpha: 0.15))),
+        ],
+      ),
+    );
+  }
+}
+
+/// Typing indicator — animated dots while LLM is processing.
+class _TypingIndicator extends StatefulWidget {
+  const _TypingIndicator();
+  @override
+  State<_TypingIndicator> createState() => _TypingIndicatorState();
+}
+
+class _TypingIndicatorState extends State<_TypingIndicator>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1200),
+    )..repeat();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 30,
+            height: 30,
+            margin: const EdgeInsets.only(top: 2),
+            decoration: BoxDecoration(
+              color: MalaikaColors.primaryLight,
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: const Icon(Icons.favorite_rounded,
+                size: 15, color: MalaikaColors.primary),
+          ),
+          const SizedBox(width: 8),
+          Container(
+            padding: const EdgeInsets.symmetric(
+                horizontal: 16, vertical: 12),
+            decoration: BoxDecoration(
+              color: MalaikaColors.botBubble,
+              borderRadius: const BorderRadius.only(
+                topLeft: Radius.circular(18),
+                topRight: Radius.circular(18),
+                bottomLeft: Radius.circular(4),
+                bottomRight: Radius.circular(18),
+              ),
+            ),
+            child: AnimatedBuilder(
+              animation: _controller,
+              builder: (context, _) {
+                return Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: List.generate(3, (i) {
+                    final delay = i * 0.2;
+                    final t = (_controller.value + delay) % 1.0;
+                    final opacity = (1.0 - (t - 0.5).abs() * 2)
+                        .clamp(0.3, 1.0);
+                    return Padding(
+                      padding:
+                          const EdgeInsets.symmetric(horizontal: 2),
+                      child: Opacity(
+                        opacity: opacity,
+                        child: Container(
+                          width: 8,
+                          height: 8,
+                          decoration: BoxDecoration(
+                            color: MalaikaColors.textMuted,
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                      ),
+                    );
+                  }),
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Photo prompt card.
+class _PhotoPromptCard extends StatelessWidget {
+  final String label;
+  final VoidCallback onTakePhoto;
+  final VoidCallback onSkip;
+  const _PhotoPromptCard(
+      {required this.label,
+      required this.onTakePhoto,
+      required this.onSkip});
+
+  @override
+  Widget build(BuildContext context) => Container(
+        margin: const EdgeInsets.symmetric(vertical: 6),
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: MalaikaColors.primaryLight,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(
+              color: MalaikaColors.primary.withValues(alpha: 0.15)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(label,
+                style: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: MalaikaColors.primary)),
+            const SizedBox(height: 10),
+            Row(children: [
+              Expanded(
+                child: ElevatedButton.icon(
+                  onPressed: onTakePhoto,
+                  icon: const Icon(Icons.photo_library_rounded, size: 18),
+                  label: const Text('Choose Photo'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: MalaikaColors.primary,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10)),
+                    elevation: 0,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              TextButton(
+                onPressed: onSkip,
+                child: Text('Skip',
+                    style: TextStyle(color: MalaikaColors.textMuted)),
+              ),
+            ]),
+          ],
+        ),
+      );
+}
+
+// =============================================================================
+// Final Report Card — structured, interactive, no markdown
+// =============================================================================
+
+class _ReportCard extends StatelessWidget {
+  final Map<String, dynamic> data;
+  const _ReportCard({required this.data});
+
+  static const _actionIcons = {
+    'hospital': Icons.local_hospital_rounded,
+    'schedule': Icons.schedule_rounded,
+    'home': Icons.home_rounded,
+    'water': Icons.water_drop_rounded,
+    'medication': Icons.medication_rounded,
+    'air': Icons.air_rounded,
+    'breastfeeding': Icons.child_care_rounded,
+    'warning': Icons.warning_amber_rounded,
+  };
+
+  @override
+  Widget build(BuildContext context) {
+    final severity = data['severity'] as String;
+    final ageMonths = data['ageMonths'] as int;
+    final summary = data['summary'] as String? ?? '';
+    final concerns = (data['concerns'] as List<dynamic>?) ?? [];
+    final clear = (data['clear'] as List<dynamic>?) ?? [];
+    final actions = (data['actions'] as List<dynamic>?) ?? [];
+    final classifications =
+        (data['classifications'] as List<dynamic>?) ?? [];
+
+    final sevColor = MalaikaColors.forSeverity(severity);
+    final sevBg = MalaikaColors.forSeverityBackground(severity);
+    final sevIcon = MalaikaColors.severityIcon(severity);
+    final sevLabel = MalaikaColors.severityLabel(severity);
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Container(
+        decoration: BoxDecoration(
+          color: MalaikaColors.surface,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: MalaikaColors.border),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.04),
+              blurRadius: 12,
+              offset: const Offset(0, 4),
+            ),
+          ],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // ── Header with severity ──
             Container(
-              padding: EdgeInsets.only(left: 10, right: 10, top: 8, bottom: MediaQuery.of(context).padding.bottom + 8),
-              decoration: BoxDecoration(color: MalaikaColors.surface, border: Border(top: BorderSide(color: Colors.white.withValues(alpha: 0.06)))),
-              child: Row(children: [
-                _BarButton(icon: Icons.camera_alt_outlined, onTap: () {}),
-                const SizedBox(width: 6),
-                Expanded(child: TextField(controller: _textController,
-                    style: const TextStyle(fontSize: 16, color: MalaikaColors.text),
-                    decoration: const InputDecoration(hintText: 'Type a message...', contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10), isDense: true),
-                    onSubmitted: (_) => _sendText())),
-                const SizedBox(width: 6),
-                _BarButton(icon: Icons.send, color: MalaikaColors.primary, onTap: _sendText),
-              ]),
+              width: double.infinity,
+              padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                color: sevBg,
+                borderRadius: const BorderRadius.only(
+                  topLeft: Radius.circular(20),
+                  topRight: Radius.circular(20),
+                ),
+              ),
+              child: Column(
+                children: [
+                  Icon(sevIcon, size: 36, color: sevColor),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Assessment Complete',
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w700,
+                      color: MalaikaColors.text,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 14, vertical: 5),
+                    decoration: BoxDecoration(
+                      color: sevColor.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Text(
+                      sevLabel,
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                        color: sevColor,
+                        letterSpacing: 0.5,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Child: $ageMonths months old',
+                    style: const TextStyle(
+                        fontSize: 12,
+                        color: MalaikaColors.textSecondary),
+                  ),
+                ],
+              ),
+            ),
+
+            // ── Gemma Summary ──
+            if (summary.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
+                child: Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: MalaikaColors.primaryLight
+                        .withValues(alpha: 0.5),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Row(
+                        children: [
+                          Icon(Icons.psychology_rounded,
+                              size: 14, color: MalaikaColors.primary),
+                          SizedBox(width: 6),
+                          Text(
+                            'Gemma Summary',
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                              color: MalaikaColors.primary,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        summary,
+                        style: const TextStyle(
+                          fontSize: 14,
+                          color: MalaikaColors.text,
+                          height: 1.5,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+
+            // ── Classifications Grid ──
+            if (classifications.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Classifications',
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: MalaikaColors.textSecondary,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: classifications.map((c) {
+                        final m = c as Map<String, dynamic>;
+                        final s = m['severity'] as String;
+                        final col = MalaikaColors.forSeverity(s);
+                        return Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 10, vertical: 6),
+                          decoration: BoxDecoration(
+                            color:
+                                MalaikaColors.forSeverityBackground(s),
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(
+                                color: col.withValues(alpha: 0.2)),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(MalaikaColors.severityIcon(s),
+                                  size: 12, color: col),
+                              const SizedBox(width: 5),
+                              Text(
+                                m['step'] as String,
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w600,
+                                  color: col,
+                                ),
+                              ),
+                            ],
+                          ),
+                        );
+                      }).toList(),
+                    ),
+                  ],
+                ),
+              ),
+
+            // ── Findings ──
+            if (concerns.isNotEmpty || clear.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Findings',
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: MalaikaColors.textSecondary,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 6,
+                      children: [
+                        ...concerns.map((c) => _findingPill(
+                            c as String, true)),
+                        ...clear.map((c) => _findingPill(
+                            c as String, false)),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+
+            // ── What To Do ──
+            if (actions.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'What To Do',
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: MalaikaColors.textSecondary,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    ...actions.asMap().entries.map((entry) {
+                      final a = entry.value as Map<String, dynamic>;
+                      final iconKey = a['icon'] as String;
+                      final icon = _actionIcons[iconKey] ??
+                          Icons.arrow_forward_rounded;
+                      final isUrgent = iconKey == 'hospital' ||
+                          iconKey == 'warning';
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: 8),
+                        child: Row(
+                          crossAxisAlignment:
+                              CrossAxisAlignment.start,
+                          children: [
+                            Container(
+                              width: 28,
+                              height: 28,
+                              decoration: BoxDecoration(
+                                color: isUrgent
+                                    ? MalaikaColors.redLight
+                                    : MalaikaColors.surfaceAlt,
+                                borderRadius:
+                                    BorderRadius.circular(8),
+                              ),
+                              child: Icon(icon,
+                                  size: 14,
+                                  color: isUrgent
+                                      ? MalaikaColors.red
+                                      : MalaikaColors.primary),
+                            ),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Text(
+                                a['text'] as String,
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  color: isUrgent
+                                      ? MalaikaColors.red
+                                      : MalaikaColors.text,
+                                  fontWeight: isUrgent
+                                      ? FontWeight.w600
+                                      : FontWeight.normal,
+                                  height: 1.4,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                    }),
+                  ],
+                ),
+              ),
+
+            // ── Footer ──
+            Padding(
+              padding: const EdgeInsets.all(20),
+              child: Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: MalaikaColors.surfaceAlt,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: const Column(
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.verified_rounded,
+                            size: 12, color: MalaikaColors.textMuted),
+                        SizedBox(width: 4),
+                        Text(
+                          'WHO IMCI Protocol',
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                            color: MalaikaColors.textMuted,
+                          ),
+                        ),
+                      ],
+                    ),
+                    SizedBox(height: 4),
+                    Text(
+                      'Please show this report to a health worker',
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: MalaikaColors.textMuted,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             ),
           ],
         ),
@@ -472,27 +1401,37 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  @override
-  void dispose() { _textController.dispose(); _scrollController.dispose(); super.dispose(); }
-}
-
-class _OrbButton extends StatelessWidget {
-  final VoiceState state; final VoidCallback onTap;
-  const _OrbButton({required this.state, required this.onTap});
-  Color get _bc => switch (state) { VoiceState.idle => MalaikaColors.primary.withValues(alpha: 0.25), VoiceState.listening => MalaikaColors.green.withValues(alpha: 0.6), VoiceState.thinking => MalaikaColors.yellow.withValues(alpha: 0.6), VoiceState.speaking => MalaikaColors.primary.withValues(alpha: 0.6) };
-  Color get _bg => switch (state) { VoiceState.idle => MalaikaColors.primary.withValues(alpha: 0.08), VoiceState.listening => MalaikaColors.green.withValues(alpha: 0.12), VoiceState.thinking => MalaikaColors.yellow.withValues(alpha: 0.12), VoiceState.speaking => MalaikaColors.primary.withValues(alpha: 0.12) };
-  IconData get _ic => switch (state) { VoiceState.idle || VoiceState.listening => Icons.mic, VoiceState.thinking => Icons.hourglass_top, VoiceState.speaking => Icons.volume_up };
-  String get _lb => switch (state) { VoiceState.idle => 'Tap to talk', VoiceState.listening => 'Listening...', VoiceState.thinking => 'Thinking...', VoiceState.speaking => 'Speaking...' };
-  @override Widget build(BuildContext context) => Column(mainAxisSize: MainAxisSize.min, children: [
-    GestureDetector(onTap: onTap, child: Container(width: 80, height: 80, decoration: BoxDecoration(shape: BoxShape.circle, border: Border.all(color: _bc, width: 2), color: _bg), child: Icon(_ic, size: 28, color: _bc))),
-    const SizedBox(height: 4), Text(_lb, style: TextStyle(fontSize: 11, color: MalaikaColors.textMuted)),
-  ]);
-}
-
-enum _ChatItemType { userMessage, botMessage, classification, skillCard, imageRequest }
-class _ChatItem { final _ChatItemType type; final String? text; final Map<String, dynamic>? metadata; _ChatItem({required this.type, this.text, this.metadata}); }
-class _BarButton extends StatelessWidget {
-  final IconData icon; final VoidCallback onTap; final Color? color;
-  const _BarButton({required this.icon, required this.onTap, this.color});
-  @override Widget build(BuildContext context) => GestureDetector(onTap: onTap, child: Container(width: 42, height: 42, decoration: BoxDecoration(color: color ?? Colors.white.withValues(alpha: 0.06), borderRadius: BorderRadius.circular(12)), child: Icon(icon, color: color != null ? MalaikaColors.background : MalaikaColors.textMuted, size: 20)));
+  Widget _findingPill(String label, bool isPositive) {
+    final color =
+        isPositive ? MalaikaColors.yellow : MalaikaColors.green;
+    return Container(
+      padding:
+          const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.08),
+        border: Border.all(color: color.withValues(alpha: 0.2)),
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            isPositive
+                ? Icons.circle
+                : Icons.check_circle_rounded,
+            size: 10,
+            color: color,
+          ),
+          const SizedBox(width: 5),
+          Text(
+            label,
+            style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w500,
+                color: color),
+          ),
+        ],
+      ),
+    );
+  }
 }

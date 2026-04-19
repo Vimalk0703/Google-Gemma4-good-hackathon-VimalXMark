@@ -179,21 +179,50 @@ Additional adapters planned:
 
 ---
 
+## Mobile App (Primary Demo)
+
+The **Flutter mobile app** is the primary demo — Gemma 4 E2B running fully offline on Android/iOS.
+
+| Feature | Status |
+|---------|--------|
+| On-device Gemma 4 E2B (2.3B params) | Running via flutter_gemma |
+| IMCI Q&A assessment (text) | Complete — all 5 clinical steps |
+| Deterministic WHO classification | Complete — `imci_protocol.dart` |
+| Vision analysis (camera photos) | Working — clinical prompts via flutter_gemma |
+| Structured findings extraction | Complete — regex-based keyword matching |
+| Assessment report with classifications | Complete — severity cards + action items |
+| Offline — zero internet required | Yes — everything on-device |
+
+### Architecture
+
+```
+Flutter App (Android/iOS)
+  ├── flutter_gemma — Gemma 4 E2B on-device inference (text + vision)
+  ├── ImciQuestionnaire — Structured Q&A with finding extraction
+  ├── ImciProtocol — Deterministic WHO classification (code, not LLM)
+  ├── ChatEngine — Skill-driven assessment orchestration
+  └── UI — Progress bar, classification cards, reasoning cards, camera
+```
+
+---
+
 ## Tech Stack
 
 | Component | Technology |
 |-----------|-----------|
-| AI Model | Gemma 4 E4B (4-bit quantized via Unsloth/BitsAndBytes) |
+| **Mobile App** | Flutter (Android + iOS) |
+| **On-Device AI** | Gemma 4 E2B via flutter_gemma (MediaPipe SDK) |
+| AI Model (GPU) | Gemma 4 E4B (4-bit quantized via Unsloth/BitsAndBytes) |
 | Agent Framework | Custom SkillRegistry + BeliefState + ChatEngine |
 | Voice Pipeline | FastAPI + WebSocket + Smallest AI (STT/TTS) |
 | Voice UI | Vanilla JS — orb, skill cards, classification cards, progress bar |
-| Inference | HuggingFace Transformers |
+| Inference | HuggingFace Transformers (GPU) / flutter_gemma (phone) |
 | Fine-tuning | Unsloth QLoRA |
 | Audio Processing | librosa (mel-spectrograms) |
 | Text-to-Speech | Piper TTS (offline) / Smallest AI Waves (cloud) |
 | Form UI | Gradio (alternative interface) |
 | Video processing | OpenCV |
-| Deployment | Colab T4 + ngrok (demo) / LiteRT-LM (phone) |
+| Deployment | Android/iOS (primary) / Colab T4 + ngrok (supplementary) |
 | Type checking | mypy (strict mode) |
 | Linting | Ruff |
 | Testing | pytest (104+ tests, 21/21 golden scenarios) |
@@ -257,6 +286,29 @@ tests/                         # 104+ tests (78 protocol + 26 engine + more)
 docs/                          # 6 engineering documents
 adapters/                      # Fine-tuned LoRA adapter weights
 configs/                       # YAML config files
+
+malaika_flutter/               # Flutter mobile app (PRIMARY DEMO)
+├── lib/
+│   ├── main.dart              # App entry point
+│   ├── core/
+│   │   ├── chat_engine.dart   # Agentic IMCI orchestration (port of Python)
+│   │   ├── imci_protocol.dart # WHO classification (deterministic Dart code)
+│   │   ├── imci_types.dart    # Clinical data types
+│   │   ├── imci_questionnaire.dart # Structured Q&A + vision prompts
+│   │   └── skills.dart        # 12 clinical skills registry
+│   ├── inference/
+│   │   ├── inference_service.dart      # Abstract inference interface
+│   │   ├── gemma_inference_service.dart # llama.cpp backend
+│   │   └── model_manager.dart          # Model download + cache
+│   ├── screens/
+│   │   ├── home_screen.dart           # Main assessment screen
+│   │   ├── splash_screen.dart         # Model loading screen
+│   │   ├── dashboard_screen.dart      # Assessment dashboard
+│   │   └── emergency_signs_screen.dart # Emergency reference
+│   ├── widgets/                       # Reusable UI components
+│   └── theme/
+│       └── malaika_theme.dart         # Design system
+└── pubspec.yaml
 ```
 
 ---

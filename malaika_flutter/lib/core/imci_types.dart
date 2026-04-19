@@ -56,6 +56,7 @@ enum ClassificationType {
   noPneumoniaCoughOrCold('no_pneumonia_cough_or_cold'),
 
   // Diarrhea
+  noDiarrhea('no_diarrhea'),
   severeDehydration('severe_dehydration'),
   someDehydration('some_dehydration'),
   noDehydration('no_dehydration'),
@@ -64,6 +65,7 @@ enum ClassificationType {
   dysentery('dysentery'),
 
   // Fever
+  noFever('no_fever'),
   verySevereFebrileDisease('very_severe_febrile_disease'),
   malaria('malaria'),
   feverNoMalaria('fever_no_malaria'),

@@ -337,10 +337,15 @@ class _HomeScreenState extends State<HomeScreen> {
       _addBot('Analyzing the photo...');
 
       await _closeChat();
-      final model = await FlutterGemma.getActiveModel(maxTokens: 200);
+      final model = await FlutterGemma.getActiveModel(
+        maxTokens: 200,
+        supportImage: true,
+        maxNumImages: 1,
+      );
       _chat = await model.createChat(
         temperature: 0.2,
         topK: 40,
+        supportImage: true,
         systemInstruction:
             'You are a clinical health assistant. '
             'Analyze the image with the specific checklist given. '
@@ -564,18 +569,41 @@ class _HomeScreenState extends State<HomeScreen> {
     ));
     setState(() {});
 
-    // LLM generates caring summary
+    // LLM generates caring summary — with hard reset after vision
     _addTyping();
+    await _closeChat();
+    // Hard reset: re-acquire the model to clear any corrupted native state
+    // from vision monitoring (E2B LiteRT can't process images, leaves bad state)
+    try {
+      await FlutterGemma.getActiveModel(maxTokens: 200, preferredBackend: PreferredBackend.gpu);
+    } catch (_) {}
+    await Future.delayed(const Duration(milliseconds: 300));
     await _initSession('report', systemPrompt: _reportPrompt);
     final reportContext = _q.buildReportContext();
     final visionContext = _reconciliation != null
         ? ' Vision assessment: ${_reconciliation!.warnings.length} warnings found.'
         : '';
-    final report = await _ask(
+    var report = await _ask(
       'Write 2-3 short plain-text sentences summarizing the child\'s condition '
       'for a caregiver. No bullet points, no markdown, no asterisks, no formatting. '
       'Just simple caring sentences.\n\n$reportContext$visionContext',
     );
+    // If model crashed from vision, retry one more time with fresh session
+    if (report.isEmpty) {
+      debugPrint('[MALAIKA] Report retry after model reset...');
+      await _closeChat();
+      await Future.delayed(const Duration(milliseconds: 500));
+      try {
+        await FlutterGemma.getActiveModel(maxTokens: 200, preferredBackend: PreferredBackend.gpu);
+      } catch (_) {}
+      if (await _initSession('report', systemPrompt: _reportPrompt)) {
+        report = await _ask(
+          'Write 2-3 short plain-text sentences summarizing the child\'s condition '
+          'for a caregiver. No bullet points, no markdown, no asterisks, no formatting. '
+          'Just simple caring sentences.\n\n$reportContext',
+        );
+      }
+    }
     _removeTyping();
 
     final cleanReport = report

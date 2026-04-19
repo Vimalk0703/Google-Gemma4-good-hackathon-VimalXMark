@@ -54,17 +54,20 @@ class _CameraMonitorScreenState extends State<CameraMonitorScreen>
   /// Aggregates findings across frames.
   final VisionAggregator _aggregator = VisionAggregator();
 
+  /// Raw AI responses per frame — for transparency.
+  final List<String> _frameResponses = [];
+
   /// Timer for periodic frame capture.
   Timer? _captureTimer;
 
   /// Current status message.
   String _statusMessage = 'Initializing camera...';
 
-  /// Target number of frames to analyze.
-  static const int _targetFrames = 6;
+  /// Target number of frames — keep low to avoid crashes.
+  static const int _targetFrames = 3;
 
-  /// Interval between frame captures (seconds).
-  static const int _captureIntervalSec = 4;
+  /// Interval between frame captures — give model time to process.
+  static const int _captureIntervalSec = 5;
 
   /// The clinical vision prompt — checks ALL signs in one pass.
   static const String _clinicalPrompt =
@@ -180,22 +183,27 @@ class _CameraMonitorScreenState extends State<CameraMonitorScreen>
     }
 
     _isCapturing = true;
+    final frameNum = _aggregator.totalFrames + 1;
 
     try {
-      // Capture a photo from the camera.
       final xFile = await _cameraController!.takePicture();
       final imageBytes = await xFile.readAsBytes();
 
+      debugPrint('[MALAIKA] Frame $frameNum: captured ${imageBytes.length} bytes '
+          '(${(imageBytes.length / 1024).toStringAsFixed(0)} KB)');
+
       setState(() {
-        _statusMessage =
-            'Analyzing frame ${_aggregator.totalFrames + 1}/$_targetFrames...';
+        _statusMessage = 'Gemma 4 analyzing frame $frameNum/$_targetFrames...';
       });
 
-      // Send to Gemma 4 for vision analysis.
       final analysis = await _analyzeWithGemma(imageBytes);
 
       if (analysis != null && mounted) {
-        // Parse the structured response.
+        debugPrint('[MALAIKA] Frame $frameNum response: $analysis');
+
+        // Store raw response for transparency.
+        _frameResponses.add(analysis);
+
         final frameFindings = _parseVisionResponse(analysis);
         final notes = _extractNotes(analysis);
         _aggregator.addFrame(frameFindings, notes);
@@ -203,17 +211,20 @@ class _CameraMonitorScreenState extends State<CameraMonitorScreen>
         setState(() {
           _statusMessage = _aggregator.totalFrames >= _targetFrames
               ? 'Scan complete! Review findings below.'
-              : 'Frame ${_aggregator.totalFrames}/$_targetFrames analyzed.';
+              : 'Frame ${_aggregator.totalFrames}/$_targetFrames done.';
         });
+      } else {
+        debugPrint('[MALAIKA] Frame $frameNum: no response from Gemma');
+        _frameResponses.add('(no response)');
       }
 
-      // Check if we have enough frames.
       if (_aggregator.totalFrames >= _targetFrames) {
         _captureTimer?.cancel();
         setState(() => _isComplete = true);
       }
     } catch (e) {
-      debugPrint('[MALAIKA] Capture error: $e');
+      debugPrint('[MALAIKA] Frame $frameNum error: $e');
+      _frameResponses.add('(error: $e)');
     } finally {
       _isCapturing = false;
     }
@@ -222,10 +233,15 @@ class _CameraMonitorScreenState extends State<CameraMonitorScreen>
   /// Send image to Gemma 4 E2B for clinical vision analysis.
   Future<String?> _analyzeWithGemma(Uint8List imageBytes) async {
     try {
-      final model = await FlutterGemma.getActiveModel(maxTokens: 200);
+      final model = await FlutterGemma.getActiveModel(
+        maxTokens: 200,
+        supportImage: true,
+        maxNumImages: 1,
+      );
       final chat = await model.createChat(
         temperature: 0.2,
         topK: 40,
+        supportImage: true,
         systemInstruction:
             'You are a clinical health assistant. Analyze images precisely '
             'using the structured format requested. Be accurate and concise.',
@@ -489,70 +505,138 @@ class _CameraMonitorScreenState extends State<CameraMonitorScreen>
       return const SizedBox.shrink();
     }
 
-    return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: const Color(0xFF1E1E1E),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.white12),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
+    return Expanded(
+      flex: 0,
+      child: Container(
+        constraints: const BoxConstraints(maxHeight: 300),
+        margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: const Color(0xFF1E1E1E),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: Colors.white12),
+        ),
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(14),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Icon(
-                _isComplete
-                    ? Icons.check_circle_rounded
-                    : Icons.visibility_rounded,
-                color: _isComplete ? MalaikaColors.green : Colors.white70,
-                size: 16,
+              // Header
+              Row(
+                children: [
+                  Icon(
+                    _isComplete
+                        ? Icons.check_circle_rounded
+                        : Icons.visibility_rounded,
+                    color: _isComplete ? MalaikaColors.green : Colors.white70,
+                    size: 16,
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    _isComplete ? 'Scan Complete' : 'Live Findings',
+                    style: TextStyle(
+                      color: _isComplete ? MalaikaColors.green : Colors.white,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  if (_aggregator.totalFrames > 0) ...[
+                    const Spacer(),
+                    Text(
+                      '${_aggregator.totalFrames} frames',
+                      style:
+                          const TextStyle(color: Colors.white38, fontSize: 11),
+                    ),
+                  ],
+                ],
               ),
-              const SizedBox(width: 8),
-              Text(
-                _isComplete ? 'Scan Complete' : 'Live Findings',
-                style: TextStyle(
-                  color: _isComplete ? MalaikaColors.green : Colors.white,
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
+
+              // Aggregated findings
+              if (findings.isNotEmpty) ...[
+                const SizedBox(height: 12),
+                _findingRow('Alertness', 'lethargic', findings,
+                    trueLabel: 'LETHARGIC', falseLabel: 'ALERT'),
+                _findingRow('Chest', 'chest_indrawing', findings,
+                    trueLabel: 'INDRAWING', falseLabel: 'CLEAR'),
+                _findingRow('Dehydration', 'dehydration', findings,
+                    trueLabel: 'DETECTED', falseLabel: 'NONE'),
+                _findingRow('Wasting', 'wasting', findings,
+                    trueLabel: 'DETECTED', falseLabel: 'NONE'),
+                _findingRow('Edema', 'edema', findings,
+                    trueLabel: 'DETECTED', falseLabel: 'NONE'),
+              ] else if (_isAnalyzing) ...[
+                const SizedBox(height: 12),
+                const Text(
+                  'Waiting for first frame analysis...',
+                  style: TextStyle(color: Colors.white38, fontSize: 12),
                 ),
-              ),
-              if (_aggregator.totalFrames > 0) ...[
-                const Spacer(),
-                Text(
-                  '${_aggregator.totalFrames} frames',
-                  style: const TextStyle(color: Colors.white38, fontSize: 11),
+              ],
+
+              // Raw AI observations — transparency
+              if (_frameResponses.isNotEmpty) ...[
+                const SizedBox(height: 14),
+                Container(
+                  width: double.infinity,
+                  height: 1,
+                  color: Colors.white12,
                 ),
+                const SizedBox(height: 10),
+                const Row(
+                  children: [
+                    Icon(Icons.psychology_rounded,
+                        size: 14, color: Colors.white38),
+                    SizedBox(width: 6),
+                    Text(
+                      'What Gemma 4 Sees',
+                      style: TextStyle(
+                        color: Colors.white54,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                ..._frameResponses.asMap().entries.map((entry) {
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.05),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(
+                            color: Colors.white.withValues(alpha: 0.08)),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Frame ${entry.key + 1}',
+                            style: const TextStyle(
+                              color: Colors.white54,
+                              fontSize: 10,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            entry.value,
+                            style: const TextStyle(
+                              color: Colors.white70,
+                              fontSize: 11,
+                              height: 1.4,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                }),
               ],
             ],
           ),
-          if (findings.isNotEmpty) ...[
-            const SizedBox(height: 12),
-            _findingRow('Alertness', 'lethargic', findings,
-                invertLabel: true,
-                trueLabel: 'LETHARGIC',
-                falseLabel: 'ALERT'),
-            _findingRow('Chest', 'chest_indrawing', findings,
-                trueLabel: 'INDRAWING',
-                falseLabel: 'CLEAR'),
-            _findingRow('Dehydration', 'dehydration', findings,
-                trueLabel: 'DETECTED',
-                falseLabel: 'NONE'),
-            _findingRow('Wasting', 'wasting', findings,
-                trueLabel: 'DETECTED',
-                falseLabel: 'NONE'),
-            _findingRow('Edema', 'edema', findings,
-                trueLabel: 'DETECTED',
-                falseLabel: 'NONE'),
-          ] else if (_isAnalyzing) ...[
-            const SizedBox(height: 12),
-            const Text(
-              'Waiting for first frame analysis...',
-              style: TextStyle(color: Colors.white38, fontSize: 12),
-            ),
-          ],
-        ],
+        ),
       ),
     );
   }
@@ -561,7 +645,6 @@ class _CameraMonitorScreenState extends State<CameraMonitorScreen>
     String label,
     String key,
     Map<String, VisionFinding> findings, {
-    bool invertLabel = false,
     required String trueLabel,
     required String falseLabel,
   }) {

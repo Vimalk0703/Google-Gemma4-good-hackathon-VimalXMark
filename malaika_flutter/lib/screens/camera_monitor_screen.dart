@@ -51,6 +51,9 @@ class _CameraMonitorScreenState extends State<CameraMonitorScreen>
   bool _isCapturing = false;
   bool _isComplete = false;
 
+  /// Reusable vision chat session — created ONCE, reused for all frames.
+  dynamic _visionChat;
+
   /// Aggregates findings across frames.
   final VisionAggregator _aggregator = VisionAggregator();
 
@@ -67,7 +70,7 @@ class _CameraMonitorScreenState extends State<CameraMonitorScreen>
   static const int _targetFrames = 3;
 
   /// Interval between frame captures — give model time to process.
-  static const int _captureIntervalSec = 5;
+  static const int _captureIntervalSec = 6;
 
   /// The clinical vision prompt — checks ALL signs in one pass.
   static const String _clinicalPrompt =
@@ -100,6 +103,7 @@ class _CameraMonitorScreenState extends State<CameraMonitorScreen>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _captureTimer?.cancel();
+    try { (_visionChat as dynamic)?.close(); } catch (_) {}
     _cameraController?.dispose();
     super.dispose();
   }
@@ -138,7 +142,7 @@ class _CameraMonitorScreenState extends State<CameraMonitorScreen>
 
       _cameraController = CameraController(
         camera,
-        ResolutionPreset.medium,
+        ResolutionPreset.low,
         enableAudio: false,
         imageFormatGroup: ImageFormatGroup.jpeg,
       );
@@ -160,12 +164,38 @@ class _CameraMonitorScreenState extends State<CameraMonitorScreen>
   // Frame Capture & Analysis
   // --------------------------------------------------------------------------
 
-  void _startMonitoring() {
+  Future<void> _startMonitoring() async {
     if (!_isCameraReady || !widget.modelLoaded) return;
 
     setState(() {
-      _statusMessage = 'Scanning... Hold camera steady on the child.';
+      _statusMessage = 'Preparing vision model...';
       _isAnalyzing = true;
+    });
+
+    // Create ONE vision session — reused for all frames.
+    try {
+      final model = await FlutterGemma.getActiveModel(
+        maxTokens: 150,
+        supportImage: true,
+        maxNumImages: 1,
+      );
+      _visionChat = await model.createChat(
+        temperature: 0.2,
+        topK: 40,
+        supportImage: true,
+        systemInstruction:
+            'You are a clinical health assistant. Analyze each image precisely. '
+            'Report findings in the structured format requested.',
+      );
+      debugPrint('[MALAIKA] Vision session created');
+    } catch (e) {
+      debugPrint('[MALAIKA] Vision session error: $e');
+      setState(() => _statusMessage = 'Vision model error: $e');
+      return;
+    }
+
+    setState(() {
+      _statusMessage = 'Scanning... Hold camera steady on the child.';
     });
 
     // Capture first frame immediately, then every N seconds.
@@ -231,30 +261,21 @@ class _CameraMonitorScreenState extends State<CameraMonitorScreen>
   }
 
   /// Send image to Gemma 4 E2B for clinical vision analysis.
+  /// Reuses the single vision session created in _startMonitoring.
   Future<String?> _analyzeWithGemma(Uint8List imageBytes) async {
-    try {
-      final model = await FlutterGemma.getActiveModel(
-        maxTokens: 200,
-        supportImage: true,
-        maxNumImages: 1,
-      );
-      final chat = await model.createChat(
-        temperature: 0.2,
-        topK: 40,
-        supportImage: true,
-        systemInstruction:
-            'You are a clinical health assistant. Analyze images precisely '
-            'using the structured format requested. Be accurate and concise.',
-      );
+    if (_visionChat == null) {
+      debugPrint('[MALAIKA] No vision session');
+      return null;
+    }
 
-      await chat.addQuery(Message(
+    try {
+      await _visionChat!.addQuery(Message(
         text: _clinicalPrompt,
         isUser: true,
         imageBytes: imageBytes,
       ));
 
-      final response = await chat.generateChatResponse();
-      await chat.close();
+      final response = await _visionChat!.generateChatResponse();
 
       if (response is TextResponse) {
         final text = response.token.trim();

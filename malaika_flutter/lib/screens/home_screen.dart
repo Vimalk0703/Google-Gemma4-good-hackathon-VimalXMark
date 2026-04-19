@@ -500,6 +500,10 @@ class _HomeScreenState extends State<HomeScreen> {
       'I\'ll use the camera to look for clinical signs.',
     );
 
+    // CRITICAL: Close the text session so the vision session can be created.
+    // The model only supports ONE active session at a time.
+    await _closeChat();
+
     final visionResult = await _launchVisionMonitoring();
 
     if (visionResult != null && visionResult.framesAnalyzed > 0) {

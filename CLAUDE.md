@@ -143,7 +143,7 @@ The Flutter Android app is the PRIMARY demo. Here is exactly what it does and do
 | Fully offline | **WORKS** | All intelligence from on-device Gemma 4 E2B |
 | In-app camera preview | **NO** | Mali GPU can't hold model + camera simultaneously |
 | System camera (take photo) | **NO** | Android OOM-kills app when it backgrounds |
-| Voice input/output | **NO** | Text-only on phone (voice is Python/Colab only) |
+| Voice input/output (STT + TTS) | **WORKS** | Offline via Android native engines (CPU), auto-listen loop |
 | Breathing rate from video | **NO** | No video processing on phone |
 | Chest indrawing detection | **NO** | Requires motion observation, photo can't capture |
 | Audio/breath sounds | **NO** | No microphone input in Flutter app |
@@ -153,6 +153,7 @@ The Flutter Android app is the PRIMARY demo. Here is exactly what it does and do
 - Gemma 4 E2B uses ~2.3GB of ~2.5GB GPU
 - Camera preview surfaces crash the driver (no headroom)
 - Gallery picker works because it's in-process, no GPU allocation
+- STT/TTS run on CPU (Android native engines) — no GPU conflict
 - Fresh LLM session per inference prevents KV cache accumulation crash
 
 ---
@@ -261,7 +262,6 @@ This boundary is sacred. Never blur it.
 | Generate caring summary report | Select treatment template based on classification |
 
 **What the phone app does NOT do** (Python/Colab only):
-- Voice conversation (STT/TTS) — phone is text-only
 - Breathing rate from video — phone uses single photo from gallery
 - Chest indrawing detection — requires observing breathing motion
 - Audio/breath sound classification — no microphone input in Flutter

@@ -8,6 +8,7 @@ import '../widgets/classification_card.dart';
 import '../widgets/reasoning_card.dart';
 import '../core/imci_questionnaire.dart';
 import '../core/reconciliation_engine.dart';
+import '../core/voice_service.dart';
 import 'camera_monitor_screen.dart';
 
 /// IMCI assessment using structured Q&A collection + LLM narration.
@@ -36,6 +37,12 @@ class _HomeScreenState extends State<HomeScreen> {
   final ScrollController _scrollController = ScrollController();
   final List<_ChatItem> _chatItems = [];
   VoiceState _voiceState = VoiceState.idle;
+
+  /// Voice service — offline STT + TTS on CPU.
+  final VoiceService _voice = VoiceService();
+  bool _voiceReady = false;
+  String _partialText = '';
+  bool _lastInputWasVoice = false;
 
   /// The questionnaire manages all IMCI Q&A state.
   final ImciQuestionnaire _q = ImciQuestionnaire();
@@ -74,6 +81,92 @@ class _HomeScreenState extends State<HomeScreen> {
   void initState() {
     super.initState();
     _startAssessment();
+    _initVoice();
+  }
+
+  Future<void> _initVoice() async {
+    final ok = await _voice.init();
+    if (mounted) setState(() => _voiceReady = ok);
+
+    _voice.onResult = _onSttResult;
+    _voice.onPartial = (text) {
+      if (mounted) setState(() => _partialText = text);
+    };
+    _voice.onListeningStopped = () {
+      if (mounted && _voiceState == VoiceState.listening) {
+        setState(() {
+          _voiceState = VoiceState.idle;
+          _partialText = '';
+        });
+      }
+    };
+    _voice.onSpeakingDone = _onSpeakingDone;
+    _voice.onError = () {
+      if (mounted) {
+        setState(() {
+          _voiceState = VoiceState.idle;
+          _partialText = '';
+        });
+      }
+    };
+  }
+
+  void _onSttResult(String recognizedText) {
+    if (recognizedText.trim().isEmpty) {
+      if (mounted && _voiceState != VoiceState.speaking) setState(() => _voiceState = VoiceState.idle);
+      return;
+    }
+    _lastInputWasVoice = true;
+    _partialText = '';
+    _textController.text = recognizedText.trim();
+    _sendText();
+  }
+
+  void _onSpeakingDone() {
+    if (!mounted) return;
+    setState(() => _voiceState = VoiceState.idle);
+    // Auto-listen for next answer if last input was voice and assessment ongoing
+    if (_lastInputWasVoice && !_q.isComplete) {
+      Future.delayed(const Duration(milliseconds: 300), () {
+        if (mounted && _voiceState == VoiceState.idle) {
+          _onMicTap();
+        }
+      });
+    }
+  }
+
+  Future<void> _onMicTap() async {
+    switch (_voiceState) {
+      case VoiceState.idle:
+        if (!_voiceReady) {
+          _showVoiceUnavailableSnackbar();
+          return;
+        }
+        setState(() {
+          _voiceState = VoiceState.listening;
+          _partialText = '';
+        });
+        await _voice.startListening();
+      case VoiceState.listening:
+        await _voice.stopListening();
+      case VoiceState.speaking:
+        await _voice.stopSpeaking();
+        setState(() => _voiceState = VoiceState.idle);
+      case VoiceState.thinking:
+        break; // Do nothing — LLM is processing
+    }
+  }
+
+  void _showVoiceUnavailableSnackbar() {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text(
+          'Offline speech not available. Download an offline language pack '
+          'in Settings > Language > Speech.',
+        ),
+        duration: Duration(seconds: 5),
+      ),
+    );
   }
 
   // --------------------------------------------------------------------------
@@ -157,7 +250,7 @@ class _HomeScreenState extends State<HomeScreen> {
           '${_q.currentQuestion!.question}');
     }
 
-    if (mounted) setState(() => _voiceState = VoiceState.idle);
+    if (mounted && _voiceState != VoiceState.speaking) setState(() => _voiceState = VoiceState.idle);
   }
 
   // --------------------------------------------------------------------------
@@ -177,7 +270,7 @@ class _HomeScreenState extends State<HomeScreen> {
         (text.toLowerCase() == 'skip' ||
             text.toLowerCase() == 'no photo')) {
       await _onSkipPhoto();
-      if (mounted) setState(() => _voiceState = VoiceState.idle);
+      if (mounted && _voiceState != VoiceState.speaking) setState(() => _voiceState = VoiceState.idle);
       return;
     }
 
@@ -191,7 +284,7 @@ class _HomeScreenState extends State<HomeScreen> {
       _addBot(response.isNotEmpty
           ? response
           : 'Please show the results to a health worker.');
-      if (mounted) setState(() => _voiceState = VoiceState.idle);
+      if (mounted && _voiceState != VoiceState.speaking) setState(() => _voiceState = VoiceState.idle);
       return;
     }
 
@@ -254,7 +347,7 @@ class _HomeScreenState extends State<HomeScreen> {
     // Check if all questions are done
     if (_q.isComplete) {
       await _generateFinalReport();
-      if (mounted) setState(() => _voiceState = VoiceState.idle);
+      if (mounted && _voiceState != VoiceState.speaking) setState(() => _voiceState = VoiceState.idle);
       return;
     }
 
@@ -264,7 +357,7 @@ class _HomeScreenState extends State<HomeScreen> {
     // If next question is a photo, handle it specially
     if (nextQ.type == AnswerType.photo) {
       await _handlePhotoQuestion(nextQ, text);
-      if (mounted) setState(() => _voiceState = VoiceState.idle);
+      if (mounted && _voiceState != VoiceState.speaking) setState(() => _voiceState = VoiceState.idle);
       return;
     }
 
@@ -287,7 +380,7 @@ class _HomeScreenState extends State<HomeScreen> {
       _addBot(response);
     }
 
-    if (mounted) setState(() => _voiceState = VoiceState.idle);
+    if (mounted && _voiceState != VoiceState.speaking) setState(() => _voiceState = VoiceState.idle);
   }
 
   // --------------------------------------------------------------------------
@@ -315,7 +408,7 @@ class _HomeScreenState extends State<HomeScreen> {
       type: _ChatItemType.photoPrompt,
       metadata: {'step': q.step, 'label': q.label},
     ));
-    setState(() => _voiceState = VoiceState.idle);
+    if (_voiceState != VoiceState.speaking) setState(() => _voiceState = VoiceState.idle);
   }
 
   Future<void> _onTakePhoto() async {
@@ -335,7 +428,7 @@ class _HomeScreenState extends State<HomeScreen> {
       );
 
       if (image == null) {
-        if (mounted) setState(() => _voiceState = VoiceState.idle);
+        if (mounted && _voiceState != VoiceState.speaking) setState(() => _voiceState = VoiceState.idle);
         return;
       }
 
@@ -408,7 +501,7 @@ class _HomeScreenState extends State<HomeScreen> {
       }
     }
 
-    if (mounted) setState(() => _voiceState = VoiceState.idle);
+    if (mounted && _voiceState != VoiceState.speaking) setState(() => _voiceState = VoiceState.idle);
   }
 
   Future<void> _onSkipPhoto() async {
@@ -436,7 +529,7 @@ class _HomeScreenState extends State<HomeScreen> {
       }
     }
 
-    if (mounted) setState(() => _voiceState = VoiceState.idle);
+    if (mounted && _voiceState != VoiceState.speaking) setState(() => _voiceState = VoiceState.idle);
   }
 
   // --------------------------------------------------------------------------
@@ -757,6 +850,11 @@ class _HomeScreenState extends State<HomeScreen> {
     setState(
         () => _chatItems.add(_ChatItem(type: _ChatItemType.bot, text: text)));
     _scrollToBottom();
+    // Speak the response via TTS
+    if (_voice.isTtsEnabled && text.isNotEmpty) {
+      setState(() => _voiceState = VoiceState.speaking);
+      _voice.speak(text);
+    }
   }
 
   void _addUser(String text) {
@@ -829,6 +927,18 @@ class _HomeScreenState extends State<HomeScreen> {
           ],
         ),
         actions: [
+          // TTS toggle
+          IconButton(
+            icon: Icon(
+              _voice.isTtsEnabled ? Icons.volume_up : Icons.volume_off,
+              size: 20,
+            ),
+            onPressed: () {
+              _voice.toggleTts();
+              if (!_voice.isTtsEnabled) _voice.stopSpeaking();
+              setState(() {});
+            },
+          ),
           Container(
             margin: const EdgeInsets.only(right: 12),
             padding:
@@ -915,6 +1025,10 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Widget _buildInputBar() {
     final isThinking = _voiceState == VoiceState.thinking;
+    final isListening = _voiceState == VoiceState.listening;
+    final isSpeaking = _voiceState == VoiceState.speaking;
+    final isBusy = isThinking || isListening;
+
     return Container(
       padding: EdgeInsets.only(
           left: 16,
@@ -926,52 +1040,114 @@ class _HomeScreenState extends State<HomeScreen> {
         border:
             Border(top: BorderSide(color: MalaikaColors.border)),
       ),
-      child: Row(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          Expanded(
-            child: TextField(
-              controller: _textController,
-              enabled: !isThinking,
-              style: const TextStyle(
-                  fontSize: 15, color: MalaikaColors.text),
-              decoration: InputDecoration(
-                hintText: isThinking
-                    ? 'Malaika is thinking...'
-                    : 'Type your answer...',
-                isDense: true,
-              ),
-              onSubmitted: (_) => _sendText(),
-            ),
-          ),
-          const SizedBox(width: 8),
-          GestureDetector(
-            onTap: isThinking ? null : _sendText,
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 200),
-              width: 44,
-              height: 44,
-              decoration: BoxDecoration(
-                color: isThinking
-                    ? MalaikaColors.textMuted
-                    : MalaikaColors.primary,
-                borderRadius: BorderRadius.circular(22),
-              ),
-              child: Icon(
-                isThinking
-                    ? Icons.hourglass_top_rounded
-                    : Icons.send_rounded,
-                size: 20,
-                color: Colors.white,
+          // Partial transcription while listening
+          if (isListening && _partialText.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Text(
+                _partialText,
+                style: const TextStyle(
+                  fontSize: 13,
+                  color: MalaikaColors.textMuted,
+                  fontStyle: FontStyle.italic,
+                ),
               ),
             ),
+          Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: _textController,
+                  enabled: !isBusy,
+                  style: const TextStyle(
+                      fontSize: 15, color: MalaikaColors.text),
+                  decoration: InputDecoration(
+                    hintText: isThinking
+                        ? 'Malaika is thinking...'
+                        : isListening
+                            ? 'Listening...'
+                            : isSpeaking
+                                ? 'Speaking...'
+                                : 'Type or tap mic...',
+                    isDense: true,
+                  ),
+                  onSubmitted: (_) {
+                    _lastInputWasVoice = false;
+                    _sendText();
+                  },
+                ),
+              ),
+              const SizedBox(width: 8),
+              // Mic button
+              _buildMicButton(),
+              const SizedBox(width: 4),
+              // Send button
+              GestureDetector(
+                onTap: isBusy ? null : () {
+                  _lastInputWasVoice = false;
+                  _sendText();
+                },
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 200),
+                  width: 44,
+                  height: 44,
+                  decoration: BoxDecoration(
+                    color: isBusy
+                        ? MalaikaColors.textMuted
+                        : MalaikaColors.primary,
+                    borderRadius: BorderRadius.circular(22),
+                  ),
+                  child: Icon(
+                    isThinking
+                        ? Icons.hourglass_top_rounded
+                        : Icons.send_rounded,
+                    size: 20,
+                    color: Colors.white,
+                  ),
+                ),
+              ),
+            ],
           ),
         ],
       ),
     );
   }
 
+  Widget _buildMicButton() {
+    final color = switch (_voiceState) {
+      VoiceState.idle => _voiceReady ? MalaikaColors.primary : MalaikaColors.textMuted,
+      VoiceState.listening => MalaikaColors.green,
+      VoiceState.thinking => MalaikaColors.yellow,
+      VoiceState.speaking => MalaikaColors.primary,
+    };
+    final icon = switch (_voiceState) {
+      VoiceState.idle || VoiceState.listening => Icons.mic,
+      VoiceState.thinking => Icons.hourglass_top,
+      VoiceState.speaking => Icons.volume_up,
+    };
+
+    return GestureDetector(
+      onTap: _onMicTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        width: 44,
+        height: 44,
+        decoration: BoxDecoration(
+          color: color.withOpacity(0.12),
+          shape: BoxShape.circle,
+          border: Border.all(color: color.withOpacity(0.4), width: 1.5),
+        ),
+        child: Icon(icon, size: 20, color: color),
+      ),
+    );
+  }
+
   @override
   void dispose() {
+    _voice.dispose();
     _closeChat();
     _textController.dispose();
     _scrollController.dispose();

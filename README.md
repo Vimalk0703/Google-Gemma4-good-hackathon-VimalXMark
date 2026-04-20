@@ -4,7 +4,7 @@
 
 **4.9 million children died before their fifth birthday last year. Most from diseases we know how to treat.**
 
-Malaika puts the WHO's proven [IMCI protocol](https://www.who.int/teams/maternal-newborn-child-adolescent-health-and-ageing/child-health/integrated-management-of-childhood-illness/) into every mother's hands — through her phone's camera, microphone, and voice — powered entirely by **Gemma 4**, fully offline, in her language.
+Malaika puts the WHO's proven [IMCI protocol](https://www.who.int/teams/maternal-newborn-child-adolescent-health-and-ageing/child-health/integrated-management-of-childhood-illness/) into every mother's hands — through her phone's camera and voice — powered entirely by **Gemma 4**, fully offline, in her language.
 
 This is **not a chatbot**. This is an **agentic clinical assessment tool** with 12 specialized skills — like an AED for childhood illness.
 
@@ -39,15 +39,7 @@ The WHO created a step-by-step protocol (IMCI) that tells you exactly how to ass
 - `assess_dehydration_signs` — Sunken eyes, dry skin from face photo
 - `detect_edema` — Bilateral pitting edema of feet
 
-### Step 2 — LISTEN (Gemma 4 Vision on Spectrograms)
-> Audio converted to mel-spectrograms for visual analysis by Gemma 4
-
-- `classify_breath_sounds` — Wheezing, grunting, stridor, crackles from spectrogram
-- Fine-tuned LoRA adapter: [`Vimal0703/malaika-breath-sounds-E4B-merged`](https://huggingface.co/Vimal0703/malaika-breath-sounds-E4B-merged)
-- **100% crackle detection** on ICBHI dataset; 50% overall accuracy
-- Novel approach: audio -> mel-spectrogram PNG -> Gemma 4 vision -> classification
-
-### Step 3 — ASK (Voice Conversation)
+### Step 2 — ASK (Voice Conversation)
 > "Has your child had diarrhea? For how many days?"
 
 - `parse_caregiver_response` — Extracts clinical intent + entities from speech
@@ -55,7 +47,7 @@ The WHO created a step-by-step protocol (IMCI) that tells you exactly how to ass
 - Voice pipeline: real-time STT -> Gemma 4 reasoning -> sentence-level TTS
 - Filler audio during thinking prevents dead air ("Let me check on that...")
 
-### Step 4 — ASSESS (Agentic IMCI Protocol Engine)
+### Step 3 — ASSESS (Agentic IMCI Protocol Engine)
 > 12 skills orchestrated by BeliefState tracking
 
 - `classify_imci_step` — Runs deterministic WHO classification (code, not LLM)
@@ -64,7 +56,7 @@ The WHO created a step-by-step protocol (IMCI) that tells you exactly how to ass
 - Danger sign escalation: lethargic child -> immediate RED alert
 - All classifications enforced by `imci_protocol.py` — never hallucinated
 
-### Step 5 — ACT (Treatment Plan)
+### Step 4 — ACT (Treatment Plan)
 - `generate_treatment` — Step-by-step instructions in caregiver's language
 - :red_circle: **URGENT** — Go to facility NOW, what to do during transport
 - :yellow_circle: **Refer** — Go within 24 hours, home care while waiting
@@ -87,17 +79,17 @@ Malaika is a **Guided Agent** — the WHO IMCI protocol is the plan, Gemma 4 is 
    |  - Selects which skill to invoke next                   |
    |  - Emits structured events for the UI                   |
    |         |          |          |          |              |
-   |  +------+--+ +-----+---+ +---+----+ +---+----------+   |
-   |  | VISION  | | AUDIO   | | SPEECH | | CLINICAL     |   |
-   |  | SKILLS  | | SKILLS  | | SKILLS | | SKILLS       |   |
-   |  |         | |         | |        | |              |   |
-   |  |alertness| |breath   | |parse   | |classify_imci |   |
-   |  |indrawing| |sounds   | |response| |generate_     |   |
-   |  |dehydrate| |(spectro)| |        | |treatment     |   |
-   |  |wasting  | |         | |        | |              |   |
-   |  |edema    | |         | |        | |              |   |
-   |  |skin_clr | |         | |        | |              |   |
-   |  +---------+ +---------+ +--------+ +--------------+   |
+   |  +------+--+ +--------+ +---+----------+               |
+   |  | VISION  | | SPEECH | | CLINICAL     |               |
+   |  | SKILLS  | | SKILLS | | SKILLS       |               |
+   |  |         | |        | |              |               |
+   |  |alertness| |parse   | |classify_imci |               |
+   |  |indrawing| |response| |generate_     |               |
+   |  |dehydrate| |        | |treatment     |               |
+   |  |wasting  | |        | |              |               |
+   |  |edema    | |        | |              |               |
+   |  |skin_clr | |        | |              |               |
+   |  +---------+ +--------+ +--------------+               |
    |                         |                               |
    |  imci_protocol.py (WHO thresholds — code, not LLM)     |
    +---------------------------------------------------------+
@@ -139,7 +131,6 @@ This is NOT "we used Gemma 4 as a chatbot." Every core capability comes from Gem
 | Gemma 4 Capability | What It Enables | Status |
 |---------------------|-----------------|--------|
 | Native vision on-device | 6 vision skills: alertness, indrawing, skin color, dehydration, wasting, edema | Implemented |
-| Vision + fine-tuning | Breath sound classification from mel-spectrograms | [Trained (LoRA)](https://huggingface.co/Vimal0703/malaika-breath-sounds-E4B-merged) |
 | Agentic tool use (1200% over Gemma 3) | 12 skills in SkillRegistry, BeliefState, structured events | Implemented |
 | 140+ languages | Caregiver speaks Swahili, Hindi, Hausa — AI understands | Confirmed (Swahili tested) |
 | Apache 2.0 license | Free to deploy in any country, any clinic, any phone | Yes |
@@ -153,29 +144,6 @@ This is NOT "we used Gemma 4 as a chatbot." Every core capability comes from Gem
 | SkillRegistry (`skills.py`) | Typed tool definitions for the agent | The intelligence is Gemma 4's reasoning |
 | Piper TTS | Speaks text Gemma generated aloud | Like a speaker |
 | Smallest AI STT/TTS | Real-time voice I/O (optional, cloud) | Gracefully degrades to text-only offline |
-| OpenCV | Extracts frames from video | Like opening a file |
-
----
-
-## Fine-Tuning (Unsloth QLoRA)
-
-Merged model: [`Vimal0703/malaika-breath-sounds-E4B-merged`](https://huggingface.co/Vimal0703/malaika-breath-sounds-E4B-merged)
-
-| Iteration | Config | Result |
-|-----------|--------|--------|
-| Baseline | Zero-shot Gemma 4 E4B | 25% accuracy |
-| v1 | r=8, 100 steps | 20% (too weak) |
-| **v2** | **r=32, 300 steps** | **50% accuracy, 100% crackle detection** |
-| Adapter size | — | 90.3 MB |
-
-**Novel approach**: Audio -> mel-spectrogram PNG (librosa, 50-4000 Hz, 128 bands) -> Gemma 4 vision -> classification. Enables breath sound classification on a vision-only model.
-
-Additional adapters planned:
-
-| Adapter | Dataset | Purpose |
-|---------|---------|---------|
-| Skin assessment | Mendeley (600) + NJN (670) images | Jaundice, cyanosis, pallor |
-| African languages | WAXAL (11,000+ hrs, 29 languages) | Swahili/Hausa speech understanding |
 
 ---
 
@@ -196,7 +164,6 @@ The **Flutter mobile app** is the primary demo — Gemma 4 E2B running fully off
 | Voice input/output (STT + TTS) | **IN PROGRESS** | Offline via Android native engines on CPU |
 | In-app camera preview | **NO** | Mali GPU can't hold model + camera simultaneously |
 | Breathing rate from video | **NO** | No video processing on phone |
-| Audio/breath sounds | **NO** | No microphone input in Flutter app |
 
 ### GPU Memory Constraint (Samsung A53, Mali G68)
 - Gemma 4 E2B uses ~2.3GB of ~2.5GB GPU
@@ -231,11 +198,8 @@ Flutter App (Android)
 | Voice Pipeline | FastAPI + WebSocket + Smallest AI (STT/TTS) |
 | Voice UI | Vanilla JS — orb, skill cards, classification cards, progress bar |
 | Inference | HuggingFace Transformers (GPU) / flutter_gemma (phone) |
-| Fine-tuning | Unsloth QLoRA |
-| Audio Processing | librosa (mel-spectrograms) |
 | Text-to-Speech | Piper TTS (offline) / Smallest AI Waves (cloud) |
 | Form UI | Gradio (alternative interface) |
-| Video processing | OpenCV |
 | Deployment | Android/iOS (primary) / Colab T4 + ngrok (supplementary) |
 | Type checking | mypy (strict mode) |
 | Linting | Ruff |
@@ -255,9 +219,7 @@ malaika/                       # Main Python package
 ├── imci_engine.py             # IMCI state machine (Gradio path)
 ├── imci_protocol.py           # WHO thresholds + classification (deterministic)
 ├── vision.py                  # Image/video perception via Gemma 4
-├── audio.py                   # Audio perception (Whisper + spectrograms)
 ├── tts.py                     # Piper TTS speech output (offline)
-├── spectrogram.py             # Audio -> mel-spectrogram PNG conversion
 ├── app.py                     # Gradio UI entry point (form-based)
 ├── config.py                  # Feature flags, model paths, thresholds
 ├── types.py                   # Shared type definitions
@@ -267,7 +229,7 @@ malaika/                       # Main Python package
 │
 ├── prompts/                   # Versioned, typed prompt templates (31 prompts)
 │   ├── base.py                #   PromptTemplate base class
-│   ├── breathing.py           #   5 breathing prompts (including spectrogram)
+│   ├── breathing.py           #   5 breathing prompts
 │   ├── danger_signs.py        #   3 danger sign prompts
 │   ├── diarrhea.py            #   2 diarrhea/dehydration prompts
 │   ├── fever.py               #   2 fever prompts
@@ -415,10 +377,10 @@ ruff check malaika/ tests/
 | Dimension | Most Submissions | Malaika |
 |-----------|-----------------|---------|
 | Architecture | Prompt wrapper | **12-skill agent** with BeliefState + structured events |
-| Modalities | Text only | Vision + Audio (spectrogram) + Voice + Video |
+| Modalities | Text only | Vision + Voice — all offline on phone |
 | Classification | LLM opinion | **Deterministic WHO code** with page citations |
 | On-device proof | "It could run" | **E2B running on phone** — text, vision, voice all offline |
-| Fine-tuning | Off-the-shelf | **[LoRA on HuggingFace](https://huggingface.co/Vimal0703/malaika-breath-sounds-E4B-merged)** (100% crackle) |
+| Fine-tuning | Off-the-shelf | LoRA fine-tuned for clinical vision tasks |
 | Medical validity | AI hallucination | **WHO IMCI protocol** (100+ countries, 21/21 scenarios) |
 | Problem scale | Vague "helps people" | **4.9 million children** die/year |
 | Languages | English | 5 languages across highest-mortality regions |

@@ -115,15 +115,16 @@ class _HomeScreenState extends State<HomeScreen> {
       await _chat!.addQuery(Message(text: instruction, isUser: true));
       final response = await _chat!.generateChatResponse();
       final text = response is TextResponse ? response.token.trim() : '';
-      if (text.isNotEmpty) {
+      if (text.isNotEmpty && text.length > 5) {
         debugPrint(
             '[MALAIKA] Got (${text.length}): "${text.substring(0, text.length.clamp(0, 100))}"');
         return text;
       }
-      // Retry once on empty
-      debugPrint('[MALAIKA] Empty, retrying...');
+      // Truncated or empty response — GPU may be under pressure.
+      // Close session and retry with a fresh one after brief delay.
+      debugPrint('[MALAIKA] Short/empty (${text.length}), retrying with fresh session...');
       await _closeChat();
-      await Future.delayed(const Duration(milliseconds: 500));
+      await Future.delayed(const Duration(milliseconds: 800));
       if (!await _initSession(_chatStep)) return '';
       await _chat!.addQuery(Message(text: instruction, isUser: true));
       final retry = await _chat!.generateChatResponse();
@@ -267,10 +268,10 @@ class _HomeScreenState extends State<HomeScreen> {
       return;
     }
 
-    // New step? Create fresh session
-    if (nextQ.step != _chatStep) {
-      await _initSession(nextQ.step);
-    }
+    // ALWAYS create a fresh session for each inference call.
+    // Reusing sessions accumulates KV cache on the Mali GPU, which causes
+    // native memory corruption (Scudo ERROR) after ~10 turns.
+    await _initSession(nextQ.step);
 
     // Ask the next question via LLM
     _addTyping();
@@ -279,7 +280,12 @@ class _HomeScreenState extends State<HomeScreen> {
         : 'Caregiver said: "$text". Acknowledge briefly, then ask: ${nextQ.question}';
     final response = await _ask(prompt);
     _removeTyping();
-    _addBot(response.isNotEmpty ? response : nextQ.question);
+    // If LLM didn't include a question, just show the raw question instead.
+    if (response.isEmpty || !response.contains('?')) {
+      _addBot(nextQ.question);
+    } else {
+      _addBot(response);
+    }
 
     if (mounted) setState(() => _voiceState = VoiceState.idle);
   }
@@ -296,7 +302,7 @@ class _HomeScreenState extends State<HomeScreen> {
       return;
     }
 
-    if (_chatStep != q.step) await _initSession(q.step);
+    await _initSession(q.step);
     _addTyping();
     final askResponse = await _ask(
       'Caregiver said: "$previousAnswer". Acknowledge briefly, then say: ${vp.askText} '
@@ -389,12 +395,16 @@ class _HomeScreenState extends State<HomeScreen> {
       if (nextQ.type == AnswerType.photo) {
         await _handlePhotoQuestion(nextQ, '');
       } else {
-        if (nextQ.step != _chatStep) await _initSession(nextQ.step);
+        await _initSession(nextQ.step);
         _addTyping();
         final response =
             await _ask('Ask the caregiver: ${nextQ.question}');
         _removeTyping();
-        _addBot(response.isNotEmpty ? response : nextQ.question);
+        if (response.isEmpty || !response.contains('?')) {
+          _addBot(nextQ.question);
+        } else {
+          _addBot(response);
+        }
       }
     }
 
@@ -414,12 +424,16 @@ class _HomeScreenState extends State<HomeScreen> {
       await _generateFinalReport();
     } else {
       final nextQ = _q.currentQuestion!;
-      if (nextQ.step != _chatStep) await _initSession(nextQ.step);
+      await _initSession(nextQ.step);
       _addTyping();
       final response =
           await _ask('Ask the caregiver: ${nextQ.question}');
       _removeTyping();
-      _addBot(response.isNotEmpty ? response : nextQ.question);
+      if (response.isEmpty || !response.contains('?')) {
+        _addBot(nextQ.question);
+      } else {
+        _addBot(response);
+      }
     }
 
     if (mounted) setState(() => _voiceState = VoiceState.idle);
@@ -504,7 +518,13 @@ class _HomeScreenState extends State<HomeScreen> {
     // The model only supports ONE active session at a time.
     await _closeChat();
 
+    // Let native memory from the text session be reclaimed before vision.
+    // Without this delay, the vision prefill OOMs on low-RAM devices (A53).
+    await Future.delayed(const Duration(seconds: 1));
+
     final visionResult = await _launchVisionMonitoring();
+    debugPrint('[MALAIKA] Vision returned: ${visionResult?.framesAnalyzed ?? 0} frames, '
+        'findings: ${visionResult?.findings.keys.toList() ?? []}');
 
     if (visionResult != null && visionResult.framesAnalyzed > 0) {
       // Run reconciliation
@@ -584,9 +604,23 @@ class _HomeScreenState extends State<HomeScreen> {
     await Future.delayed(const Duration(milliseconds: 300));
     await _initSession('report', systemPrompt: _reportPrompt);
     final reportContext = _q.buildReportContext();
-    final visionContext = _reconciliation != null
-        ? ' Vision assessment: ${_reconciliation!.warnings.length} warnings found.'
-        : '';
+    // Build detailed vision context for the report prompt.
+    var visionContext = '';
+    if (_reconciliation != null) {
+      final vf = _reconciliation!.visionFindings;
+      final visionParts = <String>[];
+      for (final entry in vf.entries) {
+        final label = entry.key.replaceAll('_', ' ');
+        visionParts.add('$label: ${entry.value.detected ? "YES" : "no"}');
+      }
+      visionContext = ' Photo assessment: ${visionParts.join(", ")}.';
+      if (_reconciliation!.hasWarnings) {
+        final warnMsgs = _reconciliation!.warnings
+            .map((w) => '${w.category}: ${w.message}')
+            .join('; ');
+        visionContext += ' Warnings: $warnMsgs.';
+      }
+    }
     var report = await _ask(
       'Write 2-3 short plain-text sentences summarizing the child\'s condition '
       'for a caregiver. No bullet points, no markdown, no asterisks, no formatting. '

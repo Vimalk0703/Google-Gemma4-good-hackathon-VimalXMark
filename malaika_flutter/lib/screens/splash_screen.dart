@@ -94,7 +94,7 @@ class _SplashScreenState extends State<SplashScreen> {
       });
 
       await FlutterGemma.getActiveModel(
-        maxTokens: 512,
+        maxTokens: 200,
         preferredBackend: PreferredBackend.gpu,
         supportImage: true,
         maxNumImages: 1,

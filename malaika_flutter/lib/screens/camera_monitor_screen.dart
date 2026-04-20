@@ -1,25 +1,30 @@
-/// Camera Monitor Screen — real-time visual assessment via Gemma 4 E2B.
+/// Photo Assessment Screen — single-photo visual assessment via Gemma 4 E2B.
 ///
-/// After the questionnaire completes, this screen opens the camera and
-/// periodically captures frames for Gemma 4 vision analysis. It checks
-/// for: alertness, chest indrawing, dehydration signs, and wasting/edema.
+/// User picks a photo from the gallery. Gemma 4 vision analyzes it for:
+/// alertness, dehydration signs, visible wasting, and edema.
 ///
-/// The findings accumulate across frames to build confidence. When enough
-/// frames are analyzed (or the user presses "Complete"), the aggregated
-/// vision findings are returned to the caller for reconciliation.
+/// WHY gallery picker (not camera):
+/// - Gemma 4 E2B occupies ~2.3GB of ~2.5GB Mali GPU memory
+/// - In-app camera preview (CameraController) crashes the Mali driver (GPU OOM)
+/// - System camera intent (ImageSource.camera) causes Android to OOM-kill our
+///   backgrounded app while the camera is open
+/// - Gallery picker runs in-process, no GPU allocation, no backgrounding
+///
+/// Chest indrawing is always false — requires observing breathing motion,
+/// which a still photo cannot capture.
 library;
 
-import 'dart:async';
 import 'dart:typed_data';
+import 'dart:ui' as ui;
 
-import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_gemma/flutter_gemma.dart';
+import 'package:image_picker/image_picker.dart';
 
 import '../core/reconciliation_engine.dart';
 import '../theme/malaika_theme.dart';
 
-/// Result returned to the caller with aggregated vision findings.
+/// Result returned to the caller with vision findings.
 class CameraMonitorResult {
   final Map<String, VisionFinding> findings;
   final int framesAnalyzed;
@@ -32,9 +37,8 @@ class CameraMonitorResult {
   });
 }
 
-/// Full-screen camera monitor for clinical visual assessment.
+/// Photo-based clinical visual assessment screen.
 class CameraMonitorScreen extends StatefulWidget {
-  /// Whether the Gemma 4 model is loaded and ready.
   final bool modelLoaded;
 
   const CameraMonitorScreen({super.key, required this.modelLoaded});
@@ -43,274 +47,217 @@ class CameraMonitorScreen extends StatefulWidget {
   State<CameraMonitorScreen> createState() => _CameraMonitorScreenState();
 }
 
-class _CameraMonitorScreenState extends State<CameraMonitorScreen>
-    with WidgetsBindingObserver {
-  CameraController? _cameraController;
-  bool _isCameraReady = false;
+class _CameraMonitorScreenState extends State<CameraMonitorScreen> {
+  final ImagePicker _picker = ImagePicker();
+
+  /// Analysis states.
   bool _isAnalyzing = false;
-  bool _isCapturing = false;
   bool _isComplete = false;
+  String? _aiResponse;
+  Map<String, bool>? _findings;
+  String _notes = '';
+  String _statusMessage = 'Choose a photo of the child for visual assessment.';
 
-  /// Reusable vision chat session — created ONCE, reused for all frames.
-  dynamic _visionChat;
+  /// System instruction — WHO IMCI clinical context.
+  static const String _visionSystem =
+      'WHO IMCI child health vision assistant. '
+      'Report only what you see. If unsure say UNCLEAR.';
 
-  /// Aggregates findings across frames.
-  final VisionAggregator _aggregator = VisionAggregator();
-
-  /// Raw AI responses per frame — for transparency.
-  final List<String> _frameResponses = [];
-
-  /// Timer for periodic frame capture.
-  Timer? _captureTimer;
-
-  /// Current status message.
-  String _statusMessage = 'Initializing camera...';
-
-  /// Target number of frames — keep low to avoid crashes.
-  static const int _targetFrames = 3;
-
-  /// Interval between frame captures — give model time to process.
-  static const int _captureIntervalSec = 6;
-
-  /// The clinical vision prompt — checks ALL signs in one pass.
-  static const String _clinicalPrompt =
-      'You are a clinical health assistant performing a visual assessment '
-      'of a child. Analyze this image and report on ALL of the following.\n\n'
-      'CHECK EACH ITEM:\n'
-      '1. ALERTNESS: Is the child alert and responsive, lethargic (abnormally '
-      'sleepy, not looking at camera), or unconscious?\n'
-      '2. CHEST: If the chest is visible, is there chest indrawing (lower '
-      'chest wall pulls inward when breathing)?\n'
-      '3. DEHYDRATION: Are the eyes sunken? Does the skin look dry? Are '
-      'lips cracked?\n'
-      '4. NUTRITION: Is the child very thin (ribs/bones visible = wasting)? '
-      'Is there swelling in both feet (edema)?\n\n'
-      'RESPOND IN EXACTLY THIS FORMAT (one line per item):\n'
+  /// Photo prompt — clear separation between what to check and answer format.
+  static const String _photoPrompt =
+      'Look at this child photo. Check: are eyes open or shut? '
+      'Is body limp? Are eyes sunken? Lips dry? Ribs visible? '
+      'Limbs thin? Feet swollen?\n'
+      'Reply with ONE word per line:\n'
       'ALERTNESS: ALERT or LETHARGIC or UNCONSCIOUS\n'
-      'CHEST: INDRAWING or NO_INDRAWING or NOT_VISIBLE\n'
       'DEHYDRATION: DEHYDRATED or NOT_DEHYDRATED\n'
       'NUTRITION: WASTING or EDEMA or BOTH or NORMAL\n'
-      'NOTES: One sentence observation about the child';
-
-  @override
-  void initState() {
-    super.initState();
-    WidgetsBinding.instance.addObserver(this);
-    _initCamera();
-  }
-
-  @override
-  void dispose() {
-    WidgetsBinding.instance.removeObserver(this);
-    _captureTimer?.cancel();
-    try { (_visionChat as dynamic)?.close(); } catch (_) {}
-    _cameraController?.dispose();
-    super.dispose();
-  }
-
-  @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (_cameraController == null || !_cameraController!.value.isInitialized) {
-      return;
-    }
-    if (state == AppLifecycleState.inactive) {
-      _captureTimer?.cancel();
-      _cameraController?.dispose();
-      _cameraController = null;
-    } else if (state == AppLifecycleState.resumed) {
-      _initCamera();
-    }
-  }
+      'NOTES: one sentence about what you see';
 
   // --------------------------------------------------------------------------
-  // Camera Initialization
+  // Image resize
   // --------------------------------------------------------------------------
 
-  Future<void> _initCamera() async {
+  Future<Uint8List> _resizeImage(Uint8List jpegBytes) async {
     try {
-      final cameras = await availableCameras();
-      if (cameras.isEmpty) {
-        setState(() => _statusMessage = 'No camera available');
+      final codec = await ui.instantiateImageCodec(
+        jpegBytes,
+        targetWidth: 160,
+      );
+      final frame = await codec.getNextFrame();
+      final image = frame.image;
+      final pngData = await image.toByteData(format: ui.ImageByteFormat.png);
+      image.dispose();
+      codec.dispose();
+      if (pngData != null) {
+        return pngData.buffer.asUint8List();
+      }
+    } catch (e) {
+      debugPrint('[MALAIKA] Image resize failed, using original: $e');
+    }
+    return jpegBytes;
+  }
+
+  // --------------------------------------------------------------------------
+  // Capture (system camera) + Analyze
+  // --------------------------------------------------------------------------
+
+  Future<void> _captureAndAnalyze() async {
+    if (_isAnalyzing) return;
+
+    setState(() {
+      _isAnalyzing = true;
+      _statusMessage = 'Opening gallery...';
+    });
+
+    try {
+      // 1. Pick image from gallery — stays in-process, no GPU contention.
+      final xFile = await _picker.pickImage(
+        source: ImageSource.gallery,
+        maxWidth: 640,
+        maxHeight: 640,
+        imageQuality: 70,
+      );
+
+      if (xFile == null) {
+        // User cancelled the camera
+        if (mounted) {
+          setState(() {
+            _isAnalyzing = false;
+            _statusMessage = 'No photo selected. Tap to try again or skip.';
+          });
+        }
         return;
       }
 
-      // Prefer back camera for clinical assessment.
-      final camera = cameras.firstWhere(
-        (c) => c.lensDirection == CameraLensDirection.back,
-        orElse: () => cameras.first,
-      );
+      final rawBytes = await xFile.readAsBytes();
+      debugPrint('[MALAIKA] Photo captured: ${rawBytes.length} bytes '
+          '(${(rawBytes.length / 1024).toStringAsFixed(0)} KB)');
 
-      _cameraController = CameraController(
-        camera,
-        ResolutionPreset.low,
-        enableAudio: false,
-        imageFormatGroup: ImageFormatGroup.jpeg,
-      );
+      setState(() => _statusMessage = 'Preparing image...');
 
-      await _cameraController!.initialize();
-      if (!mounted) return;
+      // 2. Resize for model input.
+      final imageBytes = await _resizeImage(rawBytes);
+      debugPrint('[MALAIKA] Resized to: ${imageBytes.length} bytes '
+          '(${(imageBytes.length / 1024).toStringAsFixed(0)} KB)');
 
-      setState(() {
-        _isCameraReady = true;
-        _statusMessage = 'Camera ready. Tap "Start Scan" to begin.';
-      });
+      setState(() => _statusMessage = 'Gemma 4 analyzing photo...');
+
+      // 3. Run vision analysis — no camera active, full GPU for model.
+      final analysis = await _analyzePhoto(imageBytes);
+
+      if (analysis != null && analysis.length > 10 && mounted) {
+        final parsed = _parseResponse(analysis);
+        final notes = _extractNotes(analysis);
+
+        debugPrint('[MALAIKA] ===== VISION OUTPUT =====');
+        debugPrint('[MALAIKA] Raw response: $analysis');
+        debugPrint('[MALAIKA] Parsed findings: $parsed');
+        debugPrint('[MALAIKA] Notes: $notes');
+        debugPrint('[MALAIKA] ===========================');
+
+        setState(() {
+          _aiResponse = analysis;
+          _findings = parsed;
+          _notes = notes;
+          _isComplete = true;
+          _statusMessage = 'Analysis complete. Returning results...';
+        });
+
+        // Auto-return results after brief display.
+        await Future.delayed(const Duration(seconds: 3));
+        if (mounted && _isComplete) {
+          _completeAssessment();
+          return;
+        }
+      } else {
+        debugPrint('[MALAIKA] Vision analysis returned null/short. '
+            'Response: "${analysis ?? "null"}"');
+        setState(() {
+          _statusMessage = 'Could not analyze photo. Tap X to continue.';
+          _isAnalyzing = false;
+        });
+      }
     } catch (e) {
-      debugPrint('[MALAIKA] Camera init error: $e');
-      setState(() => _statusMessage = 'Camera error: $e');
+      debugPrint('[MALAIKA] Photo analysis error: $e');
+      setState(() {
+        _statusMessage = 'Vision error. Tap X to continue without photo.';
+        _isAnalyzing = false;
+      });
     }
   }
 
-  // --------------------------------------------------------------------------
-  // Frame Capture & Analysis
-  // --------------------------------------------------------------------------
-
-  Future<void> _startMonitoring() async {
-    if (!_isCameraReady || !widget.modelLoaded) return;
-
-    setState(() {
-      _statusMessage = 'Preparing vision model...';
-      _isAnalyzing = true;
-    });
-
-    // Create ONE vision session — reused for all frames.
+  Future<String?> _analyzePhoto(Uint8List imageBytes) async {
+    dynamic visionChat;
     try {
       final model = await FlutterGemma.getActiveModel(
-        maxTokens: 150,
+        maxTokens: 512,
         supportImage: true,
         maxNumImages: 1,
       );
-      _visionChat = await model.createChat(
-        temperature: 0.2,
-        topK: 40,
+      visionChat = await model.createChat(
+        temperature: 0.1,
+        topK: 20,
         supportImage: true,
-        systemInstruction:
-            'You are a clinical health assistant. Analyze each image precisely. '
-            'Report findings in the structured format requested.',
+        systemInstruction: _visionSystem,
       );
-      debugPrint('[MALAIKA] Vision session created');
-    } catch (e) {
-      debugPrint('[MALAIKA] Vision session error: $e');
-      setState(() => _statusMessage = 'Vision model error: $e');
-      return;
-    }
+      debugPrint('[MALAIKA] Vision session created for photo');
+      debugPrint('[MALAIKA] ===== VISION INPUT =====');
+      debugPrint('[MALAIKA] Image: ${imageBytes.length} bytes '
+          '(${(imageBytes.length / 1024).toStringAsFixed(1)} KB)');
+      debugPrint('[MALAIKA] Prompt: $_photoPrompt');
+      debugPrint('[MALAIKA] ==========================');
 
-    setState(() {
-      _statusMessage = 'Scanning... Hold camera steady on the child.';
-    });
-
-    // Capture first frame immediately, then every N seconds.
-    _captureAndAnalyze();
-    _captureTimer = Timer.periodic(
-      Duration(seconds: _captureIntervalSec),
-      (_) => _captureAndAnalyze(),
-    );
-  }
-
-  Future<void> _captureAndAnalyze() async {
-    if (!mounted || _isCapturing || _isComplete) return;
-    if (_cameraController == null || !_cameraController!.value.isInitialized) {
-      return;
-    }
-
-    _isCapturing = true;
-    final frameNum = _aggregator.totalFrames + 1;
-
-    try {
-      final xFile = await _cameraController!.takePicture();
-      final imageBytes = await xFile.readAsBytes();
-
-      debugPrint('[MALAIKA] Frame $frameNum: captured ${imageBytes.length} bytes '
-          '(${(imageBytes.length / 1024).toStringAsFixed(0)} KB)');
-
-      setState(() {
-        _statusMessage = 'Gemma 4 analyzing frame $frameNum/$_targetFrames...';
-      });
-
-      final analysis = await _analyzeWithGemma(imageBytes);
-
-      if (analysis != null && mounted) {
-        debugPrint('[MALAIKA] Frame $frameNum response: $analysis');
-
-        // Store raw response for transparency.
-        _frameResponses.add(analysis);
-
-        final frameFindings = _parseVisionResponse(analysis);
-        final notes = _extractNotes(analysis);
-        _aggregator.addFrame(frameFindings, notes);
-
-        setState(() {
-          _statusMessage = _aggregator.totalFrames >= _targetFrames
-              ? 'Scan complete! Review findings below.'
-              : 'Frame ${_aggregator.totalFrames}/$_targetFrames done.';
-        });
-      } else {
-        debugPrint('[MALAIKA] Frame $frameNum: no response from Gemma');
-        _frameResponses.add('(no response)');
-      }
-
-      if (_aggregator.totalFrames >= _targetFrames) {
-        _captureTimer?.cancel();
-        setState(() => _isComplete = true);
-      }
-    } catch (e) {
-      debugPrint('[MALAIKA] Frame $frameNum error: $e');
-      _frameResponses.add('(error: $e)');
-    } finally {
-      _isCapturing = false;
-    }
-  }
-
-  /// Send image to Gemma 4 E2B for clinical vision analysis.
-  /// Reuses the single vision session created in _startMonitoring.
-  Future<String?> _analyzeWithGemma(Uint8List imageBytes) async {
-    if (_visionChat == null) {
-      debugPrint('[MALAIKA] No vision session');
-      return null;
-    }
-
-    try {
-      await _visionChat!.addQuery(Message(
-        text: _clinicalPrompt,
+      await visionChat.addQuery(Message(
+        text: _photoPrompt,
         isUser: true,
         imageBytes: imageBytes,
       ));
 
-      final response = await _visionChat!.generateChatResponse();
+      final response = await visionChat.generateChatResponse();
 
       if (response is TextResponse) {
-        final text = response.token.trim();
-        debugPrint('[MALAIKA] Vision frame: $text');
-        return text;
+        return response.token.trim();
       }
       return null;
     } catch (e) {
       debugPrint('[MALAIKA] Gemma vision error: $e');
       return null;
+    } finally {
+      try { await (visionChat as dynamic)?.close(); } catch (_) {}
     }
   }
 
-  /// Parse structured vision response into boolean findings.
-  Map<String, bool> _parseVisionResponse(String response) {
+  // --------------------------------------------------------------------------
+  // Parsing
+  // --------------------------------------------------------------------------
+
+  Map<String, bool> _parseResponse(String response) {
     final upper = response.toUpperCase();
+
+    String valueFor(String label) {
+      final pattern = RegExp('$label\\s*:\\s*(.+)', caseSensitive: false);
+      final match = pattern.firstMatch(upper);
+      return match?.group(1)?.trim() ?? '';
+    }
+
+    final alertVal = valueFor('ALERTNESS');
+    final dehydVal = valueFor('DEHYDRATION');
+    final nutriVal = valueFor('NUTRITION');
+
     return {
-      'lethargic': upper.contains('LETHARGIC') ||
-          upper.contains('UNCONSCIOUS'),
-      'chest_indrawing': upper.contains('INDRAWING') &&
-          !upper.contains('NO_INDRAWING') &&
-          !upper.contains('NO INDRAWING'),
-      'dehydration': upper.contains('DEHYDRATED') &&
-          !upper.contains('NOT_DEHYDRATED') &&
-          !upper.contains('NOT DEHYDRATED'),
-      'wasting': upper.contains('WASTING') &&
-          !upper.contains('NO WASTING') &&
-          !upper.contains('NORMAL'),
-      'edema': upper.contains('EDEMA') &&
-          !upper.contains('NO EDEMA') &&
-          !upper.contains('NO_EDEMA'),
+      'lethargic': alertVal.startsWith('LETHARGIC') ||
+          alertVal.startsWith('UNCONSCIOUS'),
+      'chest_indrawing': false,
+      'dehydration': dehydVal.startsWith('DEHYDRATED') &&
+          !dehydVal.startsWith('NOT'),
+      'wasting': nutriVal.startsWith('WASTING') ||
+          nutriVal.startsWith('BOTH'),
+      'edema': nutriVal.startsWith('EDEMA') ||
+          nutriVal.startsWith('BOTH'),
     };
   }
 
-  /// Extract the NOTES line from the response.
   String _extractNotes(String response) {
     for (final line in response.split('\n')) {
       if (line.toUpperCase().startsWith('NOTES:')) {
@@ -320,16 +267,34 @@ class _CameraMonitorScreenState extends State<CameraMonitorScreen>
     return '';
   }
 
+  // --------------------------------------------------------------------------
+  // Actions
+  // --------------------------------------------------------------------------
+
   void _completeAssessment() {
-    final result = CameraMonitorResult(
-      findings: _aggregator.findings,
-      framesAnalyzed: _aggregator.totalFrames,
-      notes: _aggregator.notes,
-    );
-    Navigator.of(context).pop(result);
+    if (_findings == null) return;
+
+    final visionFindings = <String, VisionFinding>{};
+    for (final entry in _findings!.entries) {
+      visionFindings[entry.key] = VisionFinding(
+        key: entry.key,
+        detectedCount: entry.value ? 1 : 0,
+        totalFrames: 1,
+      );
+    }
+
+    Navigator.of(context).pop(CameraMonitorResult(
+      findings: visionFindings,
+      framesAnalyzed: 1,
+      notes: _notes.isNotEmpty ? [_notes] : [],
+    ));
   }
 
-  void _skipVision() {
+  void _skip() {
+    if (_isComplete && _findings != null) {
+      _completeAssessment();
+      return;
+    }
     Navigator.of(context).pop(null);
   }
 
@@ -339,16 +304,22 @@ class _CameraMonitorScreenState extends State<CameraMonitorScreen>
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.black,
-      body: SafeArea(
-        child: Column(
-          children: [
-            _buildHeader(),
-            Expanded(child: _buildCameraPreview()),
-            _buildFindingsOverlay(),
-            _buildControls(),
-          ],
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop) return;
+        _skip();
+      },
+      child: Scaffold(
+        backgroundColor: Colors.black,
+        body: SafeArea(
+          child: Column(
+            children: [
+              _buildHeader(),
+              Expanded(child: _isComplete ? _buildResults() : _buildPrompt()),
+              _buildControls(),
+            ],
+          ),
         ),
       ),
     );
@@ -362,7 +333,7 @@ class _CameraMonitorScreenState extends State<CameraMonitorScreen>
         children: [
           IconButton(
             icon: const Icon(Icons.close, color: Colors.white),
-            onPressed: _skipVision,
+            onPressed: _skip,
           ),
           const SizedBox(width: 8),
           Expanded(
@@ -370,7 +341,7 @@ class _CameraMonitorScreenState extends State<CameraMonitorScreen>
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 const Text(
-                  'Vision Assessment',
+                  'Photo Assessment',
                   style: TextStyle(
                     color: Colors.white,
                     fontSize: 16,
@@ -391,23 +362,23 @@ class _CameraMonitorScreenState extends State<CameraMonitorScreen>
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
               decoration: BoxDecoration(
-                color: MalaikaColors.red.withValues(alpha: 0.8),
+                color: MalaikaColors.primary.withValues(alpha: 0.8),
                 borderRadius: BorderRadius.circular(12),
               ),
-              child: Row(
+              child: const Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Container(
-                    width: 8,
-                    height: 8,
-                    decoration: const BoxDecoration(
+                  SizedBox(
+                    width: 12,
+                    height: 12,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
                       color: Colors.white,
-                      shape: BoxShape.circle,
                     ),
                   ),
-                  const SizedBox(width: 6),
-                  const Text(
-                    'SCANNING',
+                  SizedBox(width: 6),
+                  Text(
+                    'ANALYZING',
                     style: TextStyle(
                       color: Colors.white,
                       fontSize: 10,
@@ -447,280 +418,266 @@ class _CameraMonitorScreenState extends State<CameraMonitorScreen>
     );
   }
 
-  Widget _buildCameraPreview() {
-    if (!_isCameraReady || _cameraController == null) {
-      return const Center(
+  Widget _buildPrompt() {
+    if (_isAnalyzing) {
+      return Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            CircularProgressIndicator(color: Colors.white),
-            SizedBox(height: 16),
-            Text(
-              'Starting camera...',
+            const CircularProgressIndicator(color: Colors.white),
+            const SizedBox(height: 16),
+            const Text(
+              'Gemma 4 is analyzing the photo...',
               style: TextStyle(color: Colors.white70, fontSize: 14),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'This takes about 25 seconds',
+              style: TextStyle(
+                color: Colors.white.withValues(alpha: 0.4),
+                fontSize: 12,
+              ),
             ),
           ],
         ),
       );
     }
 
-    return Stack(
-      fit: StackFit.expand,
-      children: [
-        // Camera preview
-        ClipRRect(
-          borderRadius: BorderRadius.circular(12),
-          child: AspectRatio(
-            aspectRatio: _cameraController!.value.aspectRatio,
-            child: CameraPreview(_cameraController!),
-          ),
-        ),
-        // Scanning overlay animation
-        if (_isAnalyzing && !_isComplete)
-          Positioned.fill(
-            child: _ScanOverlay(isCapturing: _isCapturing),
-          ),
-        // Frame counter
-        if (_aggregator.totalFrames > 0)
-          Positioned(
-            top: 12,
-            right: 12,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+    // Show captured image if available, otherwise show instructions
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 80,
+              height: 80,
               decoration: BoxDecoration(
-                color: Colors.black54,
-                borderRadius: BorderRadius.circular(20),
+                color: MalaikaColors.primary.withValues(alpha: 0.15),
+                borderRadius: BorderRadius.circular(24),
               ),
-              child: Text(
-                '${_aggregator.totalFrames}/$_targetFrames',
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 14,
-                  fontWeight: FontWeight.w700,
+              child: const Icon(
+                Icons.photo_library_rounded,
+                size: 40,
+                color: MalaikaColors.primary,
+              ),
+            ),
+            const SizedBox(height: 24),
+            const Text(
+              'Visual Assessment',
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 18,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              'Choose a photo of the child showing their face and body. '
+              'Gemma 4 will check for signs of dehydration, wasting, '
+              'and alertness.',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: Colors.white.withValues(alpha: 0.6),
+                fontSize: 13,
+                height: 1.5,
+              ),
+            ),
+            const SizedBox(height: 24),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.05),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: Colors.white.withValues(alpha: 0.1),
                 ),
               ),
-            ),
-          ),
-        // Progress bar
-        if (_isAnalyzing)
-          Positioned(
-            bottom: 0,
-            left: 0,
-            right: 0,
-            child: LinearProgressIndicator(
-              value: _aggregator.totalFrames / _targetFrames,
-              backgroundColor: Colors.white24,
-              valueColor: AlwaysStoppedAnimation<Color>(
-                _isComplete ? MalaikaColors.green : MalaikaColors.primary,
+              child: Column(
+                children: [
+                  _tipRow(Icons.visibility, 'Face clearly visible'),
+                  const SizedBox(height: 8),
+                  _tipRow(Icons.child_care, 'Body visible (arms, chest)'),
+                  const SizedBox(height: 8),
+                  _tipRow(Icons.light_mode, 'Good lighting'),
+                ],
               ),
-              minHeight: 4,
             ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _tipRow(IconData icon, String text) {
+    return Row(
+      children: [
+        Icon(icon, size: 16, color: MalaikaColors.primary),
+        const SizedBox(width: 10),
+        Text(
+          text,
+          style: TextStyle(
+            color: Colors.white.withValues(alpha: 0.6),
+            fontSize: 12,
           ),
+        ),
       ],
     );
   }
 
-  Widget _buildFindingsOverlay() {
-    final findings = _aggregator.findings;
-    if (findings.isEmpty && !_isAnalyzing) {
-      return const SizedBox.shrink();
-    }
-
-    return Expanded(
-      flex: 0,
-      child: Container(
-        constraints: const BoxConstraints(maxHeight: 300),
-        margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        decoration: BoxDecoration(
-          color: const Color(0xFF1E1E1E),
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: Colors.white12),
-        ),
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(14),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // Header
-              Row(
-                children: [
-                  Icon(
-                    _isComplete
-                        ? Icons.check_circle_rounded
-                        : Icons.visibility_rounded,
-                    color: _isComplete ? MalaikaColors.green : Colors.white70,
-                    size: 16,
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
-                    _isComplete ? 'Scan Complete' : 'Live Findings',
-                    style: TextStyle(
-                      color: _isComplete ? MalaikaColors.green : Colors.white,
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  if (_aggregator.totalFrames > 0) ...[
-                    const Spacer(),
-                    Text(
-                      '${_aggregator.totalFrames} frames',
-                      style:
-                          const TextStyle(color: Colors.white38, fontSize: 11),
-                    ),
-                  ],
-                ],
-              ),
-
-              // Aggregated findings
-              if (findings.isNotEmpty) ...[
-                const SizedBox(height: 12),
-                _findingRow('Alertness', 'lethargic', findings,
-                    trueLabel: 'LETHARGIC', falseLabel: 'ALERT'),
-                _findingRow('Chest', 'chest_indrawing', findings,
-                    trueLabel: 'INDRAWING', falseLabel: 'CLEAR'),
-                _findingRow('Dehydration', 'dehydration', findings,
-                    trueLabel: 'DETECTED', falseLabel: 'NONE'),
-                _findingRow('Wasting', 'wasting', findings,
-                    trueLabel: 'DETECTED', falseLabel: 'NONE'),
-                _findingRow('Edema', 'edema', findings,
-                    trueLabel: 'DETECTED', falseLabel: 'NONE'),
-              ] else if (_isAnalyzing) ...[
-                const SizedBox(height: 12),
-                const Text(
-                  'Waiting for first frame analysis...',
-                  style: TextStyle(color: Colors.white38, fontSize: 12),
-                ),
-              ],
-
-              // Raw AI observations — transparency
-              if (_frameResponses.isNotEmpty) ...[
-                const SizedBox(height: 14),
-                Container(
-                  width: double.infinity,
-                  height: 1,
-                  color: Colors.white12,
-                ),
-                const SizedBox(height: 10),
+  Widget _buildResults() {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Findings card
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: const Color(0xFF1E1E1E),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: Colors.white12),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
                 const Row(
                   children: [
-                    Icon(Icons.psychology_rounded,
-                        size: 14, color: Colors.white38),
-                    SizedBox(width: 6),
+                    Icon(Icons.check_circle_rounded,
+                        color: MalaikaColors.green, size: 16),
+                    SizedBox(width: 8),
                     Text(
-                      'What Gemma 4 Sees',
+                      'Photo Analysis Complete',
                       style: TextStyle(
-                        color: Colors.white54,
-                        fontSize: 11,
+                        color: MalaikaColors.green,
+                        fontSize: 13,
                         fontWeight: FontWeight.w600,
                       ),
                     ),
                   ],
                 ),
-                const SizedBox(height: 8),
-                ..._frameResponses.asMap().entries.map((entry) {
-                  return Padding(
-                    padding: const EdgeInsets.only(bottom: 8),
-                    child: Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.all(10),
-                      decoration: BoxDecoration(
-                        color: Colors.white.withValues(alpha: 0.05),
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(
-                            color: Colors.white.withValues(alpha: 0.08)),
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'Frame ${entry.key + 1}',
-                            style: const TextStyle(
-                              color: Colors.white54,
-                              fontSize: 10,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            entry.value,
-                            style: const TextStyle(
-                              color: Colors.white70,
-                              fontSize: 11,
-                              height: 1.4,
-                            ),
-                          ),
-                        ],
-                      ),
+                const SizedBox(height: 16),
+                if (_findings != null) ...[
+                  _findingRow('Alertness', 'lethargic',
+                      trueLabel: 'LETHARGIC', falseLabel: 'ALERT'),
+                  _findingRow('Dehydration', 'dehydration',
+                      trueLabel: 'DETECTED', falseLabel: 'NONE'),
+                  _findingRow('Wasting', 'wasting',
+                      trueLabel: 'DETECTED', falseLabel: 'NONE'),
+                  _findingRow('Edema', 'edema',
+                      trueLabel: 'DETECTED', falseLabel: 'NONE'),
+                  const SizedBox(height: 8),
+                  Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.05),
+                      borderRadius: BorderRadius.circular(8),
                     ),
-                  );
-                }),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.info_outline,
+                            size: 14, color: Colors.white38),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: Text(
+                            'Chest indrawing requires breathing observation '
+                            '(assessed during Q&A)',
+                            style: TextStyle(
+                              color: Colors.white.withValues(alpha: 0.4),
+                              fontSize: 11,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
               ],
-            ],
+            ),
           ),
-        ),
+          const SizedBox(height: 12),
+          // Raw AI response
+          if (_aiResponse != null)
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: const Color(0xFF1E1E1E),
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: Colors.white12),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Row(
+                    children: [
+                      Icon(Icons.psychology_rounded,
+                          size: 14, color: Colors.white38),
+                      SizedBox(width: 6),
+                      Text(
+                        'What Gemma 4 Sees',
+                        style: TextStyle(
+                          color: Colors.white54,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  Text(
+                    _aiResponse!,
+                    style: const TextStyle(
+                      color: Colors.white70,
+                      fontSize: 12,
+                      height: 1.5,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+        ],
       ),
     );
   }
 
   Widget _findingRow(
     String label,
-    String key,
-    Map<String, VisionFinding> findings, {
+    String key, {
     required String trueLabel,
     required String falseLabel,
   }) {
-    final finding = findings[key];
-    if (finding == null) {
-      return Padding(
-        padding: const EdgeInsets.symmetric(vertical: 4),
-        child: Row(
-          children: [
-            SizedBox(
-              width: 100,
-              child: Text(label,
-                  style: const TextStyle(color: Colors.white54, fontSize: 12)),
-            ),
-            const Text('--',
-                style: TextStyle(color: Colors.white24, fontSize: 12)),
-          ],
-        ),
-      );
-    }
-
-    final detected = finding.detected;
-    final isWarning = detected; // Detection = potential concern
-    final color = isWarning ? MalaikaColors.yellow : MalaikaColors.green;
-    final statusLabel = detected ? trueLabel : falseLabel;
+    final detected = _findings?[key] ?? false;
+    final color = detected ? MalaikaColors.yellow : MalaikaColors.green;
 
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
+      padding: const EdgeInsets.symmetric(vertical: 5),
       child: Row(
         children: [
           SizedBox(
             width: 100,
             child: Text(label,
-                style: const TextStyle(color: Colors.white70, fontSize: 12)),
+                style: const TextStyle(color: Colors.white70, fontSize: 13)),
           ),
           Icon(
             detected
                 ? Icons.warning_amber_rounded
                 : Icons.check_circle_rounded,
             color: color,
-            size: 14,
+            size: 16,
           ),
-          const SizedBox(width: 6),
+          const SizedBox(width: 8),
           Text(
-            statusLabel,
+            detected ? trueLabel : falseLabel,
             style: TextStyle(
               color: color,
-              fontSize: 12,
+              fontSize: 13,
               fontWeight: FontWeight.w600,
             ),
-          ),
-          const Spacer(),
-          Text(
-            finding.confidenceLabel,
-            style: const TextStyle(color: Colors.white38, fontSize: 10),
           ),
         ],
       ),
@@ -738,11 +695,10 @@ class _CameraMonitorScreenState extends State<CameraMonitorScreen>
       color: Colors.black,
       child: Row(
         children: [
-          // Skip button
-          if (!_isAnalyzing)
+          if (!_isComplete)
             Expanded(
               child: OutlinedButton(
-                onPressed: _skipVision,
+                onPressed: _isAnalyzing ? null : _skip,
                 style: OutlinedButton.styleFrom(
                   foregroundColor: Colors.white70,
                   side: const BorderSide(color: Colors.white24),
@@ -751,31 +707,25 @@ class _CameraMonitorScreenState extends State<CameraMonitorScreen>
                     borderRadius: BorderRadius.circular(12),
                   ),
                 ),
-                child: const Text('Skip Vision'),
+                child: const Text('Skip'),
               ),
             ),
-          if (!_isAnalyzing) const SizedBox(width: 12),
-          // Start / Complete button
+          if (!_isComplete) const SizedBox(width: 12),
           Expanded(
-            flex: _isAnalyzing ? 1 : 1,
             child: ElevatedButton.icon(
               onPressed: _isAnalyzing
-                  ? (_aggregator.totalFrames > 0 ? _completeAssessment : null)
-                  : _startMonitoring,
+                  ? null
+                  : _isComplete
+                      ? _completeAssessment
+                      : _captureAndAnalyze,
               icon: Icon(
                 _isComplete
                     ? Icons.check_rounded
-                    : _isAnalyzing
-                        ? Icons.stop_rounded
-                        : Icons.play_arrow_rounded,
+                    : Icons.photo_library_rounded,
                 size: 20,
               ),
               label: Text(
-                _isComplete
-                    ? 'View Results'
-                    : _isAnalyzing
-                        ? 'Complete (${_aggregator.totalFrames}/$_targetFrames)'
-                        : 'Start Scan',
+                _isComplete ? 'Use Results' : 'Choose Photo',
               ),
               style: ElevatedButton.styleFrom(
                 backgroundColor:
@@ -793,118 +743,4 @@ class _CameraMonitorScreenState extends State<CameraMonitorScreen>
       ),
     );
   }
-}
-
-// =============================================================================
-// Scan Overlay Animation
-// =============================================================================
-
-class _ScanOverlay extends StatefulWidget {
-  final bool isCapturing;
-  const _ScanOverlay({required this.isCapturing});
-
-  @override
-  State<_ScanOverlay> createState() => _ScanOverlayState();
-}
-
-class _ScanOverlayState extends State<_ScanOverlay>
-    with SingleTickerProviderStateMixin {
-  late AnimationController _controller;
-
-  @override
-  void initState() {
-    super.initState();
-    _controller = AnimationController(
-      vsync: this,
-      duration: const Duration(seconds: 2),
-    )..repeat();
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AnimatedBuilder(
-      animation: _controller,
-      builder: (context, _) {
-        return CustomPaint(
-          painter: _ScanLinePainter(
-            progress: _controller.value,
-            isCapturing: widget.isCapturing,
-          ),
-        );
-      },
-    );
-  }
-}
-
-class _ScanLinePainter extends CustomPainter {
-  final double progress;
-  final bool isCapturing;
-
-  _ScanLinePainter({required this.progress, required this.isCapturing});
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    // Corner brackets
-    final bracketPaint = Paint()
-      ..color = isCapturing
-          ? MalaikaColors.yellow.withValues(alpha: 0.8)
-          : MalaikaColors.primary.withValues(alpha: 0.6)
-      ..strokeWidth = 3
-      ..style = PaintingStyle.stroke;
-
-    const bracketLen = 30.0;
-    const margin = 24.0;
-
-    // Top-left
-    canvas.drawLine(
-        Offset(margin, margin), Offset(margin + bracketLen, margin),
-        bracketPaint);
-    canvas.drawLine(
-        Offset(margin, margin), Offset(margin, margin + bracketLen),
-        bracketPaint);
-    // Top-right
-    canvas.drawLine(Offset(size.width - margin, margin),
-        Offset(size.width - margin - bracketLen, margin), bracketPaint);
-    canvas.drawLine(Offset(size.width - margin, margin),
-        Offset(size.width - margin, margin + bracketLen), bracketPaint);
-    // Bottom-left
-    canvas.drawLine(Offset(margin, size.height - margin),
-        Offset(margin + bracketLen, size.height - margin), bracketPaint);
-    canvas.drawLine(Offset(margin, size.height - margin),
-        Offset(margin, size.height - margin - bracketLen), bracketPaint);
-    // Bottom-right
-    canvas.drawLine(
-        Offset(size.width - margin, size.height - margin),
-        Offset(size.width - margin - bracketLen, size.height - margin),
-        bracketPaint);
-    canvas.drawLine(
-        Offset(size.width - margin, size.height - margin),
-        Offset(size.width - margin, size.height - margin - bracketLen),
-        bracketPaint);
-
-    // Scanning line
-    final lineY =
-        margin + (size.height - 2 * margin) * progress;
-    final linePaint = Paint()
-      ..shader = LinearGradient(
-        colors: [
-          Colors.transparent,
-          MalaikaColors.primary.withValues(alpha: 0.6),
-          Colors.transparent,
-        ],
-      ).createShader(
-          Rect.fromLTWH(margin, lineY, size.width - 2 * margin, 2));
-    canvas.drawLine(
-        Offset(margin, lineY), Offset(size.width - margin, lineY), linePaint);
-  }
-
-  @override
-  bool shouldRepaint(covariant _ScanLinePainter old) =>
-      old.progress != progress || old.isCapturing != isCapturing;
 }

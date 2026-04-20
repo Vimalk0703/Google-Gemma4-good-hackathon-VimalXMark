@@ -88,6 +88,28 @@ adapters/                 # Fine-tuned LoRA adapter weights
 configs/                  # YAML/JSON config files
 data/                     # Datasets (gitignored, downloaded via scripts)
 docs/                     # Engineering documentation (see below)
+
+malaika_flutter/          # PRIMARY DEMO — Android app with Gemma 4 E2B
+  lib/
+    screens/
+      splash_screen.dart        # Model download + GPU initialization
+      dashboard_screen.dart     # Main menu
+      home_screen.dart          # IMCI Q&A orchestrator (~970 lines)
+      camera_monitor_screen.dart # Gallery photo picker + vision analysis
+    core/
+      imci_questionnaire.dart   # Structured IMCI questions + answer parsing
+      imci_protocol.dart        # WHO thresholds + deterministic classification
+      imci_types.dart           # Enums for severity, classification
+      reconciliation_engine.dart # Q&A vs vision cross-reference
+    theme/
+      malaika_theme.dart        # Brand colors, severity colors
+    widgets/
+      chat_bubble.dart          # Chat UI bubbles
+      imci_progress_bar.dart    # Step progress indicator
+      classification_card.dart  # WHO classification display
+      reasoning_card.dart       # Extracted findings display
+    inference/
+      model_manager.dart        # Model path management (legacy GGUF fallback)
 ```
 
 ---
@@ -107,11 +129,39 @@ Read these before writing any code. They are the law.
 
 ---
 
+## Phone App — What ACTUALLY Works (tested Apr 19, 2026)
+
+The Flutter Android app is the PRIMARY demo. Here is exactly what it does and doesn't do:
+
+| Feature | Status | Details |
+|---------|--------|---------|
+| Text-based IMCI Q&A | **WORKS** | ~20 structured questions, Gemma narrates naturally |
+| Photo from gallery → vision analysis | **WORKS** | Gallery picker, Gemma checks alertness/dehydration/wasting/edema |
+| Q&A vs vision reconciliation | **WORKS** | Cross-references verbal + visual findings, generates warnings |
+| WHO IMCI classification | **WORKS** | Deterministic code, not LLM output |
+| Final report with severity | **WORKS** | LLM summary + structured treatment actions |
+| Fully offline | **WORKS** | All intelligence from on-device Gemma 4 E2B |
+| In-app camera preview | **NO** | Mali GPU can't hold model + camera simultaneously |
+| System camera (take photo) | **NO** | Android OOM-kills app when it backgrounds |
+| Voice input/output | **NO** | Text-only on phone (voice is Python/Colab only) |
+| Breathing rate from video | **NO** | No video processing on phone |
+| Chest indrawing detection | **NO** | Requires motion observation, photo can't capture |
+| Audio/breath sounds | **NO** | No microphone input in Flutter app |
+| Real-time monitoring | **NO** | Single photo assessment, not continuous |
+
+### GPU Memory Constraint (Samsung A53, Mali G68)
+- Gemma 4 E2B uses ~2.3GB of ~2.5GB GPU
+- Camera preview surfaces crash the driver (no headroom)
+- Gallery picker works because it's in-process, no GPU allocation
+- Fresh LLM session per inference prevents KV cache accumulation crash
+
+---
+
 ## Quick Reference
 
 ### Models
 - **Gemma 4 E4B** (4.5B active): Demo machine via Transformers. Fine-tuned with LoRA. ~5-6GB VRAM in 4-bit.
-- **Gemma 4 E2B** (2.3B active): Phone via LiteRT-LM. Base model. 50+ tok/s, 2.58GB disk. Video proof.
+- **Gemma 4 E2B** (2.3B active): Phone via LiteRT-LM. Base model. 50+ tok/s, 2.58GB disk.
 
 ### IMCI Flow
 ```
@@ -144,12 +194,12 @@ ruff format malaika/ tests/
 pytest tests/test_imci_protocol.py -v
 ```
 
-### Feature Flags (configs/features.yaml)
+### Feature Flags (configs/features.yaml — Python/Colab only)
 ```yaml
-enable_heart_rate: false    # MEMS heart module — GO/NO-GO decision pending
-enable_tts: true            # Piper TTS spoken output
-enable_video_breathing: true # Breathing rate from video (vs frame-by-frame fallback)
-enable_multilingual: true   # Multi-language support
+enable_heart_rate: false    # MEMS heart module — not implemented
+enable_tts: true            # Piper TTS spoken output (Colab only, not on phone)
+enable_video_breathing: false # NOT IMPLEMENTED on phone — single photo only
+enable_multilingual: true   # Multi-language support (model supports it)
 ```
 
 ---
@@ -200,13 +250,31 @@ These patterns elevate Malaika from hackathon code to production-grade AI:
 
 This boundary is sacred. Never blur it.
 
-| Gemma 4 (AI Perception — via Skills) | Deterministic Code (Classification — imci_protocol.py) |
-|---------------------------------------|--------------------------------------------------------|
+### On Phone (Flutter — the primary demo)
+
+| Gemma 4 E2B on Device | Deterministic Code (Dart) |
+|------------------------|--------------------------|
+| Rephrase IMCI questions naturally for caregivers | Manage Q&A state machine (`imci_questionnaire.dart`) |
+| Analyze photo for alertness (eyes open? body limp?) | Parse vision response → boolean findings |
+| Analyze photo for dehydration (sunken eyes? dry lips?) | Compare Q&A vs vision findings (`reconciliation_engine.dart`) |
+| Analyze photo for wasting/edema (ribs visible? swollen feet?) | Apply WHO IMCI thresholds (`imci_protocol.dart`) |
+| Generate caring summary report | Select treatment template based on classification |
+
+**What the phone app does NOT do** (Python/Colab only):
+- Voice conversation (STT/TTS) — phone is text-only
+- Breathing rate from video — phone uses single photo from gallery
+- Chest indrawing detection — requires observing breathing motion
+- Audio/breath sound classification — no microphone input in Flutter
+- Real-time continuous monitoring — single photo assessment
+- 12-skill agentic architecture — phone uses simplified Q&A + vision
+
+### On GPU/Colab (Python — supplementary demo)
+
+| Gemma 4 E4B on GPU | Deterministic Code (Python) |
+|---------------------|----------------------------|
 | Understand speech in any language (`parse_caregiver_response`) | Parse findings into `_fields_answered` set |
 | Analyze images for alertness (`assess_alertness`) | Compare against WHO danger sign criteria (p.2) |
-| Detect chest indrawing (`detect_chest_indrawing`) | Apply `if has_indrawing: classify("severe_pneumonia")` |
 | Classify breath sounds (`classify_breath_sounds`) | Route IMCI state machine transitions |
-| Count breathing rate from video (`count_breathing_rate`) | Apply `if rate >= 50: classify("fast_breathing")` |
 | Assess dehydration from photo (`assess_dehydration_signs`) | Count dehydration signs → severity level |
 | Generate treatment instructions (`generate_treatment`) | Select treatment template based on classification |
 | Emit structured events for UI | Render skill cards, classification cards, progress bar |
@@ -224,6 +292,8 @@ This boundary is sacred. Never blur it.
 | 5: Video + Submit | May 10-18 | Video production, writeup, submission | |
 
 **Phase 1 Completed**: 104+ tests passing, 21/21 golden scenarios, skills-based agent architecture, voice pipeline with sentence-level TTS, Colab deployment via ngrok, fine-tuning v1-v5 (spectrogram approach).
+
+**Phase 2 In Progress (Apr 19)**: Full IMCI Q&A + gallery photo vision analysis working end-to-end on Samsung A53. Reconciliation engine cross-references Q&A vs vision. All GPU crash issues resolved (fresh sessions, gallery picker). Text-only on phone (voice is Colab-only).
 
 ---
 

@@ -42,10 +42,60 @@ class VoiceService {
       _sttAvailable = false;
     }
 
-    // TTS — uses Samsung TTS / Google TTS engine (offline, pre-installed)
+    // TTS — prefer Google TTS (neural voices, more natural than Samsung TTS)
     try {
+      final engines = await _tts.getEngines;
+      debugPrint('[VOICE] TTS engines: $engines');
+
+      // Switch to Google TTS if available
+      final engineList = engines is List ? engines : [];
+      if (engineList.any((e) => e.toString().contains('google'))) {
+        await _tts.setEngine('com.google.android.tts');
+        debugPrint('[VOICE] Using Google TTS engine');
+      }
+
       await _tts.setLanguage('en-US');
-      await _tts.setSpeechRate(0.45); // Slightly slow for medical context
+
+      // Pick the best available voice
+      final voices = await _tts.getVoices;
+      if (voices is List) {
+        final enVoices = voices
+            .where((v) => v is Map &&
+                (v['locale']?.toString().startsWith('en') ?? false))
+            .toList();
+        debugPrint('[VOICE] Found ${enVoices.length} English voices:');
+        for (final v in enVoices) {
+          debugPrint('[VOICE]   ${v}');
+        }
+        // Prefer Google's high-quality neural female voices — LOCAL only (offline)
+        // tpf = female, iol = female, iob = female, iog = female
+        // iom = male, tpc/tpd = male, sfg = male
+        final preferredNames = [
+          'en-us-x-tpf-local',
+          'en-us-x-iol-local',
+          'en-us-x-iob-local',
+          'en-us-x-iog-local',
+        ];
+        Map? bestVoice;
+        for (final name in preferredNames) {
+          final match = enVoices.where((v) =>
+              v is Map && v['name']?.toString() == name).firstOrNull;
+          if (match != null) {
+            bestVoice = match as Map;
+            break;
+          }
+        }
+        if (bestVoice != null) {
+          await _tts.setVoice({
+            'name': bestVoice['name'].toString(),
+            'locale': bestVoice['locale'].toString(),
+          });
+          debugPrint('[VOICE] Selected voice: ${bestVoice['name']}');
+        }
+      }
+
+      await _tts.setSpeechRate(0.48);
+      await _tts.setPitch(1.05); // Slightly warm tone
       await _tts.setVolume(1.0);
       _tts.setCompletionHandler(() => onSpeakingDone?.call());
     } catch (e) {

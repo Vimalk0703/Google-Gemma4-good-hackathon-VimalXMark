@@ -9,6 +9,7 @@ import '../widgets/reasoning_card.dart';
 import '../core/imci_questionnaire.dart';
 import '../core/reconciliation_engine.dart';
 import '../core/voice_service.dart';
+import '../widgets/voice_waveform.dart';
 import 'camera_monitor_screen.dart';
 
 /// IMCI assessment using structured Q&A collection + LLM narration.
@@ -41,8 +42,8 @@ class _HomeScreenState extends State<HomeScreen> {
   /// Voice service — offline STT + TTS on CPU.
   final VoiceService _voice = VoiceService();
   bool _voiceReady = false;
+  bool _voiceMode = false; // Continuous voice — one tap to activate
   String _partialText = '';
-  bool _lastInputWasVoice = false;
 
   /// The questionnaire manages all IMCI Q&A state.
   final ImciQuestionnaire _q = ImciQuestionnaire();
@@ -93,11 +94,21 @@ class _HomeScreenState extends State<HomeScreen> {
       if (mounted) setState(() => _partialText = text);
     };
     _voice.onListeningStopped = () {
-      if (mounted && _voiceState == VoiceState.listening) {
-        setState(() {
-          _voiceState = VoiceState.idle;
-          _partialText = '';
-        });
+      if (!mounted) return;
+      if (_voiceState == VoiceState.listening) {
+        // In voice mode, re-listen after timeout (no speech detected)
+        if (_voiceMode) {
+          Future.delayed(const Duration(milliseconds: 300), () {
+            if (mounted && _voiceMode && _voiceState == VoiceState.listening) {
+              _startListening();
+            }
+          });
+        } else {
+          setState(() {
+            _voiceState = VoiceState.idle;
+            _partialText = '';
+          });
+        }
       }
     };
     _voice.onSpeakingDone = _onSpeakingDone;
@@ -113,10 +124,15 @@ class _HomeScreenState extends State<HomeScreen> {
 
   void _onSttResult(String recognizedText) {
     if (recognizedText.trim().isEmpty) {
-      if (mounted && _voiceState != VoiceState.speaking) setState(() => _voiceState = VoiceState.idle);
+      // Empty result — re-listen if in voice mode
+      if (_voiceMode && mounted) {
+        _startListening();
+      } else if (mounted && _voiceState != VoiceState.speaking) {
+        setState(() => _voiceState = VoiceState.idle);
+      }
       return;
     }
-    _lastInputWasVoice = true;
+
     _partialText = '';
     _textController.text = recognizedText.trim();
     _sendText();
@@ -125,35 +141,59 @@ class _HomeScreenState extends State<HomeScreen> {
   void _onSpeakingDone() {
     if (!mounted) return;
     setState(() => _voiceState = VoiceState.idle);
-    // Auto-listen for next answer if last input was voice and assessment ongoing
-    if (_lastInputWasVoice && !_q.isComplete) {
-      Future.delayed(const Duration(milliseconds: 300), () {
-        if (mounted && _voiceState == VoiceState.idle) {
-          _onMicTap();
+    // In voice mode, auto-listen after every response
+    if (_voiceMode && !_q.isComplete) {
+      Future.delayed(const Duration(milliseconds: 400), () {
+        if (mounted && _voiceState == VoiceState.idle && _voiceMode) {
+          _startListening();
         }
       });
     }
   }
 
+  /// Start listening (internal — used by voice mode auto-listen and mic tap).
+  Future<void> _startListening() async {
+    if (!_voiceReady) return;
+    setState(() {
+      _voiceState = VoiceState.listening;
+      _partialText = '';
+    });
+    await _voice.startListening();
+  }
+
   Future<void> _onMicTap() async {
+    // If voice mode is active and user taps mic, exit voice mode
+    if (_voiceMode && _voiceState != VoiceState.idle) {
+      await _voice.stopListening();
+      await _voice.stopSpeaking();
+      setState(() {
+        _voiceMode = false;
+        _voiceState = VoiceState.idle;
+        _partialText = '';
+      });
+      return;
+    }
+
     switch (_voiceState) {
       case VoiceState.idle:
         if (!_voiceReady) {
           _showVoiceUnavailableSnackbar();
           return;
         }
-        setState(() {
-          _voiceState = VoiceState.listening;
-          _partialText = '';
-        });
-        await _voice.startListening();
+        // Activate continuous voice mode
+        setState(() => _voiceMode = true);
+    
+        await _startListening();
       case VoiceState.listening:
         await _voice.stopListening();
       case VoiceState.speaking:
         await _voice.stopSpeaking();
-        setState(() => _voiceState = VoiceState.idle);
+        setState(() {
+          _voiceMode = false;
+          _voiceState = VoiceState.idle;
+        });
       case VoiceState.thinking:
-        break; // Do nothing — LLM is processing
+        break;
     }
   }
 
@@ -173,11 +213,11 @@ class _HomeScreenState extends State<HomeScreen> {
   // LLM Session
   // --------------------------------------------------------------------------
 
-  Future<bool> _initSession(String step, {String? systemPrompt}) async {
+  Future<bool> _initSession(String step, {String? systemPrompt, int maxTokens = 200}) async {
     if (!widget.modelLoaded) return false;
     await _closeChat();
     try {
-      final model = await FlutterGemma.getActiveModel(maxTokens: 200);
+      final model = await FlutterGemma.getActiveModel(maxTokens: maxTokens);
       _chat = await model.createChat(
         temperature: 0.4,
         topK: 40,
@@ -627,12 +667,13 @@ class _HomeScreenState extends State<HomeScreen> {
         qaSeverity: qaSeverity,
       );
 
-      // Show vision findings summary
+      // Show vision findings summary with model's own notes
       _chatItems.add(_ChatItem(
         type: _ChatItemType.visionSummary,
         metadata: {
           'findings': visionResult.findings,
           'framesAnalyzed': visionResult.framesAnalyzed,
+          'notes': visionResult.notes,
         },
       ));
       setState(() {});
@@ -695,7 +736,7 @@ class _HomeScreenState extends State<HomeScreen> {
       await FlutterGemma.getActiveModel(maxTokens: 200, preferredBackend: PreferredBackend.gpu);
     } catch (_) {}
     await Future.delayed(const Duration(milliseconds: 300));
-    await _initSession('report', systemPrompt: _reportPrompt);
+    await _initSession('report', systemPrompt: _reportPrompt, maxTokens: 512);
     final reportContext = _q.buildReportContext();
     // Build detailed vision context for the report prompt.
     var visionContext = '';
@@ -727,7 +768,7 @@ class _HomeScreenState extends State<HomeScreen> {
       try {
         await FlutterGemma.getActiveModel(maxTokens: 200, preferredBackend: PreferredBackend.gpu);
       } catch (_) {}
-      if (await _initSession('report', systemPrompt: _reportPrompt)) {
+      if (await _initSession('report', systemPrompt: _reportPrompt, maxTokens: 512)) {
         report = await _ask(
           'Write 2-3 short plain-text sentences summarizing the child\'s condition '
           'for a caregiver. No bullet points, no markdown, no asterisks, no formatting. '
@@ -753,6 +794,13 @@ class _HomeScreenState extends State<HomeScreen> {
 
     _progressStep = imciSteps.length;
     setState(() {});
+
+    // Speak the concluding summary so the caregiver hears the result
+    if (cleanReport.isNotEmpty) {
+      _addBot(cleanReport);
+    } else {
+      _addBot('The assessment is complete. Please show these results to a health worker.');
+    }
   }
 
   Map<String, dynamic> _buildReportData(String llmSummary,
@@ -1043,53 +1091,76 @@ class _HomeScreenState extends State<HomeScreen> {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          // Partial transcription while listening
-          if (isListening && _partialText.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 8),
-              child: Text(
-                _partialText,
-                style: const TextStyle(
-                  fontSize: 13,
-                  color: MalaikaColors.textMuted,
-                  fontStyle: FontStyle.italic,
+          // Voice mode: waveform + partial transcription
+          if (_voiceMode) ...[
+            VoiceWaveform(state: _voiceState),
+            if (_partialText.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(top: 6, bottom: 4),
+                child: Text(
+                  _partialText,
+                  style: const TextStyle(
+                    fontSize: 14,
+                    color: MalaikaColors.text,
+                    fontStyle: FontStyle.italic,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+              ),
+            const SizedBox(height: 8),
+            // Stop voice mode button
+            GestureDetector(
+              onTap: _onMicTap,
+              child: Container(
+                width: 56,
+                height: 56,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: (isListening ? MalaikaColors.green : MalaikaColors.primary)
+                      .withOpacity(0.12),
+                  border: Border.all(
+                    color: isListening ? MalaikaColors.green : MalaikaColors.primary,
+                    width: 2,
+                  ),
+                ),
+                child: Icon(
+                  isListening ? Icons.mic : isSpeaking ? Icons.volume_up : Icons.stop,
+                  color: isListening ? MalaikaColors.green : MalaikaColors.primary,
+                  size: 24,
                 ),
               ),
             ),
-          Row(
-            children: [
-              Expanded(
-                child: TextField(
-                  controller: _textController,
-                  enabled: !isBusy,
-                  style: const TextStyle(
-                      fontSize: 15, color: MalaikaColors.text),
-                  decoration: InputDecoration(
-                    hintText: isThinking
-                        ? 'Malaika is thinking...'
-                        : isListening
-                            ? 'Listening...'
-                            : isSpeaking
-                                ? 'Speaking...'
-                                : 'Type or tap mic...',
-                    isDense: true,
+            const SizedBox(height: 4),
+            Text(
+              isListening ? 'Tap to stop' : isSpeaking ? '' : 'Tap to end voice',
+              style: const TextStyle(fontSize: 10, color: MalaikaColors.textMuted),
+            ),
+          ] else ...[
+            // Text mode: normal input bar
+            Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _textController,
+                    enabled: !isBusy,
+                    style: const TextStyle(
+                        fontSize: 15, color: MalaikaColors.text),
+                    decoration: InputDecoration(
+                      hintText: isThinking
+                          ? 'Malaika is thinking...'
+                          : 'Type or tap mic...',
+                      isDense: true,
+                    ),
+                    onSubmitted: (_) => _sendText(),
                   ),
-                  onSubmitted: (_) {
-                    _lastInputWasVoice = false;
-                    _sendText();
-                  },
                 ),
-              ),
-              const SizedBox(width: 8),
-              // Mic button
-              _buildMicButton(),
-              const SizedBox(width: 4),
-              // Send button
-              GestureDetector(
-                onTap: isBusy ? null : () {
-                  _lastInputWasVoice = false;
-                  _sendText();
-                },
+                const SizedBox(width: 8),
+                // Mic button
+                _buildMicButton(),
+                const SizedBox(width: 4),
+                // Send button
+                GestureDetector(
+                onTap: isBusy ? null : _sendText,
                 child: AnimatedContainer(
                   duration: const Duration(milliseconds: 200),
                   width: 44,
@@ -1111,6 +1182,7 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             ],
           ),
+          ], // end else (text mode)
         ],
       ),
     );
@@ -1789,7 +1861,11 @@ class _VisionSummaryCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final findings =
         metadata['findings'] as Map<String, VisionFinding>;
-    final framesAnalyzed = metadata['framesAnalyzed'] as int;
+    final notes = (metadata['notes'] as List<String>?) ?? [];
+
+    // Show what the vision model actually found
+    final detected = findings.entries.where((e) => e.value.detected).toList();
+    final clear = findings.entries.where((e) => !e.value.detected).toList();
 
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 6),
@@ -1804,77 +1880,84 @@ class _VisionSummaryCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(
+            const Row(
               children: [
-                const Icon(Icons.visibility_rounded,
+                Icon(Icons.visibility_rounded,
                     size: 16, color: MalaikaColors.primary),
-                const SizedBox(width: 8),
-                const Text(
-                  'Camera Assessment',
+                SizedBox(width: 8),
+                Text(
+                  'Vision Analysis',
                   style: TextStyle(
                     fontSize: 13,
                     fontWeight: FontWeight.w600,
                     color: MalaikaColors.primary,
                   ),
                 ),
-                const Spacer(),
-                Text(
-                  '$framesAnalyzed frames analyzed',
-                  style: const TextStyle(
-                    fontSize: 10,
-                    color: MalaikaColors.textMuted,
-                  ),
-                ),
               ],
             ),
-            const SizedBox(height: 10),
-            ...findings.entries.map((e) {
-              final f = e.value;
-              final label = _keyToLabel(e.key);
-              final detected = f.detected;
-              final color = detected
-                  ? MalaikaColors.yellow
-                  : MalaikaColors.green;
-              return Padding(
-                padding: const EdgeInsets.symmetric(vertical: 3),
-                child: Row(
-                  children: [
-                    Icon(
-                      detected
-                          ? Icons.warning_amber_rounded
-                          : Icons.check_circle_rounded,
-                      size: 14,
-                      color: color,
-                    ),
-                    const SizedBox(width: 8),
-                    Text(label,
-                        style: const TextStyle(
-                            fontSize: 12, color: MalaikaColors.text)),
-                    const Spacer(),
-                    Text(
-                      f.confidenceLabel,
-                      style: const TextStyle(
-                          fontSize: 10, color: MalaikaColors.textMuted),
-                    ),
-                  ],
+            // Model's own observation
+            if (notes.isNotEmpty) ...[
+              const SizedBox(height: 10),
+              Text(
+                notes.first,
+                style: const TextStyle(
+                  fontSize: 13,
+                  color: MalaikaColors.text,
+                  height: 1.4,
                 ),
-              );
-            }),
+              ),
+            ],
+            const SizedBox(height: 10),
+            // Show detected concerns
+            if (detected.isNotEmpty) ...[
+              ...detected.map((e) {
+                final desc = e.value.lastDescription.isNotEmpty
+                    ? e.value.lastDescription
+                    : e.key.replaceAll('_', ' ');
+                return Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 3),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.warning_amber_rounded,
+                          size: 14, color: MalaikaColors.yellow),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(desc,
+                            style: const TextStyle(
+                                fontSize: 12, color: MalaikaColors.text)),
+                      ),
+                    ],
+                  ),
+                );
+              }),
+            ],
+            // Show clear findings
+            if (clear.isNotEmpty) ...[
+              ...clear.map((e) {
+                final desc = e.value.lastDescription.isNotEmpty
+                    ? e.value.lastDescription
+                    : '${e.key.replaceAll('_', ' ')} — not detected';
+                return Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 3),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.check_circle_rounded,
+                          size: 14, color: MalaikaColors.green),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(desc,
+                            style: const TextStyle(
+                                fontSize: 12, color: MalaikaColors.text)),
+                      ),
+                    ],
+                  ),
+                );
+              }),
+            ],
           ],
         ),
       ),
     );
-  }
-
-  String _keyToLabel(String key) {
-    const labels = {
-      'lethargic': 'Alertness',
-      'chest_indrawing': 'Chest Indrawing',
-      'dehydration': 'Dehydration Signs',
-      'wasting': 'Visible Wasting',
-      'edema': 'Edema',
-    };
-    return labels[key] ?? key.replaceAll('_', ' ');
   }
 }
 

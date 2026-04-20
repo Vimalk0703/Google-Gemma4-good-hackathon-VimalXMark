@@ -181,27 +181,41 @@ Additional adapters planned:
 
 ## Mobile App (Primary Demo)
 
-The **Flutter mobile app** is the primary demo — Gemma 4 E2B running fully offline on Android/iOS.
+The **Flutter mobile app** is the primary demo — Gemma 4 E2B running fully offline on Android.
 
-| Feature | Status |
-|---------|--------|
-| On-device Gemma 4 E2B (2.3B params) | Running via flutter_gemma |
-| IMCI Q&A assessment (text) | Complete — all 5 clinical steps |
-| Deterministic WHO classification | Complete — `imci_protocol.dart` |
-| Vision analysis (camera photos) | Working — clinical prompts via flutter_gemma |
-| Structured findings extraction | Complete — regex-based keyword matching |
-| Assessment report with classifications | Complete — severity cards + action items |
-| Offline — zero internet required | Yes — everything on-device |
+### What ACTUALLY Works (tested Apr 19, 2026 — Samsung A53)
+
+| Feature | Status | Details |
+|---------|--------|---------|
+| Text-based IMCI Q&A | **WORKS** | ~20 structured questions, Gemma narrates naturally |
+| Photo from gallery → vision analysis | **WORKS** | Gallery picker, Gemma checks alertness/dehydration/wasting/edema |
+| Q&A vs vision reconciliation | **WORKS** | Cross-references verbal + visual findings, generates warnings |
+| WHO IMCI classification | **WORKS** | Deterministic code, not LLM output |
+| Final report with severity | **WORKS** | LLM summary + structured treatment actions |
+| Fully offline | **WORKS** | All intelligence from on-device Gemma 4 E2B |
+| Voice input/output (STT + TTS) | **IN PROGRESS** | Offline via Android native engines on CPU |
+| In-app camera preview | **NO** | Mali GPU can't hold model + camera simultaneously |
+| Breathing rate from video | **NO** | No video processing on phone |
+| Audio/breath sounds | **NO** | No microphone input in Flutter app |
+
+### GPU Memory Constraint (Samsung A53, Mali G68)
+- Gemma 4 E2B uses ~2.3GB of ~2.5GB GPU
+- Camera preview surfaces crash the driver (no headroom)
+- Gallery picker works because it's in-process, no GPU allocation
+- STT/TTS run on CPU (Android native engines) — no GPU conflict
+- Fresh LLM session per inference prevents KV cache accumulation crash
 
 ### Architecture
 
 ```
-Flutter App (Android/iOS)
-  ├── flutter_gemma — Gemma 4 E2B on-device inference (text + vision)
+Flutter App (Android)
+  ├── flutter_gemma — Gemma 4 E2B on-device inference (text + vision, GPU)
+  ├── speech_to_text — Offline STT via Android SpeechRecognizer (CPU)
+  ├── flutter_tts — Offline TTS via Samsung/Google TTS engine (CPU)
   ├── ImciQuestionnaire — Structured Q&A with finding extraction
   ├── ImciProtocol — Deterministic WHO classification (code, not LLM)
-  ├── ChatEngine — Skill-driven assessment orchestration
-  └── UI — Progress bar, classification cards, reasoning cards, camera
+  ├── ReconciliationEngine — Q&A vs vision cross-reference + warnings
+  └── UI — Progress bar, classification cards, reasoning cards, gallery picker
 ```
 
 ---
@@ -315,7 +329,16 @@ malaika_flutter/               # Flutter mobile app (PRIMARY DEMO)
 
 ## Running the Demo
 
-### Option A: Voice Agent on Colab (Recommended)
+### Option A: Mobile App on Android (Primary Demo)
+
+Install the APK on any Android phone with 4GB+ RAM:
+
+1. Build: `cd malaika_flutter && flutter build apk --release`
+2. Install APK on device
+3. App downloads Gemma 4 E2B (~2.6GB) on first launch
+4. Fully offline after download — no internet needed
+
+### Option B: Voice Agent on Colab
 
 Open [`notebooks/10_voice_agent_colab.ipynb`](notebooks/10_voice_agent_colab.ipynb) on Colab with T4 GPU:
 
@@ -324,10 +347,6 @@ Open [`notebooks/10_voice_agent_colab.ipynb`](notebooks/10_voice_agent_colab.ipy
 3. Add `NGROK_TOKEN` for stable tunnel (optional)
 4. Run Cell 1 (installs) -> Cell 2 (model load) -> Cell 3 (launch)
 5. Open the printed URL on your phone
-
-### Option B: Gradio Form UI on Colab
-
-Open [`notebooks/08_colab_run_app.ipynb`](notebooks/08_colab_run_app.ipynb) on Colab with T4 GPU.
 
 ### Option C: Local Development
 
@@ -398,7 +417,7 @@ ruff check malaika/ tests/
 | Architecture | Prompt wrapper | **12-skill agent** with BeliefState + structured events |
 | Modalities | Text only | Vision + Audio (spectrogram) + Voice + Video |
 | Classification | LLM opinion | **Deterministic WHO code** with page citations |
-| On-device proof | "It could run" | Video of E2B running on phone |
+| On-device proof | "It could run" | **E2B running on phone** — text, vision, voice all offline |
 | Fine-tuning | Off-the-shelf | **[LoRA on HuggingFace](https://huggingface.co/Vimal0703/malaika-breath-sounds-E4B-merged)** (100% crackle) |
 | Medical validity | AI hallucination | **WHO IMCI protocol** (100+ countries, 21/21 scenarios) |
 | Problem scale | Vague "helps people" | **4.9 million children** die/year |

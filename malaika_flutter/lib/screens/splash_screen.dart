@@ -93,8 +93,10 @@ class _SplashScreenState extends State<SplashScreen> {
         _status = 'Loading model into memory...';
       });
 
+      // maxTokens=512: vision prompt + image tokens need headroom.
+      // 200 was too small — vision prompt alone can be 130+ tokens + ~80 image tokens.
       await FlutterGemma.getActiveModel(
-        maxTokens: 200,
+        maxTokens: 512,
         preferredBackend: PreferredBackend.gpu,
         supportImage: true,
         maxNumImages: 1,

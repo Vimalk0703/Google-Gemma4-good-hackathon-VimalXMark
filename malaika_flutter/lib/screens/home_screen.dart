@@ -883,7 +883,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
       await _closeChat();
       final model = await FlutterGemma.getActiveModel(
-        maxTokens: 200,
+        maxTokens: 512,
         supportImage: true,
         maxNumImages: 1,
       );

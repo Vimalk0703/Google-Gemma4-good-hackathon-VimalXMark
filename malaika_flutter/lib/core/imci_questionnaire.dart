@@ -181,6 +181,13 @@ const List<ImciQuestion> imciQuestions = [
     type: AnswerType.age,
     label: 'Age',
   ),
+  ImciQuestion(
+    id: 'weight_kg',
+    step: 'greeting',
+    question: 'How much does your child weigh in kilograms? If you are not sure, that is okay — just say "not sure".',
+    type: AnswerType.number,
+    label: 'Weight',
+  ),
 
   // --- Danger Signs (IMCI p.2) ---
   ImciQuestion(
@@ -348,6 +355,9 @@ class ImciQuestionnaire {
   /// Child's age in months.
   int ageMonths = 0;
 
+  /// Child's weight in kg. 0 = unknown (will use age-based estimation).
+  double weightKg = 0;
+
   /// Extracted clinical findings.
   final Map<String, dynamic> findings = {};
 
@@ -445,7 +455,9 @@ class ImciQuestionnaire {
         }
         findings[q.id] = value ?? false; // Default to false if still ambiguous
       case AnswerType.number:
-        findings[q.id] = _extractNumber(text);
+        final num = _extractNumber(text);
+        findings[q.id] = num;
+        if (q.id == 'weight_kg') weightKg = num.toDouble();
       case AnswerType.age:
         ageMonths = _extractAge(text);
         findings[q.id] = ageMonths;
@@ -805,5 +817,35 @@ class ImciQuestionnaire {
   /// Extract age in months from text.
   static int _extractAge(String text) {
     return _extractNumber(text);
+  }
+
+  // --------------------------------------------------------------------------
+  // Serialization — for persisting assessment results
+  // --------------------------------------------------------------------------
+
+  /// Serialize the complete assessment state to JSON.
+  Map<String, dynamic> toJson() {
+    final classMap = <String, String>{};
+    for (final entry in classifications.entries) {
+      if (entry.value != null) {
+        classMap[entry.key] = entry.value!.classification.value;
+      }
+    }
+
+    // Filter findings to only serializable types
+    final serializableFindings = <String, dynamic>{};
+    findings.forEach((key, value) {
+      if (value is bool || value is int || value is double || value is String) {
+        serializableFindings[key] = value;
+      }
+    });
+
+    return {
+      'ageMonths': ageMonths,
+      'weightKg': weightKg,
+      'severity': overallSeverity,
+      'findings': serializableFindings,
+      'classifications': classMap,
+    };
   }
 }

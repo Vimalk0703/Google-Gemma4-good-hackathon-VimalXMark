@@ -8,24 +8,25 @@ import '../widgets/classification_card.dart';
 import '../widgets/skill_event_card.dart';
 import '../widgets/benchmark_card.dart';
 import '../core/imci_questionnaire.dart';
+import '../core/imci_protocol.dart';
 import '../core/reconciliation_engine.dart';
+import '../core/treatment_protocol.dart';
+import '../core/assessment_store.dart';
+import '../core/agentic_assessor.dart';
 import '../core/voice_service.dart';
 import '../core/skills.dart';
 import '../core/tool_call_tracker.dart';
 import '../widgets/voice_waveform.dart';
 import 'camera_monitor_screen.dart';
 
-/// IMCI assessment using structured Q&A collection + LLM narration.
+/// Vision-First IMCI Assessment — "Show me your child."
 ///
-/// Phase 1: COLLECT — Walk through predefined IMCI questions in order.
-///   LLM rephrases each question naturally. User answers.
-///   Reasoning card shows extracted findings after each answer.
-///
-/// Phase 2: CLASSIFY — After each step completes, run deterministic WHO
-///   classification (imci_protocol.dart). Show classification card.
-///
-/// Phase 3: NARRATE — After all questions, LLM generates a comprehensive
-///   report from all Q&A pairs + classifications.
+/// Phase 1: GREET — Collect age + weight.
+/// Phase 2: SEE — Photo first. Gemma 4 vision detects clinical signs.
+/// Phase 3: ASK — Targeted questions based on what Gemma saw (~3-8, not 20).
+/// Phase 4: CLASSIFY — Deterministic WHO IMCI (imci_protocol.dart).
+/// Phase 5: TREAT — Exact medicines + doses (treatment_protocol.dart).
+/// Phase 6: GUIDE — Gemma generates care instructions in caregiver's language.
 
 class HomeScreen extends StatefulWidget {
   final bool modelLoaded;
@@ -64,6 +65,18 @@ class _HomeScreenState extends State<HomeScreen> {
   /// Track the previous step for transition banners.
   String _lastDisplayedStep = 'greeting';
 
+  /// Whether the vision-first phase has been done.
+  bool _visionFirstDone = false;
+
+  /// Vision findings from the comprehensive photo analysis.
+  Map<String, bool> _visionFindings = {};
+
+  /// Treatment plan generated after classification.
+  TreatmentPlan? _treatmentPlan;
+
+  /// User's preferred language code (loaded from store).
+  String _language = 'en';
+
   /// System prompt for the LLM — just persona and tone.
   static const _systemPrompt =
       'You are Malaika, a warm and caring child health assistant. '
@@ -84,12 +97,23 @@ class _HomeScreenState extends State<HomeScreen> {
       'Explain findings simply. Be caring but direct. '
       'Never diagnose — recommend seeing a health worker.';
 
+  /// Get language directive for Gemma prompts.
+  String get _langDirective => _language != 'en'
+      ? ' Respond in ${AssessmentStore.languageName(_language)}.'
+      : '';
+
   @override
   void initState() {
     super.initState();
     registerAllSkills();
+    _loadLanguage();
     _startAssessment();
     _initVoice();
+  }
+
+  Future<void> _loadLanguage() async {
+    final lang = await AssessmentStore.getLanguage();
+    if (mounted) setState(() => _language = lang);
   }
 
   Future<void> _initVoice() async {
@@ -305,6 +329,211 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   // --------------------------------------------------------------------------
+  // VISION FIRST — Photo before questions (the key innovation)
+  // --------------------------------------------------------------------------
+
+  /// After greeting completes, prompt for a photo of the child.
+  /// Gemma 4 vision analyzes the photo for ALL clinical signs at once.
+  /// Pre-populates findings so we only need to ask targeted questions.
+  Future<void> _handleVisionFirst(String previousAnswer) async {
+    _visionFirstDone = true;
+
+    // Show vision step banner
+    _addStepBanner('Vision Assessment');
+    _lastDisplayedStep = 'vision';
+
+    // Ask for photo with Gemma narration
+    setState(() => _voiceState = VoiceState.thinking);
+    _addTyping();
+    await _initSession('vision', systemPrompt:
+        'You are Malaika, a caring child health assistant.$_langDirective');
+    final askPhoto = await _ask(
+      'The caregiver told you about their child. '
+      'Now ask them warmly to show you a photo of the child so you can '
+      'check for health signs. Say it can be from the gallery. '
+      'Also say they can type "skip" if no photo is available.',
+    );
+    _removeTyping();
+    _addBot(askPhoto.isNotEmpty
+        ? askPhoto
+        : 'Now, can you show me a photo of your child? I will look for '
+          'health signs. You can pick one from your gallery, or type "skip".');
+
+    // Show photo prompt card
+    _chatItems.add(_ChatItem(
+      type: _ChatItemType.photoPrompt,
+      metadata: {'step': 'vision', 'label': 'Take or choose a photo of your child'},
+    ));
+    if (mounted && _voiceState != VoiceState.speaking) {
+      setState(() => _voiceState = VoiceState.idle);
+    }
+  }
+
+  /// Run comprehensive vision analysis on the selected photo.
+  Future<void> _runComprehensiveVision() async {
+    setState(() => _voiceState = VoiceState.thinking);
+
+    _tracker.startCall('comprehensive_vision', step: 'vision', inputType: 'image');
+
+    try {
+      await _closeChat();
+      final picker = ImagePicker();
+      final image = await picker.pickImage(
+        source: ImageSource.gallery,
+        maxWidth: 256,
+        maxHeight: 256,
+        imageQuality: 50,
+      );
+
+      if (image == null) {
+        _tracker.endCall(success: false, parseMethod: 'vision_analysis', confidence: 0.0);
+        _skipVisionAndContinue();
+        return;
+      }
+
+      final imageBytes = await image.readAsBytes();
+      _addBot('Analyzing the photo...');
+
+      // Open vision session
+      await _closeChat();
+      final model = await FlutterGemma.getActiveModel(
+        maxTokens: 256,
+        supportImage: true,
+        maxNumImages: 1,
+      );
+      _chat = await model.createChat(
+        temperature: 0.2,
+        topK: 40,
+        supportImage: true,
+        systemInstruction:
+            'You are a clinical health assistant. '
+            'Analyze the image precisely. Only report what you can see.',
+      );
+      _chatStep = 'vision';
+
+      await _chat!.addQuery(Message(
+        text: comprehensiveVisionPrompt,
+        isUser: true,
+        imageBytes: imageBytes,
+      ));
+
+      final response = await _chat!.generateChatResponse();
+      final analysisText =
+          response is TextResponse ? response.token.trim() : '';
+
+      if (analysisText.isNotEmpty) {
+        debugPrint('[MALAIKA] Comprehensive vision: $analysisText');
+
+        // Parse structured response
+        _visionFindings = parseVisionResponse(analysisText);
+
+        _tracker.endCall(
+          findings: _visionFindings.map((k, v) => MapEntry(k, v.toString())),
+          success: true,
+          parseMethod: 'comprehensive_vision',
+          confidence: 0.85,
+          inputTokens: (comprehensiveVisionPrompt.split(' ').length * 1.3).round(),
+          outputTokens: analysisText.split(' ').length,
+        );
+
+        // Show vision findings card
+        _chatItems.add(_ChatItem(
+          type: _ChatItemType.skillEvent,
+          metadata: {
+            'event': _tracker.lastEvent,
+            'autoFilled': <String>[],
+            'stepIndex': _q.stepProgress,
+          },
+        ));
+        setState(() {});
+
+        // Show what Gemma saw
+        final detected = _visionFindings.entries
+            .where((e) => e.value)
+            .map((e) => e.key.replaceAll('vision_', '').replaceAll('_', ' '))
+            .toList();
+        final clear = _visionFindings.entries
+            .where((e) => !e.value && !e.key.contains('dehydrated') && !e.key.contains('measles'))
+            .map((e) => e.key.replaceAll('vision_', '').replaceAll('_', ' '))
+            .toList();
+
+        if (detected.isNotEmpty) {
+          _addBot('I can see some signs: ${detected.join(', ')}. '
+              'Let me ask a few more questions to be sure.');
+        } else {
+          _addBot('The child looks okay from the photo. '
+              'Let me ask a few questions to check for things I cannot see.');
+        }
+
+        // Pre-populate IMCI findings from vision
+        final imciFindings = visionToImciFindings(_visionFindings);
+        imciFindings.forEach((key, value) {
+          _q.findings[key] = value;
+        });
+        debugPrint('[MALAIKA] Vision pre-populated: $imciFindings');
+
+        final saved = questionsSaved(
+          visionFindings: _visionFindings,
+          ageMonths: _q.ageMonths,
+        );
+        debugPrint('[MALAIKA] Questions saved by vision: $saved');
+      } else {
+        _tracker.endCall(success: false, parseMethod: 'vision_analysis', confidence: 0.0);
+        _addBot('I had trouble analyzing the photo. Let me ask you some questions instead.');
+      }
+    } catch (e) {
+      debugPrint('[MALAIKA] Comprehensive vision error: $e');
+      _tracker.endCall(success: false, parseMethod: 'vision_analysis', confidence: 0.0);
+      _addBot('I had trouble with the photo. Let me continue with questions.');
+    }
+
+    // Continue to targeted Q&A
+    await _continueToTargetedQA();
+  }
+
+  /// Skip vision and continue with full questionnaire.
+  void _skipVisionAndContinue() {
+    _addBot('No photo — no problem. Let me ask you some questions about your child.');
+    _continueToTargetedQA();
+  }
+
+  /// After vision (or skip), continue to the targeted Q&A phase.
+  Future<void> _continueToTargetedQA() async {
+    // Show first clinical step banner
+    final nextStep = _q.currentStep;
+    if (nextStep != 'greeting' && nextStep != 'complete') {
+      _addStepBanner(nextStep);
+      _lastDisplayedStep = nextStep;
+    }
+    _progressStep = _q.stepProgress;
+
+    if (_q.isComplete) {
+      await _generateFinalReport();
+      if (mounted && _voiceState != VoiceState.speaking) setState(() => _voiceState = VoiceState.idle);
+      return;
+    }
+
+    final nextQ = _q.currentQuestion!;
+    // Skip per-step photo prompts (we already did comprehensive vision)
+    if (nextQ.type == AnswerType.photo) {
+      _q.skipPhoto();
+      return _continueToTargetedQA(); // Recurse to next question
+    }
+
+    // Ask the first targeted question
+    await _initSession(nextQ.step, systemPrompt:
+        '$_systemPrompt$_langDirective');
+    _addTyping();
+    final response = await _ask(
+        'Ask the caregiver: ${nextQ.question}');
+    _removeTyping();
+    _addBot(response.isNotEmpty && response.contains('?')
+        ? response : nextQ.question);
+
+    if (mounted && _voiceState != VoiceState.speaking) setState(() => _voiceState = VoiceState.idle);
+  }
+
+  // --------------------------------------------------------------------------
   // Main Send — Agentic Q&A with Gemma 4 LLM Extraction
   // --------------------------------------------------------------------------
 
@@ -478,6 +707,14 @@ class _HomeScreenState extends State<HomeScreen> {
       _classifyAndShowCard(completedStep);
     }
 
+    // ── VISION FIRST: After greeting (age+weight), prompt for photo ──
+    if (completedStep == 'greeting' && !_visionFirstDone) {
+      _removeTyping();
+      await _handleVisionFirst(text);
+      if (mounted && _voiceState != VoiceState.speaking) setState(() => _voiceState = VoiceState.idle);
+      return;
+    }
+
     // Step transition banner
     final nextStepName = _q.currentStep;
     if (nextStepName != _lastDisplayedStep &&
@@ -500,6 +737,28 @@ class _HomeScreenState extends State<HomeScreen> {
 
     if (nextQ.type == AnswerType.photo) {
       _removeTyping();
+      // Skip per-step photo prompts — we already did comprehensive vision
+      if (_visionFirstDone) {
+        _q.skipPhoto();
+        _progressStep = _q.stepProgress;
+        // Continue to next question
+        final next = _q.currentQuestion;
+        if (next == null) {
+          await _generateFinalReport();
+          if (mounted && _voiceState != VoiceState.speaking) setState(() => _voiceState = VoiceState.idle);
+          return;
+        }
+        await _initSession(next.step, systemPrompt:
+            '$_systemPrompt$_langDirective');
+        _addTyping();
+        final response = await _ask(
+            'Ask the caregiver: ${next.question}');
+        _removeTyping();
+        _addBot(response.isNotEmpty && response.contains('?')
+            ? response : next.question);
+        if (mounted && _voiceState != VoiceState.speaking) setState(() => _voiceState = VoiceState.idle);
+        return;
+      }
       await _handlePhotoQuestion(nextQ, text);
       if (mounted && _voiceState != VoiceState.speaking) setState(() => _voiceState = VoiceState.idle);
       return;
@@ -786,80 +1045,21 @@ class _HomeScreenState extends State<HomeScreen> {
       }
     }
 
-    // Q&A severity before vision
-    final qaSeverity = _q.overallSeverity;
+    final finalSeverity = _q.overallSeverity;
 
-    // --- Vision Monitoring Phase ---
-    _chatItems.add(_ChatItem(
-      type: _ChatItemType.stepBanner,
-      text: 'Vision Assessment',
-      metadata: {'step': 'vision'},
-    ));
-    setState(() {});
-    _scrollToBottom();
+    // ── TREATMENT PLAN — deterministic, from WHO dosing tables ──
+    final classificationList = _q.classifications.values
+        .where((c) => c != null)
+        .cast<DomainClassification>()
+        .toList();
 
-    _addBot(
-      'The questionnaire is complete. Now let\'s do a visual check. '
-      'I\'ll use the camera to look for clinical signs.',
+    _treatmentPlan = generateTreatmentPlan(
+      classifications: classificationList,
+      ageMonths: _q.ageMonths,
+      weightKg: _q.weightKg,
     );
-
-    // CRITICAL: Close the text session so the vision session can be created.
-    // The model only supports ONE active session at a time.
-    await _closeChat();
-
-    // Let native memory from the text session be reclaimed before vision.
-    // Without this delay, the vision prefill OOMs on low-RAM devices (A53).
-    await Future.delayed(const Duration(seconds: 1));
-
-    final visionResult = await _launchVisionMonitoring();
-    debugPrint('[MALAIKA] Vision returned: ${visionResult?.framesAnalyzed ?? 0} frames, '
-        'findings: ${visionResult?.findings.keys.toList() ?? []}');
-
-    if (visionResult != null && visionResult.framesAnalyzed > 0) {
-      // Run reconciliation
-      _reconciliation = ReconciliationEngine.reconcile(
-        qaFindings: _q.findings,
-        visionFindings: visionResult.findings,
-        qaSeverity: qaSeverity,
-      );
-
-      // Show vision findings summary with model's own notes
-      _chatItems.add(_ChatItem(
-        type: _ChatItemType.visionSummary,
-        metadata: {
-          'findings': visionResult.findings,
-          'framesAnalyzed': visionResult.framesAnalyzed,
-          'notes': visionResult.notes,
-        },
-      ));
-      setState(() {});
-
-      // Show warnings if any
-      if (_reconciliation!.hasWarnings) {
-        for (final warning in _reconciliation!.warnings) {
-          _chatItems.add(_ChatItem(
-            type: _ChatItemType.reconciliationWarning,
-            metadata: {
-              'category': warning.category,
-              'qaValue': warning.qaValue,
-              'visionValue': warning.visionValue,
-              'confidence': warning.confidence,
-              'message': warning.message,
-              'recommendation': warning.recommendation,
-              'severity': warning.severity,
-            },
-          ));
-        }
-        setState(() {});
-      }
-    } else {
-      _addBot('Vision assessment skipped. Generating report from questionnaire only.');
-    }
-
-    // Determine final severity (may be upgraded by vision)
-    final finalSeverity = _reconciliation?.severityUpgraded == true
-        ? _reconciliation!.upgradedSeverity!
-        : qaSeverity;
+    debugPrint('[MALAIKA] Treatment: ${_treatmentPlan!.medicines.length} medicines, '
+        'ORS: ${_treatmentPlan!.orsGuide?.planType ?? "none"}');
 
     // Overall assessment card
     const urgencyMap = {
@@ -868,67 +1068,104 @@ class _HomeScreenState extends State<HomeScreen> {
       'green': 'Treat at home with follow-up in 5 days',
     };
 
-    final overallLabel = _reconciliation?.severityUpgraded == true
-        ? 'Overall: ${finalSeverity.toUpperCase()} (upgraded by vision)'
-        : 'Overall: ${finalSeverity.toUpperCase()}';
-
     _chatItems.add(_ChatItem(
       type: _ChatItemType.classification,
       metadata: {
         'step': 'Overall Assessment',
         'severity': finalSeverity,
-        'label': overallLabel,
+        'label': 'Overall: ${finalSeverity.toUpperCase()}',
         'reasoning': urgencyMap[finalSeverity] ?? 'Consult a health worker',
       },
     ));
     setState(() {});
 
-    // LLM generates caring summary — with hard reset after vision
+    // ── TREATMENT CARDS — show exact medicines + doses inline ──
+    if (_treatmentPlan!.preReferralActions.isNotEmpty) {
+      _addStepBanner('Urgent Actions');
+      for (final action in _treatmentPlan!.preReferralActions) {
+        _chatItems.add(_ChatItem(
+          type: _ChatItemType.treatmentAction,
+          text: action,
+          metadata: {'urgent': true},
+        ));
+      }
+      setState(() {});
+    }
+
+    if (_treatmentPlan!.medicines.isNotEmpty || _treatmentPlan!.orsGuide != null) {
+      _addStepBanner('Treatment');
+    }
+
+    // Medicine cards
+    for (final medicine in _treatmentPlan!.medicines) {
+      _chatItems.add(_ChatItem(
+        type: _ChatItemType.medicineCard,
+        metadata: {
+          'name': medicine.medicineName,
+          'formulation': medicine.formulation,
+          'dose': medicine.doseDescription,
+          'duration': '${medicine.durationDays} days',
+          'preparation': medicine.preparation,
+          'reference': medicine.whoReference,
+        },
+      ));
+    }
+
+    // ORS Guide card
+    if (_treatmentPlan!.orsGuide != null) {
+      final ors = _treatmentPlan!.orsGuide!;
+      _chatItems.add(_ChatItem(
+        type: _ChatItemType.orsGuideCard,
+        metadata: {
+          'planType': ors.planType,
+          'volumeMl': ors.volumeMl,
+          'frequency': ors.frequency,
+          'zincDoseMg': ors.zincDoseMg,
+          'zincDays': ors.zincDays,
+          'homemadeRecipe': OrsGuide.homemadeRecipe,
+          'reference': ors.whoReference,
+        },
+      ));
+    }
+    setState(() {});
+    _scrollToBottom();
+
+    // ── LLM REPORT — caring summary in caregiver's language ──
     _addTyping();
     await _closeChat();
-    // Hard reset: re-acquire the model to clear any corrupted native state
-    // from vision monitoring (E2B LiteRT can't process images, leaves bad state)
-    try {
-      await FlutterGemma.getActiveModel(maxTokens: 200, preferredBackend: PreferredBackend.gpu);
-    } catch (_) {}
-    await Future.delayed(const Duration(milliseconds: 300));
-    await _initSession('report', systemPrompt: _reportPrompt, maxTokens: 512);
+    await Future.delayed(const Duration(milliseconds: 800));
+    await _initSession('report',
+        systemPrompt: '$_reportPrompt$_langDirective', maxTokens: 512);
     final reportContext = _q.buildReportContext();
-    // Build detailed vision context for the report prompt.
-    var visionContext = '';
-    if (_reconciliation != null) {
-      final vf = _reconciliation!.visionFindings;
-      final visionParts = <String>[];
-      for (final entry in vf.entries) {
-        final label = entry.key.replaceAll('_', ' ');
-        visionParts.add('$label: ${entry.value.detected ? "YES" : "no"}');
-      }
-      visionContext = ' Photo assessment: ${visionParts.join(", ")}.';
-      if (_reconciliation!.hasWarnings) {
-        final warnMsgs = _reconciliation!.warnings
-            .map((w) => '${w.category}: ${w.message}')
-            .join('; ');
-        visionContext += ' Warnings: $warnMsgs.';
-      }
+
+    // Build treatment context for the report
+    var treatmentContext = '';
+    if (_treatmentPlan!.medicines.isNotEmpty) {
+      final meds = _treatmentPlan!.medicines
+          .map((m) => '${m.medicineName}: ${m.doseDescription}')
+          .join(', ');
+      treatmentContext = ' Treatment: $meds.';
     }
+    if (_treatmentPlan!.orsGuide != null) {
+      final ors = _treatmentPlan!.orsGuide!;
+      treatmentContext += ' ORS Plan ${ors.planType}: ${ors.volumeMl.round()}ml ${ors.frequency}.';
+    }
+
     var report = await _ask(
       'Write 2-3 short plain-text sentences summarizing the child\'s condition '
-      'for a caregiver. No bullet points, no markdown, no asterisks, no formatting. '
-      'Just simple caring sentences.\n\n$reportContext$visionContext',
+      'and what the caregiver should do RIGHT NOW. No bullet points, no markdown. '
+      'Just simple caring sentences.$_langDirective\n\n'
+      '$reportContext$treatmentContext',
     );
-    // If model crashed from vision, retry one more time with fresh session
     if (report.isEmpty) {
-      debugPrint('[MALAIKA] Report retry after model reset...');
+      debugPrint('[MALAIKA] Report retry...');
       await _closeChat();
       await Future.delayed(const Duration(milliseconds: 500));
-      try {
-        await FlutterGemma.getActiveModel(maxTokens: 200, preferredBackend: PreferredBackend.gpu);
-      } catch (_) {}
-      if (await _initSession('report', systemPrompt: _reportPrompt, maxTokens: 512)) {
+      if (await _initSession('report',
+          systemPrompt: '$_reportPrompt$_langDirective', maxTokens: 512)) {
         report = await _ask(
-          'Write 2-3 short plain-text sentences summarizing the child\'s condition '
-          'for a caregiver. No bullet points, no markdown, no asterisks, no formatting. '
-          'Just simple caring sentences.\n\n$reportContext',
+          'Write 2-3 short caring sentences about this child\'s health '
+          'and what to do.$_langDirective\n\n$reportContext',
         );
       }
     }
@@ -962,6 +1199,50 @@ class _HomeScreenState extends State<HomeScreen> {
       _addBot(cleanReport);
     } else {
       _addBot('The assessment is complete. Please show these results to a health worker.');
+    }
+
+    // Home care + follow-up
+    if (_treatmentPlan!.homeCare.isNotEmpty) {
+      for (final care in _treatmentPlan!.homeCare) {
+        _chatItems.add(_ChatItem(
+          type: _ChatItemType.treatmentAction,
+          text: care,
+          metadata: {'urgent': false},
+        ));
+      }
+    }
+
+    // Return immediately signs
+    _chatItems.add(_ChatItem(
+      type: _ChatItemType.treatmentAction,
+      text: _treatmentPlan!.followUp,
+      metadata: {'urgent': finalSeverity == 'red'},
+    ));
+    setState(() {});
+    _scrollToBottom();
+
+    // ── SAVE ASSESSMENT ──
+    try {
+      final assessment = SavedAssessment(
+        id: DateTime.now().millisecondsSinceEpoch.toString(),
+        timestamp: DateTime.now(),
+        ageMonths: _q.ageMonths,
+        weightKg: _q.weightKg,
+        severity: finalSeverity,
+        findings: Map<String, dynamic>.from(_q.findings)
+          ..removeWhere((_, v) => v is! bool && v is! int && v is! double && v is! String),
+        classifications: _q.classifications.entries
+            .where((e) => e.value != null)
+            .fold(<String, String>{}, (map, e) {
+              map[e.key] = e.value!.classification.value;
+              return map;
+            }),
+        language: _language,
+      );
+      await AssessmentStore.save(assessment);
+      debugPrint('[MALAIKA] Assessment saved: ${assessment.id}');
+    } catch (e) {
+      debugPrint('[MALAIKA] Save error: $e');
     }
   }
 
@@ -1212,14 +1493,27 @@ class _HomeScreenState extends State<HomeScreen> {
                       _ReportCard(data: item.metadata!),
                     _ChatItemType.photoPrompt => _PhotoPromptCard(
                         label: item.metadata!['label'] as String,
-                        onTakePhoto: _onTakePhoto,
-                        onSkip: _onSkipPhoto),
+                        onTakePhoto: item.metadata!['step'] == 'vision'
+                            ? _runComprehensiveVision
+                            : _onTakePhoto,
+                        onSkip: item.metadata!['step'] == 'vision'
+                            ? _skipVisionAndContinue
+                            : _onSkipPhoto),
                     _ChatItemType.visionSummary =>
                       _VisionSummaryCard(metadata: item.metadata!),
                     _ChatItemType.reconciliationWarning =>
                       _ReconciliationWarningCard(metadata: item.metadata!),
                     _ChatItemType.benchmark => BenchmarkCard(
                         summary: item.metadata!['summary'] as BenchmarkSummary),
+                    _ChatItemType.medicineCard =>
+                      _MedicineCardWidget(metadata: item.metadata!),
+                    _ChatItemType.orsGuideCard =>
+                      _OrsGuideWidget(metadata: item.metadata!),
+                    _ChatItemType.treatmentAction =>
+                      _TreatmentActionWidget(
+                        text: item.text ?? '',
+                        urgent: item.metadata?['urgent'] as bool? ?? false,
+                      ),
                   };
                 },
               ),
@@ -1404,6 +1698,9 @@ enum _ChatItemType {
   visionSummary,
   reconciliationWarning,
   benchmark,
+  medicineCard,
+  orsGuideCard,
+  treatmentAction,
 }
 
 class _ChatItem {
@@ -1429,6 +1726,8 @@ class _StepBannerWidget extends StatelessWidget {
     'Fever': Icons.thermostat_rounded,
     'Nutrition': Icons.restaurant_rounded,
     'Vision Assessment': Icons.visibility_rounded,
+    'Treatment': Icons.medication_rounded,
+    'Urgent Actions': Icons.local_hospital_rounded,
   };
 
   @override
@@ -2312,5 +2611,340 @@ class _ReconciliationWarningCard extends StatelessWidget {
         .map((w) =>
             w.isEmpty ? w : '${w[0].toUpperCase()}${w.substring(1)}')
         .join(' ');
+  }
+}
+
+// =============================================================================
+// Medicine Card — shows exact dose for one medicine
+// =============================================================================
+
+class _MedicineCardWidget extends StatelessWidget {
+  final Map<String, dynamic> metadata;
+  const _MedicineCardWidget({required this.metadata});
+
+  @override
+  Widget build(BuildContext context) {
+    final name = metadata['name'] as String;
+    final formulation = metadata['formulation'] as String;
+    final dose = metadata['dose'] as String;
+    final duration = metadata['duration'] as String;
+    final preparation = metadata['preparation'] as String;
+    final reference = metadata['reference'] as String;
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: MalaikaColors.surface,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: MalaikaColors.primary.withValues(alpha: 0.2)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Header
+            Row(
+              children: [
+                Container(
+                  width: 32,
+                  height: 32,
+                  decoration: BoxDecoration(
+                    color: MalaikaColors.primaryLight,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: const Icon(Icons.medication_rounded,
+                      size: 18, color: MalaikaColors.primary),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(name,
+                          style: const TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w700,
+                              color: MalaikaColors.text)),
+                      Text(formulation,
+                          style: const TextStyle(
+                              fontSize: 11, color: MalaikaColors.textSecondary)),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            // DOSE — large, clear, unmissable
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              decoration: BoxDecoration(
+                color: MalaikaColors.primaryLight,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Text(
+                dose,
+                style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w700,
+                  color: MalaikaColors.primary,
+                ),
+              ),
+            ),
+            const SizedBox(height: 8),
+            // Duration
+            Row(
+              children: [
+                const Icon(Icons.schedule_rounded,
+                    size: 13, color: MalaikaColors.textSecondary),
+                const SizedBox(width: 6),
+                Text('For $duration',
+                    style: const TextStyle(
+                        fontSize: 12, color: MalaikaColors.textSecondary)),
+              ],
+            ),
+            const SizedBox(height: 8),
+            // Preparation
+            Text(preparation,
+                style: const TextStyle(
+                    fontSize: 12, color: MalaikaColors.text, height: 1.4)),
+            const SizedBox(height: 6),
+            // WHO reference
+            Text(reference,
+                style: const TextStyle(
+                    fontSize: 9, color: MalaikaColors.textMuted)),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// =============================================================================
+// ORS Guide Card — visual rehydration instructions
+// =============================================================================
+
+class _OrsGuideWidget extends StatelessWidget {
+  final Map<String, dynamic> metadata;
+  const _OrsGuideWidget({required this.metadata});
+
+  @override
+  Widget build(BuildContext context) {
+    final planType = metadata['planType'] as String;
+    final volumeMl = (metadata['volumeMl'] as num).toDouble();
+    final frequency = metadata['frequency'] as String;
+    final zincDoseMg = (metadata['zincDoseMg'] as num).toDouble();
+    final zincDays = metadata['zincDays'] as int;
+    final homemadeRecipe = metadata['homemadeRecipe'] as String;
+    final reference = metadata['reference'] as String;
+
+    final isUrgent = planType == 'C';
+    final borderColor = isUrgent ? MalaikaColors.red : MalaikaColors.primary;
+    final bgColor = isUrgent ? MalaikaColors.redLight : Colors.blue.shade50;
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: bgColor,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: borderColor.withValues(alpha: 0.3)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Header
+            Row(
+              children: [
+                Icon(Icons.water_drop_rounded,
+                    size: 20, color: borderColor),
+                const SizedBox(width: 8),
+                Text(
+                  'ORS Rehydration — Plan $planType',
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
+                    color: borderColor,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+
+            // Volume — large and clear
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.8),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Column(
+                children: [
+                  Text(
+                    '${volumeMl.round()} ml',
+                    style: TextStyle(
+                      fontSize: 28,
+                      fontWeight: FontWeight.w800,
+                      color: borderColor,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    frequency,
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: borderColor,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 10),
+
+            // How to prepare
+            const Text(
+              'How to prepare ORS:',
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: MalaikaColors.text,
+              ),
+            ),
+            const SizedBox(height: 4),
+            const Text(
+              '1. Wash your hands\n'
+              '2. Pour 1 ORS packet into a clean container\n'
+              '3. Add 1 liter of clean water\n'
+              '4. Stir until dissolved\n'
+              '5. Give small sips frequently',
+              style: TextStyle(
+                  fontSize: 12, color: MalaikaColors.text, height: 1.5),
+            ),
+            const SizedBox(height: 10),
+
+            // Homemade recipe fallback
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: MalaikaColors.yellowLight,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(
+                    color: MalaikaColors.yellow.withValues(alpha: 0.3)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Row(
+                    children: [
+                      Icon(Icons.lightbulb_outline_rounded,
+                          size: 13, color: MalaikaColors.yellow),
+                      SizedBox(width: 6),
+                      Text('If no ORS packet available:',
+                          style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                              color: MalaikaColors.yellow)),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Text(homemadeRecipe,
+                      style: const TextStyle(
+                          fontSize: 11,
+                          color: MalaikaColors.text,
+                          height: 1.4)),
+                ],
+              ),
+            ),
+            const SizedBox(height: 10),
+
+            // Zinc reminder
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: MalaikaColors.greenLight,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.add_circle_outline_rounded,
+                      size: 16, color: MalaikaColors.green),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Also give Zinc ${zincDoseMg.round()}mg daily for $zincDays days '
+                      '— even after diarrhea stops',
+                      style: const TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: MalaikaColors.green,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(reference,
+                style: const TextStyle(
+                    fontSize: 9, color: MalaikaColors.textMuted)),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// =============================================================================
+// Treatment Action — single action item (home care / pre-referral)
+// =============================================================================
+
+class _TreatmentActionWidget extends StatelessWidget {
+  final String text;
+  final bool urgent;
+  const _TreatmentActionWidget({required this.text, this.urgent = false});
+
+  @override
+  Widget build(BuildContext context) {
+    final color = urgent ? MalaikaColors.red : MalaikaColors.green;
+    final bg = urgent ? MalaikaColors.redLight : MalaikaColors.greenLight;
+    final icon = urgent
+        ? Icons.warning_amber_rounded
+        : Icons.check_circle_outline_rounded;
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 3),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: BoxDecoration(
+          color: bg,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: color.withValues(alpha: 0.2)),
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(icon, size: 16, color: color),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                text,
+                style: TextStyle(
+                  fontSize: 13,
+                  color: urgent ? MalaikaColors.red : MalaikaColors.text,
+                  fontWeight: urgent ? FontWeight.w600 : FontWeight.normal,
+                  height: 1.4,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }

@@ -44,42 +44,28 @@ class VisionKeys {
 // Comprehensive Vision Prompt — single photo, multiple assessments
 // ============================================================================
 
-/// System instruction for the vision session (~20 tokens).
-/// Kept minimal — clinical persona + precision directive.
-const String visionSystemPrompt =
-    'You are a child health screener. Report only what you observe.';
+/// System instruction for the vision session — empty to save tokens.
+/// All instructions go in the user prompt instead.
+const String visionSystemPrompt = 'Check this child for health signs.';
 
-/// The master vision prompt — clinically precise, ~130 tokens.
+/// Ultra-short vision prompt — must fit in ~90 tokens.
 ///
-/// Token budget (maxTokens=512):
-///   Image: ~70-140 tokens (256px, low budget)
-///   System: ~20 tokens
-///   This prompt: ~130 tokens
-///   Output: ~100 tokens (6 answers + 1 sentence)
-///   Total: ~360-430 — safely under 512
+/// Token budget (maxTokens=200 — proven stable on A53 Mali G68):
+///   Image: ~70 tokens (256px, smallest token budget)
+///   System: ~10 tokens
+///   This prompt: ~90 tokens
+///   Total input: ~170 — under 200 limit
+///   Output: generated after input, not counted against limit
 ///
-/// Design choices:
-///   - Specific visual cues per sign (not just medical terms)
-///   - Structured YES/NO output for reliable parsing
-///   - One summary sentence for the UI display
-///   - No redundant signs (removed unconscious, dry_lips, nasal_flaring
-///     — these are less reliable from a single photo)
+/// Each line has a brief visual cue so the 2B model knows what to look for.
 const String comprehensiveVisionPrompt =
-    'Look at this child. For each sign, answer YES or NO.\n\n'
-    'LETHARGIC — eyes closed or unfocused, body limp, not alert?\n'
-    'SUNKEN_EYES — eyes deep in sockets, hollow look?\n'
-    'WASTING — very thin, ribs or bones clearly showing, loose skin?\n'
-    'EDEMA — swelling in both feet or legs?\n'
-    'PALLOR — skin, lips, or palms unusually pale?\n'
-    'RASH — red spots, bumps, or skin rash anywhere?\n\n'
-    'Reply:\n'
-    'LETHARGIC: YES or NO\n'
-    'SUNKEN_EYES: YES or NO\n'
-    'WASTING: YES or NO\n'
-    'EDEMA: YES or NO\n'
-    'PALLOR: YES or NO\n'
-    'RASH: YES or NO\n'
-    'SUMMARY: one sentence about the child.';
+    'Answer YES or NO for each:\n'
+    'LETHARGIC (eyes closed, limp): YES/NO\n'
+    'SUNKEN_EYES (deep in sockets): YES/NO\n'
+    'WASTING (very thin, ribs showing): YES/NO\n'
+    'EDEMA (swollen feet): YES/NO\n'
+    'PALLOR (pale skin/lips): YES/NO\n'
+    'RASH (spots or rash): YES/NO';
 
 // ============================================================================
 // Parse Vision Response

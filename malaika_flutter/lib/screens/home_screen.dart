@@ -376,11 +376,8 @@ class _HomeScreenState extends State<HomeScreen> {
     _tracker.startCall('comprehensive_vision', step: 'vision', inputType: 'image');
 
     try {
-      // CRITICAL: Close text session BEFORE opening gallery picker.
-      // The gallery backgrounds the app — if model holds GPU, Android OOM-kills us.
+      // Close text session before gallery — same pattern as proven _onTakePhoto.
       await _closeChat();
-      // Let GPU memory fully reclaim before backgrounding for gallery
-      await Future.delayed(const Duration(seconds: 1));
 
       final picker = ImagePicker();
       final image = await picker.pickImage(
@@ -399,16 +396,10 @@ class _HomeScreenState extends State<HomeScreen> {
       final imageBytes = await image.readAsBytes();
       _addBot('Analyzing the photo...');
 
-      // Hard GPU reset: same pattern as the proven _onTakePhoto flow.
-      // Close any lingering session, wait for Mali G68 to release memory,
-      // then re-acquire model with vision support enabled.
+      // Re-acquire model with vision support — same as proven _onTakePhoto.
       await _closeChat();
-      await Future.delayed(const Duration(seconds: 2));
-
-      // Force fresh model with vision encoder.
-      // maxTokens=512 because image tokens + prompt need headroom.
       final model = await FlutterGemma.getActiveModel(
-        maxTokens: 512,
+        maxTokens: 200,
         supportImage: true,
         maxNumImages: 1,
       );
@@ -634,7 +625,7 @@ class _HomeScreenState extends State<HomeScreen> {
     _addTyping();
 
     final extractPrompt = _buildExtractPrompt(currentQ, text);
-    await _initSession(prevStep, maxTokens: 256,
+    await _initSession(prevStep, maxTokens: 200,
         systemPrompt: 'You are a clinical assistant. Reply with ONLY what is asked. One word or number only.');
     final extractRaw = await _ask(extractPrompt, minLength: 1);
 
@@ -883,7 +874,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
       await _closeChat();
       final model = await FlutterGemma.getActiveModel(
-        maxTokens: 512,
+        maxTokens: 200,
         supportImage: true,
         maxNumImages: 1,
       );

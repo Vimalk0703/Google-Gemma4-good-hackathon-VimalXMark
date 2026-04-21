@@ -376,7 +376,12 @@ class _HomeScreenState extends State<HomeScreen> {
     _tracker.startCall('comprehensive_vision', step: 'vision', inputType: 'image');
 
     try {
+      // CRITICAL: Close text session BEFORE opening gallery picker.
+      // The gallery backgrounds the app — if model holds GPU, Android OOM-kills us.
       await _closeChat();
+      // Let GPU memory fully reclaim before backgrounding for gallery
+      await Future.delayed(const Duration(seconds: 1));
+
       final picker = ImagePicker();
       final image = await picker.pickImage(
         source: ImageSource.gallery,
@@ -394,10 +399,16 @@ class _HomeScreenState extends State<HomeScreen> {
       final imageBytes = await image.readAsBytes();
       _addBot('Analyzing the photo...');
 
-      // Open vision session
+      // Hard GPU reset: same pattern as the proven _onTakePhoto flow.
+      // Close any lingering session, wait for Mali G68 to release memory,
+      // then re-acquire model with vision support enabled.
       await _closeChat();
+      await Future.delayed(const Duration(seconds: 2));
+
+      // Force fresh model with vision encoder.
+      // maxTokens=512 because image tokens + prompt need headroom.
       final model = await FlutterGemma.getActiveModel(
-        maxTokens: 256,
+        maxTokens: 512,
         supportImage: true,
         maxNumImages: 1,
       );
@@ -661,13 +672,22 @@ class _HomeScreenState extends State<HomeScreen> {
       return;
     }
 
-    // ── CLEAR ANSWER: Feed original text for auto-fill, override primary finding ──
-    // Pass original text so auto-fill can detect numbers/keywords for upcoming Qs
-    // (e.g., "yes fever for 2 days" auto-fills fever_days=2)
+    // ── CLEAR ANSWER: Feed LLM-extracted value to state machine ──
+    // Use clean value (not original text) to prevent false auto-fills
+    // across different question types (e.g., age "12" → weight "12")
+    String cleanInput;
+    if (extraction.value == true) {
+      cleanInput = 'yes';
+    } else if (extraction.value == false) {
+      cleanInput = 'no';
+    } else if (extraction.value is int) {
+      cleanInput = '${extraction.value}';
+    } else {
+      cleanInput = text;
+    }
+
     final prevRawKeys = Set<String>.from(_q.rawAnswers.keys);
-    final completedStep = _q.recordAnswer(text);
-    // Override the primary finding with LLM-extracted value (more reliable)
-    _q.findings[currentQ.id] = extraction.value;
+    final completedStep = _q.recordAnswer(cleanInput);
 
     final newKeys = _q.rawAnswers.keys
         .where((k) => !prevRawKeys.contains(k))

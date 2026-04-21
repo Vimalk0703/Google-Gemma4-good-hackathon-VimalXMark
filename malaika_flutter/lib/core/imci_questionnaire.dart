@@ -457,7 +457,10 @@ class ImciQuestionnaire {
       case AnswerType.number:
         final num = _extractNumber(text);
         findings[q.id] = num;
-        if (q.id == 'weight_kg') weightKg = num.toDouble();
+        if (q.id == 'weight_kg') {
+          // 0 means "not sure" — will use age-based estimation in treatment
+          weightKg = num > 0 ? num.toDouble() : 0;
+        }
       case AnswerType.age:
         ageMonths = _extractAge(text);
         findings[q.id] = ageMonths;
@@ -508,6 +511,8 @@ class ImciQuestionnaire {
 
       switch (q.type) {
         case AnswerType.number:
+          // Don't auto-fill weight from age — they're unrelated numbers
+          if (q.id == 'weight_kg') continue;
           // "yes for last 2 days" → extract the number
           final num = _extractNumber(text);
           if (num > 0) {

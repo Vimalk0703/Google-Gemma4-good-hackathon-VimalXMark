@@ -46,32 +46,18 @@ class VisionKeys {
 
 /// The master vision prompt that checks everything in ONE photo.
 /// This replaces the per-step vision prompts with a single comprehensive scan.
+/// Short prompt that fits in ~120 tokens. Must stay under 150 tokens
+/// because image tokens + system prompt eat into the 512 maxTokens budget.
 const String comprehensiveVisionPrompt =
-    'You are a child health assistant. Look at this child carefully and '
-    'assess ALL of the following clinical signs.\n\n'
-    'CHECK EACH ONE and reply YES or NO for each:\n\n'
-    '1. ALERTNESS: Is the child lethargic (very sleepy, not looking around)?\n'
-    '2. CONSCIOUSNESS: Is the child unconscious (eyes closed, not responding)?\n'
-    '3. SUNKEN EYES: Are the eyes sunken deep in the sockets?\n'
-    '4. DRY LIPS/MOUTH: Are the lips dry, cracked, or mouth dry?\n'
-    '5. WASTING: Is the child very thin? Ribs, bones, or spine visible?\n'
-    '6. EDEMA: Is there visible swelling in both feet?\n'
-    '7. PALLOR: Is the skin or palms very pale (sign of anemia)?\n'
-    '8. RASH: Is there a visible skin rash?\n'
-    '9. NASAL FLARING: Are the nostrils widening with each breath?\n'
-    '10. DISTRESS: Does the child appear to be in pain or distress?\n\n'
-    'Reply in this EXACT format, one per line:\n'
+    'Check this child for: lethargic, sunken eyes, dry lips, '
+    'wasting (ribs visible), edema (swollen feet), pallor, rash.\n'
+    'Reply YES or NO per line:\n'
     'LETHARGIC: YES/NO\n'
-    'UNCONSCIOUS: YES/NO\n'
     'SUNKEN_EYES: YES/NO\n'
-    'DRY_LIPS: YES/NO\n'
     'WASTING: YES/NO\n'
     'EDEMA: YES/NO\n'
     'PALLOR: YES/NO\n'
-    'RASH: YES/NO\n'
-    'NASAL_FLARING: YES/NO\n'
-    'DISTRESS: YES/NO\n\n'
-    'Then write ONE sentence describing the child\'s overall appearance.';
+    'RASH: YES/NO';
 
 // ============================================================================
 // Parse Vision Response
@@ -90,8 +76,6 @@ Map<String, bool> parseVisionResponse(String response) {
     // Check for each finding keyword
     if (trimmed.contains('LETHARGIC')) {
       findings[VisionKeys.lethargic] = trimmed.contains('YES');
-    } else if (trimmed.contains('UNCONSCIOUS')) {
-      findings[VisionKeys.unconscious] = trimmed.contains('YES');
     } else if (trimmed.contains('SUNKEN') && trimmed.contains('EYE')) {
       findings[VisionKeys.sunkenEyes] = trimmed.contains('YES');
     } else if (trimmed.contains('DRY') && (trimmed.contains('LIP') || trimmed.contains('MOUTH'))) {

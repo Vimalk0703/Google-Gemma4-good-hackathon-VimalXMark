@@ -44,20 +44,42 @@ class VisionKeys {
 // Comprehensive Vision Prompt — single photo, multiple assessments
 // ============================================================================
 
-/// The master vision prompt that checks everything in ONE photo.
-/// This replaces the per-step vision prompts with a single comprehensive scan.
-/// Short prompt that fits in ~120 tokens. Must stay under 150 tokens
-/// because image tokens + system prompt eat into the 512 maxTokens budget.
+/// System instruction for the vision session (~20 tokens).
+/// Kept minimal — clinical persona + precision directive.
+const String visionSystemPrompt =
+    'You are a child health screener. Report only what you observe.';
+
+/// The master vision prompt — clinically precise, ~130 tokens.
+///
+/// Token budget (maxTokens=512):
+///   Image: ~70-140 tokens (256px, low budget)
+///   System: ~20 tokens
+///   This prompt: ~130 tokens
+///   Output: ~100 tokens (6 answers + 1 sentence)
+///   Total: ~360-430 — safely under 512
+///
+/// Design choices:
+///   - Specific visual cues per sign (not just medical terms)
+///   - Structured YES/NO output for reliable parsing
+///   - One summary sentence for the UI display
+///   - No redundant signs (removed unconscious, dry_lips, nasal_flaring
+///     — these are less reliable from a single photo)
 const String comprehensiveVisionPrompt =
-    'Check this child for: lethargic, sunken eyes, dry lips, '
-    'wasting (ribs visible), edema (swollen feet), pallor, rash.\n'
-    'Reply YES or NO per line:\n'
-    'LETHARGIC: YES/NO\n'
-    'SUNKEN_EYES: YES/NO\n'
-    'WASTING: YES/NO\n'
-    'EDEMA: YES/NO\n'
-    'PALLOR: YES/NO\n'
-    'RASH: YES/NO';
+    'Look at this child. For each sign, answer YES or NO.\n\n'
+    'LETHARGIC — eyes closed or unfocused, body limp, not alert?\n'
+    'SUNKEN_EYES — eyes deep in sockets, hollow look?\n'
+    'WASTING — very thin, ribs or bones clearly showing, loose skin?\n'
+    'EDEMA — swelling in both feet or legs?\n'
+    'PALLOR — skin, lips, or palms unusually pale?\n'
+    'RASH — red spots, bumps, or skin rash anywhere?\n\n'
+    'Reply:\n'
+    'LETHARGIC: YES or NO\n'
+    'SUNKEN_EYES: YES or NO\n'
+    'WASTING: YES or NO\n'
+    'EDEMA: YES or NO\n'
+    'PALLOR: YES or NO\n'
+    'RASH: YES or NO\n'
+    'SUMMARY: one sentence about the child.';
 
 // ============================================================================
 // Parse Vision Response
@@ -73,38 +95,51 @@ Map<String, bool> parseVisionResponse(String response) {
     final trimmed = line.trim();
     if (trimmed.isEmpty) continue;
 
-    // Check for each finding keyword
+    // Check for each finding keyword — tolerant of formatting variations
     if (trimmed.contains('LETHARGIC')) {
       findings[VisionKeys.lethargic] = trimmed.contains('YES');
     } else if (trimmed.contains('SUNKEN') && trimmed.contains('EYE')) {
       findings[VisionKeys.sunkenEyes] = trimmed.contains('YES');
-    } else if (trimmed.contains('DRY') && (trimmed.contains('LIP') || trimmed.contains('MOUTH'))) {
-      findings[VisionKeys.dryLips] = trimmed.contains('YES');
-    } else if (trimmed.contains('WASTING') || trimmed.contains('THIN')) {
+    } else if (trimmed.contains('WASTING') || (trimmed.contains('THIN') && !trimmed.contains('SUMMARY'))) {
       findings[VisionKeys.wasting] = trimmed.contains('YES');
     } else if (trimmed.contains('EDEMA') || trimmed.contains('SWELLING')) {
       findings[VisionKeys.edema] = trimmed.contains('YES');
     } else if (trimmed.contains('PALLOR') || trimmed.contains('PALE')) {
       findings[VisionKeys.pallor] = trimmed.contains('YES');
-    } else if (trimmed.contains('RASH')) {
+    } else if (trimmed.contains('RASH') && !trimmed.contains('SUMMARY')) {
       findings[VisionKeys.rash] = trimmed.contains('YES');
-    } else if (trimmed.contains('NASAL') || trimmed.contains('FLARING')) {
-      findings[VisionKeys.nasalFlaring] = trimmed.contains('YES');
-    } else if (trimmed.contains('DISTRESS')) {
-      findings[VisionKeys.respiratoryDistress] = trimmed.contains('YES');
     }
+    // SUMMARY line is not a finding — it's for UI display
   }
 
-  // Mark dehydrated if any dehydration sign present
+  // Mark dehydrated if sunken eyes detected
   findings[VisionKeys.dehydrated] =
-      (findings[VisionKeys.sunkenEyes] ?? false) ||
-      (findings[VisionKeys.dryLips] ?? false);
+      findings[VisionKeys.sunkenEyes] ?? false;
 
-  // Check for measles-like rash pattern
+  // Rash could indicate measles — follow-up Q will confirm
   findings[VisionKeys.measlesRash] =
-      (findings[VisionKeys.rash] ?? false); // Further classification by follow-up Q
+      findings[VisionKeys.rash] ?? false;
 
   return findings;
+}
+
+/// Extract the SUMMARY sentence from the vision response (for UI display).
+String extractVisionSummary(String response) {
+  final lines = response.split('\n');
+  for (final line in lines) {
+    final trimmed = line.trim();
+    if (trimmed.toUpperCase().startsWith('SUMMARY')) {
+      // Remove "SUMMARY:" prefix
+      final idx = trimmed.indexOf(':');
+      return idx >= 0 ? trimmed.substring(idx + 1).trim() : trimmed;
+    }
+  }
+  // If no SUMMARY line, return the last non-empty line
+  for (var i = lines.length - 1; i >= 0; i--) {
+    final trimmed = lines[i].trim();
+    if (trimmed.isNotEmpty && !trimmed.contains(':')) return trimmed;
+  }
+  return '';
 }
 
 // ============================================================================

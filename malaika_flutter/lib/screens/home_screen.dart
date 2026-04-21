@@ -416,9 +416,7 @@ class _HomeScreenState extends State<HomeScreen> {
         temperature: 0.2,
         topK: 40,
         supportImage: true,
-        systemInstruction:
-            'You are a clinical health assistant. '
-            'Analyze the image precisely. Only report what you can see.',
+        systemInstruction: visionSystemPrompt,
       );
       _chatStep = 'vision';
 
@@ -468,7 +466,13 @@ class _HomeScreenState extends State<HomeScreen> {
             .map((e) => e.key.replaceAll('vision_', '').replaceAll('_', ' '))
             .toList();
 
-        if (detected.isNotEmpty) {
+        // Show Gemma's own summary if available, else list findings
+        final summary = extractVisionSummary(analysisText);
+        if (summary.isNotEmpty) {
+          _addBot(summary.endsWith('.')
+              ? '$summary Let me ask a few more questions.'
+              : '$summary. Let me ask a few more questions.');
+        } else if (detected.isNotEmpty) {
           _addBot('I can see some signs: ${detected.join(', ')}. '
               'Let me ask a few more questions to be sure.');
         } else {

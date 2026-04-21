@@ -1,15 +1,44 @@
 import 'package:flutter/material.dart';
 import '../theme/malaika_theme.dart';
+import '../core/assessment_store.dart';
 import 'home_screen.dart';
 import 'emergency_signs_screen.dart';
 
 /// Dashboard — the app home screen.
 ///
-/// Shows the main IMCI assessment action, quick reference features,
-/// and technology info. Multiple functionalities, not just a chat.
-class DashboardScreen extends StatelessWidget {
+/// Shows the main IMCI assessment action, language selector,
+/// quick reference features, and technology info.
+class DashboardScreen extends StatefulWidget {
   final bool modelLoaded;
   const DashboardScreen({super.key, required this.modelLoaded});
+
+  @override
+  State<DashboardScreen> createState() => _DashboardScreenState();
+}
+
+class _DashboardScreenState extends State<DashboardScreen> {
+  String _language = 'en';
+  int _assessmentCount = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadState();
+  }
+
+  Future<void> _loadState() async {
+    final lang = await AssessmentStore.getLanguage();
+    final count = await AssessmentStore.count();
+    if (mounted) setState(() { _language = lang; _assessmentCount = count; });
+  }
+
+  Future<void> _cycleLanguage() async {
+    final codes = AssessmentStore.supportedLanguages.keys.toList();
+    final idx = codes.indexOf(_language);
+    final next = codes[(idx + 1) % codes.length];
+    await AssessmentStore.setLanguage(next);
+    setState(() => _language = next);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -79,6 +108,36 @@ class DashboardScreen extends StatelessWidget {
                 ),
               ),
             ],
+          ),
+        ),
+        // Language selector
+        GestureDetector(
+          onTap: _cycleLanguage,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            margin: const EdgeInsets.only(right: 8),
+            decoration: BoxDecoration(
+              color: MalaikaColors.primaryLight,
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(
+                  color: MalaikaColors.primary.withValues(alpha: 0.2)),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.language_rounded,
+                    size: 13, color: MalaikaColors.primary),
+                const SizedBox(width: 5),
+                Text(
+                  _language.toUpperCase(),
+                  style: const TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                    color: MalaikaColors.primary,
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
         // Offline badge
@@ -171,11 +230,14 @@ class DashboardScreen extends StatelessWidget {
           SizedBox(
             width: double.infinity,
             child: ElevatedButton(
-              onPressed: () => Navigator.of(context).push(
-                MaterialPageRoute(
-                    builder: (_) =>
-                        HomeScreen(modelLoaded: modelLoaded)),
-              ),
+              onPressed: () async {
+                await Navigator.of(context).push(
+                  MaterialPageRoute(
+                      builder: (_) =>
+                          HomeScreen(modelLoaded: widget.modelLoaded)),
+                );
+                _loadState(); // Refresh assessment count on return
+              },
               style: ElevatedButton.styleFrom(
                 backgroundColor: Colors.white,
                 foregroundColor: MalaikaColors.primary,
@@ -307,33 +369,147 @@ class DashboardScreen extends StatelessWidget {
   // --------------------------------------------------------------------------
 
   Widget _buildQuickRefGrid(BuildContext context) {
-    return Row(
+    return Column(
       children: [
-        Expanded(
-          child: _buildFeatureCard(
-            icon: Icons.warning_amber_rounded,
-            iconColor: MalaikaColors.red,
-            iconBg: MalaikaColors.redLight,
-            title: 'Emergency Signs',
-            subtitle: 'When to seek help',
-            onTap: () => Navigator.of(context).push(
-              MaterialPageRoute(
-                  builder: (_) => const EmergencySignsScreen()),
+        Row(
+          children: [
+            Expanded(
+              child: _buildFeatureCard(
+                icon: Icons.warning_amber_rounded,
+                iconColor: MalaikaColors.red,
+                iconBg: MalaikaColors.redLight,
+                title: 'Emergency Signs',
+                subtitle: 'When to seek help',
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute(
+                      builder: (_) => const EmergencySignsScreen()),
+                ),
+              ),
             ),
-          ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: _buildFeatureCard(
+                icon: Icons.menu_book_rounded,
+                iconColor: MalaikaColors.primary,
+                iconBg: MalaikaColors.primaryLight,
+                title: 'IMCI Guide',
+                subtitle: 'Protocol reference',
+                onTap: () => _showAbout(context),
+              ),
+            ),
+          ],
         ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: _buildFeatureCard(
-            icon: Icons.menu_book_rounded,
-            iconColor: MalaikaColors.primary,
-            iconBg: MalaikaColors.primaryLight,
-            title: 'IMCI Guide',
-            subtitle: 'Protocol reference',
-            onTap: () => _showAbout(context),
+        if (_assessmentCount > 0) ...[
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: _buildFeatureCard(
+                  icon: Icons.history_rounded,
+                  iconColor: MalaikaColors.green,
+                  iconBg: MalaikaColors.greenLight,
+                  title: 'Past Assessments',
+                  subtitle: '$_assessmentCount saved',
+                  onTap: () => _showPastAssessments(context),
+                ),
+              ),
+              const SizedBox(width: 12),
+              const Expanded(child: SizedBox()), // Placeholder for grid balance
+            ],
           ),
-        ),
+        ],
       ],
+    );
+  }
+
+  void _showPastAssessments(BuildContext context) async {
+    final assessments = await AssessmentStore.loadAll();
+    if (!context.mounted) return;
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: MalaikaColors.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => DraggableScrollableSheet(
+        initialChildSize: 0.5,
+        minChildSize: 0.3,
+        maxChildSize: 0.85,
+        expand: false,
+        builder: (_, controller) => ListView(
+          controller: controller,
+          padding: const EdgeInsets.all(24),
+          children: [
+            Center(
+              child: Container(
+                width: 40, height: 4,
+                decoration: BoxDecoration(
+                  color: MalaikaColors.border,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
+            const SizedBox(height: 20),
+            const Text('Past Assessments',
+                style: TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.w700,
+                    color: MalaikaColors.text)),
+            const SizedBox(height: 16),
+            if (assessments.isEmpty)
+              const Text('No saved assessments yet.',
+                  style: TextStyle(color: MalaikaColors.textSecondary))
+            else
+              ...assessments.map((a) {
+                final sevColor = MalaikaColors.forSeverity(a.severity);
+                final date = '${a.timestamp.day}/${a.timestamp.month}/${a.timestamp.year}';
+                return Container(
+                  margin: const EdgeInsets.only(bottom: 10),
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: MalaikaColors.surface,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: MalaikaColors.border),
+                  ),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 10, height: 10,
+                        decoration: BoxDecoration(
+                          color: sevColor,
+                          shape: BoxShape.circle,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text('$date — ${a.ageMonths} months old',
+                                style: const TextStyle(
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w600,
+                                    color: MalaikaColors.text)),
+                            const SizedBox(height: 2),
+                            Text(
+                              'Severity: ${a.severity.toUpperCase()} — ${a.classifications.values.join(", ")}',
+                              style: const TextStyle(
+                                  fontSize: 12,
+                                  color: MalaikaColors.textSecondary),
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              }),
+          ],
+        ),
+      ),
     );
   }
 

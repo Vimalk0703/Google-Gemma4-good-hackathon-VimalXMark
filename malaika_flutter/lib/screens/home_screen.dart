@@ -53,6 +53,15 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _voiceMode = false; // Continuous voice — one tap to activate
   String _partialText = '';
 
+  /// Tracks consecutive STT errors to break runaway re-listen loops. When
+  /// the engine refuses repeated starts (error_busy, error_client) the
+  /// auto-restart can spin many times per second; if 3 errors land in <5s
+  /// we exit voice mode so the user can manually retry.
+  int _sttErrorCount = 0;
+  DateTime? _lastSttError;
+  static const _sttErrorWindow = Duration(seconds: 5);
+  static const _sttErrorThreshold = 3;
+
   /// The questionnaire manages all IMCI Q&A state.
   final ImciQuestionnaire _q = ImciQuestionnaire();
 
@@ -81,18 +90,24 @@ class _HomeScreenState extends State<HomeScreen> {
   /// User's preferred language code (loaded from store).
   String _language = 'en';
 
-  /// System prompt for the LLM — just persona and tone.
+  /// First-turn system prompt — used only for the very first message, where
+  /// a brief introduction is appropriate. After that, every subsequent
+  /// session uses _systemPromptMidConversation, which forbids re-greeting.
   static const _systemPrompt =
-      'You are Malaika, a warm and caring child health assistant. '
-      'You help caregivers check on their child\'s health.\n'
-      'RULES:\n'
-      '- Keep responses to 1-2 short sentences\n'
-      '- Be warm and reassuring\n'
-      '- ONLY ask the question you are told to ask\n'
-      '- Do NOT add extra questions or ask about other topics\n'
-      '- Do NOT assume any symptoms\n'
-      '- Acknowledge what the caregiver says briefly, then ask the given question\n'
-      '- Never diagnose';
+      'You are Malaika, a warm child-health assistant starting a new '
+      'conversation. Greet briefly. Ask the question given. '
+      '1-2 short sentences total. Never diagnose.';
+
+  /// Mid-conversation system prompt — used for every Gemma call AFTER the
+  /// initial greeting. Critically, this forbids re-introducing or saying
+  /// "Hi/Hello/I'm Malaika" because each session is recreated per turn
+  /// (memory constraint) and Gemma defaults to greeting in fresh sessions.
+  static const _systemPromptMidConversation =
+      'You are continuing an active conversation with the caregiver about '
+      'their sick child. NEVER re-introduce yourself. NEVER say "Hi", '
+      '"Hello", or "I am Malaika". Be warm but brief. ONE short sentence '
+      'ending in a question mark. Reference what is already known when '
+      'helpful. Ask only the question given. Never diagnose.';
 
   /// Report-specific system prompt (no "only ask questions" rule).
   static const _reportPrompt =
@@ -130,36 +145,59 @@ class _HomeScreenState extends State<HomeScreen> {
     };
     _voice.onListeningStopped = () {
       if (!mounted) return;
+      // STT genuinely stopped. Always reflect that in visible state — voice
+      // mode is a *user-intent* flag and must not be tied to a stale "still
+      // listening" state. Without this reset the mic icon gets stuck on
+      // "stop" while nothing is actually listening.
       if (_voiceState == VoiceState.listening) {
-        // In voice mode, re-listen after timeout (no speech detected)
-        if (_voiceMode) {
-          Future.delayed(const Duration(milliseconds: 300), () {
-            if (mounted && _voiceMode && _voiceState == VoiceState.listening) {
-              _startListening();
-            }
-          });
-        } else {
-          setState(() {
-            _voiceState = VoiceState.idle;
-            _partialText = '';
-          });
-        }
-      }
-    };
-    _voice.onSpeakingDone = _onSpeakingDone;
-    _voice.onError = () {
-      if (mounted) {
         setState(() {
           _voiceState = VoiceState.idle;
           _partialText = '';
         });
       }
+      // If user still wants voice mode, schedule a clean re-listen. The
+      // 600ms delay gives Android's SpeechRecognizer time to release its
+      // resources — back-to-back starts under 300ms silently fail on A53.
+      if (_voiceMode && !_q.isComplete) {
+        Future.delayed(const Duration(milliseconds: 600), () {
+          if (mounted && _voiceMode && _voiceState == VoiceState.idle) {
+            _startListening();
+          }
+        });
+      }
+    };
+    _voice.onSpeakingDone = _onSpeakingDone;
+    _voice.onError = () {
+      if (!mounted) return;
+
+      // Track STT error rate — break runaway auto-listen loop on repeated
+      // engine errors (error_busy / error_client / error_speech_timeout
+      // followed immediately by another timeout, etc.).
+      final now = DateTime.now();
+      if (_lastSttError != null &&
+          now.difference(_lastSttError!) < _sttErrorWindow) {
+        _sttErrorCount++;
+      } else {
+        _sttErrorCount = 1;
+      }
+      _lastSttError = now;
+
+      if (_sttErrorCount >= _sttErrorThreshold && _voiceMode) {
+        debugPrint('[VOICE] $_sttErrorCount STT errors in window — exiting voice mode');
+        _voiceMode = false;
+        _sttErrorCount = 0;
+        _voice.stopListening();
+      }
+
+      setState(() {
+        _voiceState = VoiceState.idle;
+        _partialText = '';
+      });
     };
   }
 
   void _onSttResult(String recognizedText) {
     if (recognizedText.trim().isEmpty) {
-      // Empty result — re-listen if in voice mode
       if (_voiceMode && mounted) {
         _startListening();
       } else if (mounted && _voiceState != VoiceState.speaking) {
@@ -167,6 +205,9 @@ class _HomeScreenState extends State<HomeScreen> {
       }
       return;
     }
+    // Successful recognition — reset the error rate-limiter.
+    _sttErrorCount = 0;
+    _lastSttError = null;
 
     _partialText = '';
     _textController.text = recognizedText.trim();
@@ -197,39 +238,39 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _onMicTap() async {
-    // If voice mode is active and user taps mic, exit voice mode
-    if (_voiceMode && _voiceState != VoiceState.idle) {
+    // If voice mode is on (regardless of inner state — even if stuck idle),
+    // tapping the mic means "exit voice mode". Clean stop both STT and TTS,
+    // reset all flags, and let the user tap again to start fresh.
+    if (_voiceMode) {
       await _voice.stopListening();
       await _voice.stopSpeaking();
-      setState(() {
-        _voiceMode = false;
-        _voiceState = VoiceState.idle;
-        _partialText = '';
-      });
-      return;
-    }
-
-    switch (_voiceState) {
-      case VoiceState.idle:
-        if (!_voiceReady) {
-          _showVoiceUnavailableSnackbar();
-          return;
-        }
-        // Activate continuous voice mode
-        setState(() => _voiceMode = true);
-    
-        await _startListening();
-      case VoiceState.listening:
-        await _voice.stopListening();
-      case VoiceState.speaking:
-        await _voice.stopSpeaking();
+      if (mounted) {
         setState(() {
           _voiceMode = false;
           _voiceState = VoiceState.idle;
+          _partialText = '';
         });
-      case VoiceState.thinking:
-        break;
+      }
+      return;
     }
+
+    // Voice mode is off. Tapping while thinking is a no-op — model is busy.
+    if (_voiceState == VoiceState.thinking) return;
+
+    if (!_voiceReady) {
+      _showVoiceUnavailableSnackbar();
+      return;
+    }
+
+    // Activate voice mode and start listening. The brief delay lets any
+    // prior STT session fully release before we start a new one — without
+    // this, Android's SpeechRecognizer occasionally accepts the call but
+    // emits no results.
+    setState(() => _voiceMode = true);
+    await _voice.stopListening();
+    await Future.delayed(const Duration(milliseconds: 200));
+    if (!mounted || !_voiceMode) return;
+    await _startListening();
   }
 
   void _showVoiceUnavailableSnackbar() {
@@ -253,10 +294,14 @@ class _HomeScreenState extends State<HomeScreen> {
     await _closeChat();
     try {
       final model = await FlutterGemma.getActiveModel(maxTokens: maxTokens);
+      // Default to mid-conversation prompt — greeting path passes _systemPrompt
+      // explicitly. Each session is recreated per turn (memory constraint),
+      // so without this Gemma re-greets the caregiver on every prompt.
       _chat = await model.createChat(
         temperature: 0.4,
         topK: 40,
-        systemInstruction: systemPrompt ?? _systemPrompt,
+        systemInstruction:
+            systemPrompt ?? '$_systemPromptMidConversation$_langDirective',
       );
       _chatStep = step;
       debugPrint('[MALAIKA] Session: $step');
@@ -412,7 +457,12 @@ class _HomeScreenState extends State<HomeScreen> {
     setState(() => _voiceState = VoiceState.thinking);
     _addTyping();
 
-    if (await _initSession('greeting')) {
+    // First-turn ONLY: use the greeting-friendly system prompt. Every other
+    // _initSession call defaults to _systemPromptMidConversation.
+    if (await _initSession(
+      'greeting',
+      systemPrompt: '$_systemPrompt$_langDirective',
+    )) {
       final greeting = await _ask(
         'Greet the caregiver warmly and ask: ${_q.currentQuestion!.question}',
       );
@@ -443,22 +493,16 @@ class _HomeScreenState extends State<HomeScreen> {
     _addStepBanner('Vision Assessment');
     _lastDisplayedStep = 'vision';
 
-    // Ask for photo with Gemma narration
+    // Ask for photo with Gemma narration — mid-conversation prompt
+    // (default in _initSession) keeps it from re-greeting.
     setState(() => _voiceState = VoiceState.thinking);
     _addTyping();
-    await _initSession('vision', systemPrompt:
-        'You are Malaika, a caring child health assistant.$_langDirective');
-    final askPhoto = await _ask(
-      'The caregiver told you about their child. '
-      'Now ask them warmly to show you a photo of the child so you can '
-      'check for health signs. Say it can be from the gallery. '
-      'Also say they can type "skip" if no photo is available.',
-    );
+    await _initSession('vision');
+    final askPhoto = await _ask(_buildPhotoAskPrompt());
     _removeTyping();
     _addBot(askPhoto.isNotEmpty
         ? askPhoto
-        : 'Now, can you show me a photo of your child? I will look for '
-          'health signs. You can pick one from your gallery, or type "skip".');
+        : 'Can you show me a photo of your child? You can type "skip" if no photo.');
 
     // Show photo prompt card
     _chatItems.add(_ChatItem(
@@ -622,6 +666,9 @@ class _HomeScreenState extends State<HomeScreen> {
       return;
     }
 
+    // Phase 2: pick the most clinically important question for this step.
+    await _pickAgenticNextQuestion(_q.currentStep);
+
     final nextQ = _q.currentQuestion!;
     // Skip per-step photo prompts (we already did comprehensive vision)
     if (nextQ.type == AnswerType.photo) {
@@ -629,12 +676,10 @@ class _HomeScreenState extends State<HomeScreen> {
       return _continueToTargetedQA(); // Recurse to next question
     }
 
-    // Ask the first targeted question
-    await _initSession(nextQ.step, systemPrompt:
-        '$_systemPrompt$_langDirective');
+    // Ask the first targeted question — default mid-conversation prompt.
+    await _initSession(nextQ.step);
     _addTyping();
-    final response = await _ask(
-        'Ask the caregiver: ${nextQ.question}');
+    final response = await _ask(_buildContextualAsk(nextQ));
     _removeTyping();
     _addBot(response.isNotEmpty && response.contains('?')
         ? response : nextQ.question);
@@ -683,6 +728,125 @@ class _HomeScreenState extends State<HomeScreen> {
       case AnswerType.photo:
         return (value: null, isUnclear: false);
     }
+  }
+
+  /// Phase 2 — agentic next-question selection.
+  ///
+  /// When 2+ questions remain in the current IMCI step, ask Gemma which is
+  /// most clinically important to ask next. The picker stays inside the
+  /// current step (we never reorder across IMCI domains — that flow is set
+  /// by the WHO protocol). On any failure (parse, no valid id, exception)
+  /// we fall through silently and the linear `currentQuestion` walk runs.
+  Future<void> _pickAgenticNextQuestion(String step) async {
+    if (!kAgenticOrchestration) return;
+    try {
+      final remaining = _q.remainingQuestionsInStep(step);
+      if (remaining.length < 2) return; // nothing to choose
+
+      final prompt = pickNextQuestionPrompt(
+        knownFindings: _q.findings,
+        remaining: remaining,
+      );
+
+      _tracker.startCall('select_next_question', step: step);
+      await _initSession(step,
+          maxTokens: 200,
+          systemPrompt:
+              'You are a clinical assistant. Reply with ONLY the question id.');
+      final raw = await _ask(prompt, minLength: 1);
+      debugPrint('[MALAIKA] Picker raw: "$raw"');
+
+      final pickedId = parseNextQuestionId(
+        raw,
+        remaining.map((q) => q.id).toSet(),
+      );
+      if (pickedId == null) {
+        debugPrint('[MALAIKA] Picker invalid — keeping linear order');
+        _tracker.endCall(
+          success: false,
+          parseMethod: 'picker_invalid',
+          confidence: 0.0,
+        );
+        return;
+      }
+
+      final currentNext = _q.currentQuestion;
+      if (currentNext != null && currentNext.id == pickedId) {
+        debugPrint('[MALAIKA] Picker chose linear next ($pickedId) — no jump');
+        _tracker.endCall(
+          findings: {'picked': pickedId, 'jumped': 'false'},
+          success: true,
+          parseMethod: 'agentic_pick',
+          confidence: 0.9,
+        );
+        return;
+      }
+
+      debugPrint(
+          '[MALAIKA] Picker chose: $pickedId (linear next: ${currentNext?.id})');
+      _q.setIndexToQuestion(pickedId);
+      _tracker.endCall(
+        findings: {'picked': pickedId, 'jumped_from': currentNext?.id ?? '?'},
+        success: true,
+        parseMethod: 'agentic_pick',
+        confidence: 0.9,
+      );
+    } catch (e) {
+      debugPrint('[MALAIKA] Picker error (falling through): $e');
+    }
+  }
+
+  /// Phase 3 — build a Gemma user-prompt for asking ONE question naturally,
+  /// with explicit anti-greeting and known-context injection.
+  ///
+  /// The model has just been initialized in a fresh session (memory pattern)
+  /// so we re-introduce the conversation state in the prompt itself: positive
+  /// findings from belief, observed signs from vision, then the question.
+  /// All call sites use _systemPromptMidConversation, but the user prompt
+  /// reinforces "do not greet" because Gemma's instruction-following on a
+  /// 2.3B model is imperfect.
+  String _buildContextualAsk(ImciQuestion q) {
+    final lines = <String>[];
+    final belief = formatBeliefForPrompt(_q.findings);
+    if (belief.isNotEmpty) lines.add(belief);
+
+    if (_visionFindings.isNotEmpty) {
+      final seen = _visionFindings.entries
+          .where((e) => e.value)
+          .map((e) =>
+              e.key.replaceAll('vision_', '').replaceAll('_', ' '))
+          .toList();
+      if (seen.isNotEmpty) {
+        lines.add('Photo showed: ${seen.join(', ')}.');
+      }
+    }
+
+    final context = lines.isEmpty ? '' : '${lines.join('\n')}\n';
+    return '${context}Ask ONE warm short question. '
+        'Reference what you already know if relevant. '
+        'Do NOT greet, do NOT introduce yourself, do NOT say Hi/Hello. '
+        'The question to ask: "${q.question}"';
+  }
+
+  /// Phase 3 — build a "acknowledge prior answer + ask next question" prompt.
+  /// Same anti-greeting rules; references the caregiver's last text so the
+  /// transition feels natural.
+  String _buildAcknowledgeAndAsk(String previousAnswer, ImciQuestion q) {
+    return 'The caregiver just said: "$previousAnswer". '
+        'Acknowledge it briefly with concern if needed, then ask ONE warm '
+        'short question. Do NOT greet, do NOT introduce yourself. '
+        'The question to ask: "${q.question}"';
+  }
+
+  /// Phase 3 — build the comprehensive photo-request prompt without
+  /// re-greeting. Used right after greeting completes.
+  String _buildPhotoAskPrompt() {
+    final belief = formatBeliefForPrompt(_q.findings);
+    final preface = belief.isEmpty ? '' : '$belief\n';
+    return '${preface}You are mid-conversation. In ONE short caring sentence, '
+        'ask the caregiver to show a photo of the child so you can check '
+        'health signs. Mention they can type "skip" if no photo is available. '
+        'Do NOT greet, do NOT introduce yourself, do NOT say Hi/Hello.';
   }
 
   Future<void> _sendText() async {
@@ -920,6 +1084,9 @@ class _HomeScreenState extends State<HomeScreen> {
       return;
     }
 
+    // Phase 2: pick the most clinically important next question (within step).
+    await _pickAgenticNextQuestion(_q.currentStep);
+
     final nextQ = _q.currentQuestion!;
 
     if (nextQ.type == AnswerType.photo) {
@@ -935,11 +1102,9 @@ class _HomeScreenState extends State<HomeScreen> {
           if (mounted && _voiceState != VoiceState.speaking) setState(() => _voiceState = VoiceState.idle);
           return;
         }
-        await _initSession(next.step, systemPrompt:
-            '$_systemPrompt$_langDirective');
+        await _initSession(next.step);
         _addTyping();
-        final response = await _ask(
-            'Ask the caregiver: ${next.question}');
+        final response = await _ask(_buildContextualAsk(next));
         _removeTyping();
         _addBot(response.isNotEmpty && response.contains('?')
             ? response : next.question);
@@ -956,13 +1121,9 @@ class _HomeScreenState extends State<HomeScreen> {
     // Gemma 4 generates a warm, natural follow-up with the next question.
     // =====================================================================
     _tracker.startCall('speak_to_caregiver', step: nextQ.step);
-    await _initSession(nextQ.step, systemPrompt:
-        'You are Malaika, a caring child health assistant. '
-        'NEVER say "I\'m glad" or "that\'s great" about symptoms. '
-        'Show gentle concern when the child is unwell. Be brief.');
-    final response = await _ask(
-      'Caregiver said: "$text". Acknowledge with concern if needed, then ask: "${nextQ.question}"',
-    );
+    // Mid-conversation prompt is the default — no re-greeting.
+    await _initSession(nextQ.step);
+    final response = await _ask(_buildAcknowledgeAndAsk(text, nextQ));
     _tracker.endCall(
       success: response.isNotEmpty,
       parseMethod: 'gemma4_generation',
@@ -995,8 +1156,10 @@ class _HomeScreenState extends State<HomeScreen> {
     await _initSession(q.step);
     _addTyping();
     final askResponse = await _ask(
-      'Caregiver said: "$previousAnswer". Acknowledge briefly, then say: ${vp.askText} '
-      'Also mention they can type "skip" if they don\'t have a camera.',
+      'The caregiver just said: "$previousAnswer". '
+      'In ONE short caring sentence, ask: ${vp.askText} '
+      'Mention they can type "skip" if no photo. '
+      'Do NOT greet, do NOT introduce yourself.',
     );
     _removeTyping();
     _addBot(askResponse.isNotEmpty ? askResponse : vp.askText);
@@ -1107,14 +1270,14 @@ class _HomeScreenState extends State<HomeScreen> {
     if (_q.isComplete) {
       await _generateFinalReport();
     } else {
+      await _pickAgenticNextQuestion(_q.currentStep);
       final nextQ = _q.currentQuestion!;
       if (nextQ.type == AnswerType.photo) {
         await _handlePhotoQuestion(nextQ, '');
       } else {
         await _initSession(nextQ.step);
         _addTyping();
-        final response =
-            await _ask('Ask the caregiver: ${nextQ.question}');
+        final response = await _ask(_buildContextualAsk(nextQ));
         _removeTyping();
         if (response.isEmpty || !response.contains('?')) {
           _addBot(nextQ.question);
@@ -1139,11 +1302,11 @@ class _HomeScreenState extends State<HomeScreen> {
     if (_q.isComplete) {
       await _generateFinalReport();
     } else {
+      await _pickAgenticNextQuestion(_q.currentStep);
       final nextQ = _q.currentQuestion!;
       await _initSession(nextQ.step);
       _addTyping();
-      final response =
-          await _ask('Ask the caregiver: ${nextQ.question}');
+      final response = await _ask(_buildContextualAsk(nextQ));
       _removeTyping();
       if (response.isEmpty || !response.contains('?')) {
         _addBot(nextQ.question);

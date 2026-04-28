@@ -433,6 +433,32 @@ class ImciQuestionnaire {
   List<ImciQuestion> questionsForStep(String step) =>
       imciQuestions.where((q) => q.step == step).toList();
 
+  /// Questions remaining to ask within [step]: not photo, not yet answered,
+  /// trigger gate (if any) is satisfied. Used by the Phase 2 next-question
+  /// picker to constrain the LLM's choice to clinically valid options.
+  List<ImciQuestion> remainingQuestionsInStep(String step) {
+    return imciQuestions.where((q) {
+      if (q.step != step) return false;
+      if (q.type == AnswerType.photo) return false;
+      if (rawAnswers.containsKey(q.id)) return false;
+      if (q.triggerKey != null && findings[q.triggerKey] != true) return false;
+      return true;
+    }).toList();
+  }
+
+  /// Jump _index to the slot of [questionId] in [imciQuestions]. The next
+  /// call to [currentQuestion] will return that question (or skip it and
+  /// advance if it's already answered/its trigger is unmet — same rules
+  /// as the linear walk). No-op if the id isn't found.
+  void setIndexToQuestion(String questionId) {
+    for (var i = 0; i < imciQuestions.length; i++) {
+      if (imciQuestions[i].id == questionId) {
+        _index = i;
+        return;
+      }
+    }
+  }
+
   /// Record the user's answer to the current question.
   ///
   /// Extracts the finding value from the answer text using simple,

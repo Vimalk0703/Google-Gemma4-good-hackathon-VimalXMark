@@ -309,19 +309,51 @@ void registerAllSkills() {
   SkillRegistry.register(const Skill(
     name: 'parse_caregiver_response',
     description:
-        'Extract clinical facts from the caregiver\'s spoken or typed '
-        'response',
+        'Extract a single yes/no/number value from the caregiver\'s '
+        'response (legacy single-value path; used as fallback when '
+        'structured extraction fails).',
     imciStep: 'any',
     inputType: 'text',
     parameters: {
       'text': 'Caregiver\'s response (transcribed speech or typed)',
     },
     returns: {
-      'intent':
-          'What the caregiver is communicating '
-          '(affirmative/negative/informative/uncertain)',
-      'entities': 'Clinical entities mentioned (symptoms, duration, severity)',
-      'findings': 'Extracted IMCI-relevant findings',
+      'value': 'Single typed value matching the question type',
+    },
+  ));
+
+  // Phase 1 skill — structured multi-value extraction.
+  SkillRegistry.register(const Skill(
+    name: 'extract_structured_findings',
+    description:
+        'Extract every clinical finding the caregiver explicitly stated, '
+        'in one Gemma call, as a JSON object keyed by finding id.',
+    imciStep: 'any',
+    inputType: 'text',
+    parameters: {
+      'text': 'Caregiver\'s answer (verbatim)',
+      'schema': 'Allowed finding ids and types for the current step',
+    },
+    returns: {
+      'findings': 'Map of finding_id to typed value',
+    },
+  ));
+
+  // Phase 2 skill — agentic next-question selection.
+  SkillRegistry.register(const Skill(
+    name: 'select_next_question',
+    description:
+        'Pick the most clinically important question to ask next within '
+        'the current IMCI step, given confirmed findings. Stays inside '
+        'the WHO IMCI step order; only reorders within a step.',
+    imciStep: 'any',
+    inputType: 'findings',
+    parameters: {
+      'belief': 'Confirmed findings so far',
+      'remaining': 'List of remaining question_ids in the current step',
+    },
+    returns: {
+      'question_id': 'The chosen next question id',
     },
   ));
 

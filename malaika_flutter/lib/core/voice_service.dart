@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:speech_to_text/speech_to_text.dart';
 import 'package:flutter_tts/flutter_tts.dart';
@@ -10,6 +12,8 @@ class VoiceService {
 
   bool _sttAvailable = false;
   bool _ttsEnabled = true;
+  bool _isSpeaking = false;
+  Timer? _ttsWatchdog;
 
   bool get isSttAvailable => _sttAvailable;
   bool get isTtsEnabled => _ttsEnabled;
@@ -97,7 +101,15 @@ class VoiceService {
       await _tts.setSpeechRate(0.48);
       await _tts.setPitch(1.05); // Slightly warm tone
       await _tts.setVolume(1.0);
-      _tts.setCompletionHandler(() => onSpeakingDone?.call());
+      // ALL terminal TTS states — completion, error, cancel — must clear
+      // _isSpeaking and fire onSpeakingDone. Without this, audio focus
+      // loss or engine errors leave the UI stuck on "speaking".
+      _tts.setCompletionHandler(_finishSpeaking);
+      _tts.setErrorHandler((msg) {
+        debugPrint('[VOICE] TTS error: $msg');
+        _finishSpeaking();
+      });
+      _tts.setCancelHandler(_finishSpeaking);
     } catch (e) {
       debugPrint('[VOICE] TTS init failed: $e');
     }
@@ -107,10 +119,20 @@ class VoiceService {
   }
 
   /// Start listening. Auto-stops after 3s silence or 15s max.
+  ///
+  /// Defensive: if a prior session is still active (Android's SpeechRecognizer
+  /// often holds the resource for ~200ms after stop), we explicitly stop and
+  /// wait before starting a new session. Without this guard, listen() can
+  /// silently no-op and the UI gets stuck showing "listening" while nothing
+  /// is actually being recorded.
   Future<void> startListening() async {
     if (!_sttAvailable) return;
     try {
-      await _stt.listen(
+      if (_stt.isListening) {
+        await _stt.stop();
+        await Future.delayed(const Duration(milliseconds: 250));
+      }
+      final ok = await _stt.listen(
         onResult: (result) {
           if (result.finalResult) {
             onResult?.call(result.recognizedWords);
@@ -122,6 +144,13 @@ class VoiceService {
         pauseFor: const Duration(seconds: 3),
         listenOptions: SpeechListenOptions(listenMode: ListenMode.dictation),
       );
+      // The speech_to_text plugin's return value is unreliable on Android —
+      // it can return false even when the engine started listening (the
+      // status callback "listening" fires regardless). Only log; the
+      // status/error callbacks are the authoritative signal.
+      if (ok != true) {
+        debugPrint('[VOICE] _stt.listen returned false (status callback authoritative)');
+      }
     } catch (e) {
       debugPrint('[VOICE] Listen error: $e');
       onError?.call();
@@ -136,17 +165,40 @@ class VoiceService {
   }
 
   /// Speak text via TTS. No-op if TTS is disabled.
+  ///
+  /// A watchdog timer guarantees [onSpeakingDone] fires even if the engine
+  /// silently drops the request (audio focus loss, Bluetooth disconnect,
+  /// engine swap). Estimate is generous — ~0.5s per word + 3s buffer,
+  /// capped at 30s — so genuine completion still wins.
   Future<void> speak(String text) async {
     if (!_ttsEnabled || text.isEmpty) {
       onSpeakingDone?.call();
       return;
     }
+    _isSpeaking = true;
+    _ttsWatchdog?.cancel();
+    final wordCount = text.split(RegExp(r'\s+')).length;
+    final estimateMs = (wordCount * 500 + 3000).clamp(3000, 30000);
+    _ttsWatchdog = Timer(Duration(milliseconds: estimateMs), () {
+      if (_isSpeaking) {
+        debugPrint('[VOICE] TTS watchdog fired after ${estimateMs}ms — forcing onSpeakingDone');
+        _finishSpeaking();
+      }
+    });
     try {
       await _tts.speak(text);
     } catch (e) {
       debugPrint('[VOICE] TTS speak error: $e');
-      onSpeakingDone?.call();
+      _finishSpeaking();
     }
+  }
+
+  void _finishSpeaking() {
+    _ttsWatchdog?.cancel();
+    _ttsWatchdog = null;
+    if (!_isSpeaking) return; // already cleared — don't fire twice
+    _isSpeaking = false;
+    onSpeakingDone?.call();
   }
 
   /// Interrupt TTS playback.
@@ -154,11 +206,13 @@ class VoiceService {
     try {
       await _tts.stop();
     } catch (_) {}
+    _finishSpeaking();
   }
 
   void toggleTts() => _ttsEnabled = !_ttsEnabled;
 
   Future<void> dispose() async {
+    _ttsWatchdog?.cancel();
     await _stt.stop();
     await _stt.cancel();
     await _tts.stop();

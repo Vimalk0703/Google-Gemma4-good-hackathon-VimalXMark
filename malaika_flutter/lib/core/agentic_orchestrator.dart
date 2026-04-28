@@ -14,6 +14,7 @@ library;
 import 'dart:convert';
 
 import 'imci_questionnaire.dart';
+import 'skills.dart';
 
 // ============================================================================
 // Feature flag
@@ -24,6 +25,58 @@ import 'imci_questionnaire.dart';
 /// with their own per-call fallbacks. Lets us A/B revert during demos
 /// without touching code.
 const bool kAgenticOrchestration = true;
+
+// ============================================================================
+// P2.5/P2.6 — Belief + Skill context for prompts
+// ============================================================================
+
+/// Render the belief snapshot as a one-line preamble for prompts.
+/// Examples:
+///   "" (empty when nothing is known)
+///   "Known: lethargic, sunken_eyes, age_months=12, fever_days=2."
+///
+/// Token budget: ≤ ~30 tokens for typical end-of-assessment belief sets.
+/// Skips false booleans and zero numerics — only positive findings carry
+/// clinical signal worth giving the model.
+String formatBeliefForPrompt(Map<String, dynamic> belief) {
+  if (belief.isEmpty) return '';
+  final items = <String>[];
+  belief.forEach((k, v) {
+    if (v == true) items.add(k);
+    else if (v is num && v > 0) items.add('$k=$v');
+  });
+  if (items.isEmpty) return '';
+  return 'Known: ${items.join(', ')}.';
+}
+
+/// Render the active skill's contract as a one-line prompt prefix so the
+/// model sees the registered skill, not just hand-written instructions.
+/// Returns empty string if the skill name isn't in the registry.
+///
+/// Token budget: ~15-25 tokens depending on the skill description.
+String formatSkillContext(String skillName) {
+  try {
+    final skill = SkillRegistry.get(skillName);
+    return 'Skill: ${skill.name} — ${skill.description}';
+  } catch (_) {
+    return '';
+  }
+}
+
+/// Compose belief + skill prefix as a single block. Either or both may be
+/// empty; we return only the non-empty parts joined by a newline.
+String composePromptPrefix({String? skillName, Map<String, dynamic>? belief}) {
+  final parts = <String>[];
+  if (skillName != null) {
+    final s = formatSkillContext(skillName);
+    if (s.isNotEmpty) parts.add(s);
+  }
+  if (belief != null) {
+    final b = formatBeliefForPrompt(belief);
+    if (b.isNotEmpty) parts.add(b);
+  }
+  return parts.isEmpty ? '' : '${parts.join('\n')}\n';
+}
 
 // ============================================================================
 // Phase 1 — Structured Multi-Value Extraction
@@ -77,7 +130,12 @@ String buildStructuredExtractPrompt({
   if (lines.isEmpty) return '';
 
   final schema = lines.join(', ');
-  return 'Caregiver was just asked: "${currentQuestion.question}" '
+  final prefix = composePromptPrefix(
+    skillName: 'extract_structured_findings',
+    belief: knownFindings,
+  );
+
+  return '${prefix}Caregiver was just asked: "${currentQuestion.question}" '
       'Caregiver said: "$userText". '
       'Extract ONLY findings the caregiver explicitly stated. '
       'If they only answered the question above, include just that key. '
@@ -93,6 +151,51 @@ String _exampleValueForType(AnswerType t) => switch (t) {
       AnswerType.age => '12',
       AnswerType.photo => '""',
     };
+
+// ============================================================================
+// Phase 2 — Agentic Next-Question Selection
+// ============================================================================
+
+/// Build a prompt asking Gemma to pick the most clinically important
+/// question to ask NEXT, given what we already know.
+///
+/// Constraints:
+///   - The picker only sees questions remaining within the CURRENT IMCI step
+///     (we never reorder across steps — danger → breathing → diarrhea → fever
+///     → nutrition is the WHO IMCI flow and stays preserved).
+///   - The response is a single question_id; everything else is ignored.
+///
+/// Token budget: ≤ ~120 tokens of prompt for a typical 4-question step,
+/// ~5 tokens of response. Comfortable inside the model's 200-token window.
+String pickNextQuestionPrompt({
+  required Map<String, dynamic> knownFindings,
+  required List<ImciQuestion> remaining,
+}) {
+  final ids = remaining.map((q) => q.id).join(', ');
+  final prefix = composePromptPrefix(
+    skillName: 'select_next_question',
+    belief: knownFindings,
+  );
+
+  return '${prefix}Choose the most clinically important next question. '
+      'Reply with EXACTLY one of these ids: $ids. '
+      'Output ONLY the id text — no numbers, no quotes, no other words.';
+}
+
+/// Parse a model response into a question id from the allowed whitelist.
+/// Tolerates surrounding prose/quotes/newlines — finds the first id that
+/// appears in the response. Returns null if no allowed id is found.
+String? parseNextQuestionId(String raw, Set<String> validIds) {
+  final cleaned = raw.toLowerCase();
+  // Sort by length desc so longer ids match before their substrings (e.g.
+  // "fever_days" before "fever").
+  final sorted = validIds.toList()
+    ..sort((a, b) => b.length.compareTo(a.length));
+  for (final id in sorted) {
+    if (cleaned.contains(id.toLowerCase())) return id;
+  }
+  return null;
+}
 
 /// Allowed-key whitelist for a step. Used to drop hallucinated fields.
 Set<String> allowedKeysForStep(List<ImciQuestion> stepQuestions) =>

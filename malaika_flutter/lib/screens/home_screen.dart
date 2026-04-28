@@ -1,6 +1,8 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_gemma/flutter_gemma.dart';
-import 'package:image_picker/image_picker.dart';
+import 'package:image/image.dart' as img;
 import '../theme/malaika_theme.dart';
 import '../widgets/chat_bubble.dart';
 import '../widgets/imci_progress_bar.dart';
@@ -18,6 +20,7 @@ import '../core/skills.dart';
 import '../core/tool_call_tracker.dart';
 import '../widgets/voice_waveform.dart';
 import 'camera_monitor_screen.dart';
+import 'capture_screen.dart';
 
 /// Vision-First IMCI Assessment — "Show me your child."
 ///
@@ -272,6 +275,103 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  /// Fully unload Gemma 4 — frees ~2.3GB so the camera HAL can allocate
+  /// without triggering Android's LMKD on the A53. The .litertlm file stays
+  /// on disk; subsequent getActiveModel re-mmaps in 3-5s.
+  Future<void> _unloadFullModel() async {
+    await _closeChat();
+    try {
+      final model = await FlutterGemma.getActiveModel(maxTokens: 200);
+      await model.close();
+      debugPrint('[MALAIKA] Model fully unloaded — RAM freed for camera');
+    } catch (e) {
+      debugPrint('[MALAIKA] Model unload error (continuing): $e');
+    }
+  }
+
+  static const String _modelUrl =
+      'https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/main/gemma-4-E2B-it.litertlm';
+
+  /// Re-bind the cached .litertlm file with the native LiteRT-LM runtime.
+  /// Called after a full closeModel — the platform forgets the model path,
+  /// so we replay installModel (no redownload since the file is on disk).
+  Future<void> _reinstallCachedModel() async {
+    await FlutterGemma.installModel(
+      modelType: ModelType.gemmaIt,
+      fileType: ModelFileType.litertlm,
+    ).fromNetwork(_modelUrl).install();
+  }
+
+  /// Reload Gemma 4 with vision support after the camera has closed.
+  /// Returns a vision-capable chat session ready for image queries.
+  Future<dynamic> _reloadModelForVision({String? systemInstruction}) async {
+    await _reinstallCachedModel();
+    final model = await FlutterGemma.getActiveModel(
+      maxTokens: 200,
+      preferredBackend: PreferredBackend.gpu,
+      supportImage: true,
+      maxNumImages: 1,
+    );
+    final chat = await model.createChat(
+      temperature: 0.2,
+      topK: 40,
+      supportImage: true,
+      systemInstruction: systemInstruction ?? visionSystemPrompt,
+    );
+    _chat = chat;
+    _chatStep = 'vision';
+    debugPrint('[MALAIKA] Model reloaded with vision support');
+    return chat;
+  }
+
+  /// Reload Gemma 4 for plain text Q&A (used on capture-cancel so the
+  /// rest of the assessment can proceed).
+  Future<void> _reloadModelForText() async {
+    try {
+      await _reinstallCachedModel();
+      await FlutterGemma.getActiveModel(
+        maxTokens: 200,
+        preferredBackend: PreferredBackend.gpu,
+      );
+      debugPrint('[MALAIKA] Model reloaded for text Q&A');
+    } catch (e) {
+      debugPrint('[MALAIKA] Text reload error: $e');
+    }
+  }
+
+  /// Resize a captured JPEG down to ~256×192 (preserving aspect) and re-encode
+  /// as JPEG so Gemma 4 vision sees it under the model's 200-token context.
+  ///
+  /// Gemma 4 E2B is loaded once at splash with maxTokens=200 (proven stable —
+  /// 256/512 OOM at startup). flutter_gemma's getActiveModel returns the
+  /// cached singleton, so context cannot be widened later. The image must
+  /// instead be small enough that vision tokens + prompt fit under 200.
+  ///
+  /// PNG re-encode (Flutter's built-in toByteData) doesn't bind to the vision
+  /// adapter — Gemma replies "please provide an image" without seeing it.
+  /// Only JPEG bytes work.
+  Future<Uint8List> _shrinkForVision(Uint8List jpegBytes) async {
+    try {
+      final src = img.decodeJpg(jpegBytes);
+      if (src == null) {
+        debugPrint('[MALAIKA] Vision input: decode failed, '
+            'sending original ${jpegBytes.length} bytes');
+        return jpegBytes;
+      }
+      final resized = img.copyResize(src, width: 256);
+      final out = Uint8List.fromList(img.encodeJpg(resized, quality: 80));
+      debugPrint(
+        '[MALAIKA] Vision input: ${out.length} bytes JPEG '
+        '(${(out.length / 1024).toStringAsFixed(1)} KB) '
+        '${resized.width}x${resized.height}',
+      );
+      return out;
+    } catch (e) {
+      debugPrint('[MALAIKA] Image resize failed: $e — sending original');
+      return jpegBytes;
+    }
+  }
+
   Future<String> _ask(String instruction, {int minLength = 5}) async {
     if (_chat == null) return '';
     debugPrint('[MALAIKA] Ask: "$instruction"');
@@ -376,40 +476,34 @@ class _HomeScreenState extends State<HomeScreen> {
     _tracker.startCall('comprehensive_vision', step: 'vision', inputType: 'image');
 
     try {
-      // Close text session before gallery — same pattern as proven _onTakePhoto.
-      await _closeChat();
+      // Path A: unload Gemma fully BEFORE opening camera. The A53 cannot host
+      // both the 2.3GB model and Camera2 HAL buffers simultaneously — LMKD
+      // kills our app within ~2s otherwise.
+      await _unloadFullModel();
+      if (!mounted) return;
 
-      final picker = ImagePicker();
-      final image = await picker.pickImage(
-        source: ImageSource.gallery,
-        maxWidth: 256,
-        maxHeight: 256,
-        imageQuality: 50,
+      final captureBytes = await Navigator.of(context).push<Uint8List>(
+        MaterialPageRoute(
+          builder: (_) => const CaptureScreen(
+            title: 'Visual Assessment',
+            hint: 'Frame the whole child. Good light. Hold steady.',
+          ),
+        ),
       );
 
-      if (image == null) {
+      if (captureBytes == null || captureBytes.isEmpty) {
         _tracker.endCall(success: false, parseMethod: 'vision_analysis', confidence: 0.0);
+        await _reloadModelForText();
         _skipVisionAndContinue();
         return;
       }
 
-      final imageBytes = await image.readAsBytes();
+      final imageBytes = await _shrinkForVision(captureBytes);
       _addBot('Analyzing the photo...');
 
-      // Re-acquire model with vision support — same as proven _onTakePhoto.
-      await _closeChat();
-      final model = await FlutterGemma.getActiveModel(
-        maxTokens: 200,
-        supportImage: true,
-        maxNumImages: 1,
-      );
-      _chat = await model.createChat(
-        temperature: 0.2,
-        topK: 40,
-        supportImage: true,
-        systemInstruction: visionSystemPrompt,
-      );
-      _chatStep = 'vision';
+      // Reload Gemma with vision adapter. Image is ~256px wide so vision
+      // tokens + prompt fit in the 200-token context set at splash.
+      _chat = await _reloadModelForVision();
 
       await _chat!.addQuery(Message(
         text: comprehensiveVisionPrompt,
@@ -854,40 +948,34 @@ class _HomeScreenState extends State<HomeScreen> {
     _tracker.startCall(visionSkill, step: vp.step, inputType: 'image');
 
     try {
-      await _closeChat();
-      final picker = ImagePicker();
-      final image = await picker.pickImage(
-        source: ImageSource.gallery,
-        maxWidth: 256,
-        maxHeight: 256,
-        imageQuality: 50,
+      // Path A: free 2.3GB before opening Camera2 to dodge LMKD on the A53.
+      await _unloadFullModel();
+      if (!mounted) return;
+      final captureBytes = await Navigator.of(context).push<Uint8List>(
+        MaterialPageRoute(
+          builder: (_) => const CaptureScreen(
+            title: 'Photo Assessment',
+            hint: 'Frame the whole child. Good light. Hold steady.',
+          ),
+        ),
       );
 
-      if (image == null) {
+      if (captureBytes == null || captureBytes.isEmpty) {
         _tracker.endCall(success: false, parseMethod: 'vision_analysis', confidence: 0.0);
+        await _reloadModelForText();
         if (mounted && _voiceState != VoiceState.speaking) setState(() => _voiceState = VoiceState.idle);
         return;
       }
 
-      final imageBytes = await image.readAsBytes();
+      final imageBytes = await _shrinkForVision(captureBytes);
       _addBot('Analyzing the photo...');
 
-      await _closeChat();
-      final model = await FlutterGemma.getActiveModel(
-        maxTokens: 200,
-        supportImage: true,
-        maxNumImages: 1,
-      );
-      _chat = await model.createChat(
-        temperature: 0.2,
-        topK: 40,
-        supportImage: true,
+      _chat = await _reloadModelForVision(
         systemInstruction:
             'You are a clinical health assistant. '
             'Analyze the image with the specific checklist given. '
             'Be precise and only report what you can see.',
       );
-      _chatStep = 'vision';
 
       await _chat!.addQuery(Message(
         text: vp.analysisPrompt,

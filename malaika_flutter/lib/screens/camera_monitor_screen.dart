@@ -1,14 +1,16 @@
 /// Photo Assessment Screen — single-photo visual assessment via Gemma 4 E2B.
 ///
-/// User picks a photo from the gallery. Gemma 4 vision analyzes it for:
+/// Launches the headless `CaptureScreen` (native Camera2 + ImageReader, no
+/// SurfaceView) to acquire a photo, then runs Gemma 4 vision analysis for
 /// alertness, dehydration signs, visible wasting, and edema.
 ///
-/// WHY gallery picker (not camera):
+/// WHY headless capture (not standard camera or gallery):
 /// - Gemma 4 E2B occupies ~2.3GB of ~2.5GB Mali GPU memory
-/// - In-app camera preview (CameraController) crashes the Mali driver (GPU OOM)
-/// - System camera intent (ImageSource.camera) causes Android to OOM-kill our
-///   backgrounded app while the camera is open
-/// - Gallery picker runs in-process, no GPU allocation, no backgrounding
+/// - A normal camera preview SurfaceView allocates an EGL/GPU texture and
+///   crashes the Mali driver (GPU OOM) on the A53
+/// - System camera intent OOM-kills the backgrounded app
+/// - Headless Camera2 with `ImageReader` keeps frames in CPU-readable
+///   gralloc memory — no GPU surface, no driver pressure
 ///
 /// Chest indrawing is always false — requires observing breathing motion,
 /// which a still photo cannot capture.
@@ -19,10 +21,10 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_gemma/flutter_gemma.dart';
-import 'package:image_picker/image_picker.dart';
 
 import '../core/reconciliation_engine.dart';
 import '../theme/malaika_theme.dart';
+import 'capture_screen.dart';
 
 /// Result returned to the caller with vision findings.
 class CameraMonitorResult {
@@ -48,15 +50,13 @@ class CameraMonitorScreen extends StatefulWidget {
 }
 
 class _CameraMonitorScreenState extends State<CameraMonitorScreen> {
-  final ImagePicker _picker = ImagePicker();
-
   /// Analysis states.
   bool _isAnalyzing = false;
   bool _isComplete = false;
   String? _aiResponse;
   Map<String, bool>? _findings;
   String _notes = '';
-  String _statusMessage = 'Choose a photo of the child for visual assessment.';
+  String _statusMessage = 'Tap below to take a photo of the child.';
 
   /// System instruction — WHO IMCI clinical context.
   static const String _visionSystem =
@@ -99,7 +99,7 @@ class _CameraMonitorScreenState extends State<CameraMonitorScreen> {
   }
 
   // --------------------------------------------------------------------------
-  // Capture (system camera) + Analyze
+  // Capture (headless Camera2) + Analyze
   // --------------------------------------------------------------------------
 
   Future<void> _captureAndAnalyze() async {
@@ -107,30 +107,30 @@ class _CameraMonitorScreenState extends State<CameraMonitorScreen> {
 
     setState(() {
       _isAnalyzing = true;
-      _statusMessage = 'Opening gallery...';
+      _statusMessage = 'Opening camera...';
     });
 
     try {
-      // 1. Pick image from gallery — stays in-process, no GPU contention.
-      final xFile = await _picker.pickImage(
-        source: ImageSource.gallery,
-        maxWidth: 640,
-        maxHeight: 640,
-        imageQuality: 70,
+      // 1. Headless Camera2 capture — ImageReader only, no GPU surface.
+      final rawBytes = await Navigator.of(context).push<Uint8List>(
+        MaterialPageRoute(
+          builder: (_) => const CaptureScreen(
+            title: 'Photo Assessment',
+            hint: 'Frame the whole child. Good light. Hold steady.',
+          ),
+        ),
       );
 
-      if (xFile == null) {
-        // User cancelled the camera
+      if (rawBytes == null || rawBytes.isEmpty) {
         if (mounted) {
           setState(() {
             _isAnalyzing = false;
-            _statusMessage = 'No photo selected. Tap to try again or skip.';
+            _statusMessage = 'No photo taken. Tap to try again or skip.';
           });
         }
         return;
       }
 
-      final rawBytes = await xFile.readAsBytes();
       debugPrint('[MALAIKA] Photo captured: ${rawBytes.length} bytes '
           '(${(rawBytes.length / 1024).toStringAsFixed(0)} KB)');
 
@@ -458,7 +458,7 @@ class _CameraMonitorScreenState extends State<CameraMonitorScreen> {
                 borderRadius: BorderRadius.circular(24),
               ),
               child: const Icon(
-                Icons.photo_library_rounded,
+                Icons.camera_alt_rounded,
                 size: 40,
                 color: MalaikaColors.primary,
               ),
@@ -474,9 +474,9 @@ class _CameraMonitorScreenState extends State<CameraMonitorScreen> {
             ),
             const SizedBox(height: 12),
             Text(
-              'Choose a photo of the child showing their face and body. '
+              'Take a photo of the child showing their face and body. '
               'Gemma 4 will check for signs of dehydration, wasting, '
-              'and alertness.',
+              'and alertness — fully on-device.',
               textAlign: TextAlign.center,
               style: TextStyle(
                 color: Colors.white.withValues(alpha: 0.6),
@@ -721,11 +721,11 @@ class _CameraMonitorScreenState extends State<CameraMonitorScreen> {
               icon: Icon(
                 _isComplete
                     ? Icons.check_rounded
-                    : Icons.photo_library_rounded,
+                    : Icons.camera_alt_rounded,
                 size: 20,
               ),
               label: Text(
-                _isComplete ? 'Use Results' : 'Choose Photo',
+                _isComplete ? 'Use Results' : 'Take Photo',
               ),
               style: ElevatedButton.styleFrom(
                 backgroundColor:

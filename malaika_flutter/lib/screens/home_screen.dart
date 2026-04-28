@@ -15,6 +15,7 @@ import '../core/reconciliation_engine.dart';
 import '../core/treatment_protocol.dart';
 import '../core/assessment_store.dart';
 import '../core/agentic_assessor.dart';
+import '../core/agentic_orchestrator.dart';
 import '../core/voice_service.dart';
 import '../core/skills.dart';
 import '../core/tool_call_tracker.dart';
@@ -565,10 +566,18 @@ class _HomeScreenState extends State<HomeScreen> {
               'Let me ask a few questions to check for things I cannot see.');
         }
 
-        // Pre-populate IMCI findings from vision
+        // Pre-populate IMCI findings from vision. Also stamp rawAnswers
+        // so the questionnaire's _index advance treats these as "answered"
+        // and the bot doesn't re-ask the same question verbally.
         final imciFindings = visionToImciFindings(_visionFindings);
         imciFindings.forEach((key, value) {
           _q.findings[key] = value;
+          _q.rawAnswers[key] = '(seen in photo: $value)';
+          _q.qaPairs.add({
+            'question': '(Photo finding: $key)',
+            'answer': '$value',
+            'id': key,
+          });
         });
         debugPrint('[MALAIKA] Vision pre-populated: $imciFindings');
 
@@ -709,14 +718,83 @@ class _HomeScreenState extends State<HomeScreen> {
 
     final currentQ = _q.currentQuestion!;
     final prevStep = _q.currentStep;
+    final prevRawKeys = Set<String>.from(_q.rawAnswers.keys);
 
     // =====================================================================
-    // TOOL CALL 1: parse_caregiver_response (EXTRACT)
-    // Gemma 4 reads the caregiver's answer and returns ONE WORD.
-    // No regex parsing — just string comparison. The LLM does the work.
+    // PHASE 1: Structured multi-value extraction (Gemma returns JSON)
+    // One model call extracts every finding the caregiver mentioned in
+    // their answer — fixes the "fever for 2 days" bug where days got
+    // dropped because the previous code asked for a single yes/no word.
+    // Falls back to the original single-value path on any failure.
     // =====================================================================
+    String? completedStep;
+    String parseMethod = 'gemma4_reasoning';
+    bool structuredHandled = false;
+    bool typingAdded = false;
+
+    if (kAgenticOrchestration) {
+      final stepQuestions = _q.questionsForStep(prevStep);
+      final structuredPrompt = buildStructuredExtractPrompt(
+        currentQuestion: currentQ,
+        stepQuestions: stepQuestions,
+        knownFindings: _q.findings,
+        answeredIds: _q.rawAnswers.keys.toSet(),
+        userText: text,
+      );
+
+      if (structuredPrompt.isNotEmpty) {
+        _tracker.startCall('extract_structured_findings', step: prevStep);
+        _addTyping();
+        typingAdded = true;
+
+        await _initSession(prevStep,
+            maxTokens: 200,
+            systemPrompt:
+                'You are a clinical assistant. Reply ONLY with valid JSON.');
+        final raw = await _ask(structuredPrompt, minLength: 1);
+        debugPrint('[MALAIKA] Structured raw: "$raw"');
+
+        final parsed = parseStructuredResponse(
+          raw: raw,
+          stepQuestions: stepQuestions,
+        );
+
+        if (parsed != null && parsed.isNotEmpty) {
+          debugPrint('[MALAIKA] Structured parsed: $parsed');
+          completedStep = _q.recordMultipleFindings(parsed, text);
+          parseMethod = 'gemma4_structured';
+          structuredHandled = true;
+          _tracker.endCall(
+            findings: parsed.map((k, v) => MapEntry(k, v.toString())),
+            success: true,
+            parseMethod: parseMethod,
+            confidence: 0.9,
+            inputTokens: (structuredPrompt.split(' ').length * 1.3).round(),
+            outputTokens: raw.split(' ').length,
+          );
+        } else {
+          _tracker.endCall(
+            success: false,
+            parseMethod: 'structured_fallback',
+            confidence: 0.0,
+          );
+          debugPrint(
+              '[MALAIKA] Structured parse failed — falling back to single-value');
+        }
+      }
+    }
+
+    // =====================================================================
+    // FALLBACK: original single-value extraction (proven path).
+    // Runs whenever the structured attempt was skipped, parsed empty, or
+    // disabled by feature flag. Behaviour identical to pre-Phase-1.
+    // =====================================================================
+    if (!structuredHandled) {
     _tracker.startCall('parse_caregiver_response', step: prevStep);
-    _addTyping();
+    if (!typingAdded) {
+      _addTyping();
+      typingAdded = true;
+    }
 
     final extractPrompt = _buildExtractPrompt(currentQ, text);
     await _initSession(prevStep, maxTokens: 200,
@@ -775,9 +853,18 @@ class _HomeScreenState extends State<HomeScreen> {
       cleanInput = text;
     }
 
-    final prevRawKeys = Set<String>.from(_q.rawAnswers.keys);
-    final completedStep = _q.recordAnswer(cleanInput);
+    completedStep = _q.recordAnswer(cleanInput);
+    _tracker.endCall(
+      findings: {currentQ.id: cleanInput},
+      success: true,
+      parseMethod: 'gemma4_reasoning',
+      confidence: 0.9,
+      inputTokens: (extractPrompt.split(' ').length * 1.3).round(),
+      outputTokens: extractRaw.split(' ').length,
+    );
+    } // end !structuredHandled fallback
 
+    // === Shared post-record logic — runs for both structured and fallback ===
     final newKeys = _q.rawAnswers.keys
         .where((k) => !prevRawKeys.contains(k))
         .toList();
@@ -787,16 +874,7 @@ class _HomeScreenState extends State<HomeScreen> {
       reasoningFindings[key] = _q.findings[key];
     }
 
-    _tracker.endCall(
-      findings: reasoningFindings,
-      success: true,
-      parseMethod: 'gemma4_reasoning',
-      confidence: 0.9,
-      inputTokens: (extractPrompt.split(' ').length * 1.3).round(),
-      outputTokens: extractRaw.split(' ').length,
-    );
-
-    debugPrint('[MALAIKA] Extracted: $reasoningFindings (auto: $autoFilledKeys)');
+    debugPrint('[MALAIKA] Recorded ($parseMethod): $reasoningFindings (auto: $autoFilledKeys)');
 
     // Show agentic skill event card
     if (reasoningFindings.isNotEmpty) {

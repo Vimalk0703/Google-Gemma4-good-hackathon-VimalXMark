@@ -382,18 +382,24 @@ class ImciQuestionnaire {
   }
 
   /// The current question to ask, or null if assessment is complete.
-  /// Automatically skips conditional questions whose trigger is false.
+  /// Skips:
+  ///   - Conditional questions whose trigger is false
+  ///   - Questions whose finding is already in [rawAnswers] (set by vision
+  ///     pre-population or a prior multi-value extract)
   ImciQuestion? get currentQuestion {
     while (_index < imciQuestions.length) {
       final q = imciQuestions[_index];
-      // Skip conditional questions if trigger finding is false/absent
       if (q.triggerKey != null && findings[q.triggerKey] != true) {
+        _index++;
+        continue;
+      }
+      if (rawAnswers.containsKey(q.id)) {
         _index++;
         continue;
       }
       return q;
     }
-    return null; // All questions asked
+    return null;
   }
 
   /// The step of the current question (for progress bar).
@@ -421,6 +427,11 @@ class ImciQuestionnaire {
 
   /// Whether the assessment is complete (all questions asked).
   bool get isComplete => currentQuestion == null;
+
+  /// All ImciQuestions belonging to the given IMCI step. Used by the
+  /// agentic orchestrator to build a per-step extraction schema.
+  List<ImciQuestion> questionsForStep(String step) =>
+      imciQuestions.where((q) => q.step == step).toList();
 
   /// Record the user's answer to the current question.
   ///
@@ -494,6 +505,91 @@ class ImciQuestionnaire {
     final nextQ = currentQuestion;
     if (nextQ == null || nextQ.step != previousStep) {
       return previousStep; // Step completed
+    }
+    return null;
+  }
+
+  /// Apply multiple findings extracted in a single LLM call.
+  ///
+  /// Phase 1 of the agentic enhancements: rather than asking the model
+  /// "yes or no?" and discarding the rest of the user's sentence, the
+  /// caller invokes the model once with a JSON schema for the whole step
+  /// and feeds the result here. We type-cast each value, update findings
+  /// + qaPairs, and advance _index past every question whose finding has
+  /// just been answered (within the same step).
+  ///
+  /// Returns the step name if that step just completed (so the caller
+  /// can run classification), otherwise null.
+  ///
+  /// Defensive: silently drops keys that aren't in [imciQuestions], that
+  /// have a triggerKey whose trigger isn't true, or whose type doesn't
+  /// fit the value. Caller is responsible for doing fallback if the
+  /// returned map was empty (this method assumes findings is non-empty).
+  String? recordMultipleFindings(
+    Map<String, dynamic> extracted,
+    String originalText,
+  ) {
+    final currentQ = currentQuestion;
+    if (currentQ == null) return null;
+
+    final previousStep = currentQ.step;
+    final byId = {for (final q in imciQuestions) q.id: q};
+
+    for (final entry in extracted.entries) {
+      final q = byId[entry.key];
+      if (q == null) continue;
+
+      // Respect conditional triggers — don't apply a follow-up before its
+      // gate is open.
+      if (q.triggerKey != null && findings[q.triggerKey] != true) continue;
+
+      final value = entry.value;
+      switch (q.type) {
+        case AnswerType.yesNo:
+          if (value is bool) findings[q.id] = value;
+        case AnswerType.number:
+          if (value is int) {
+            findings[q.id] = value;
+            if (q.id == 'weight_kg') {
+              weightKg = value > 0 ? value.toDouble() : 0;
+            }
+          }
+        case AnswerType.age:
+          if (value is int && value > 0) {
+            ageMonths = value;
+            findings[q.id] = value;
+          }
+        case AnswerType.photo:
+          continue;
+      }
+
+      rawAnswers[q.id] = '$value';
+      qaPairs.add({
+        'question': q.question,
+        'answer': '$value (extracted from "$originalText")',
+        'id': q.id,
+      });
+    }
+
+    // Advance _index past every question (in this step) we just answered,
+    // honoring conditional gates as we go.
+    while (_index < imciQuestions.length) {
+      final q = imciQuestions[_index];
+      if (q.step != previousStep) break;
+      if (q.triggerKey != null && findings[q.triggerKey] != true) {
+        _index++;
+        continue;
+      }
+      if (rawAnswers.containsKey(q.id)) {
+        _index++;
+        continue;
+      }
+      break;
+    }
+
+    final nextQ = currentQuestion;
+    if (nextQ == null || nextQ.step != previousStep) {
+      return previousStep;
     }
     return null;
   }

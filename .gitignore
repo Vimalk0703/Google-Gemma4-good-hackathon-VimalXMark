@@ -56,3 +56,7 @@ reports/
 # Kaggle kernel push temp files
 .kaggle_kernel/
 .kaggle_output/
+
+# Claude Code session state (local only)
+.claude/
+

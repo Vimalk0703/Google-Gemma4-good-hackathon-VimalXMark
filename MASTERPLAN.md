@@ -183,14 +183,15 @@ Manages the conversational session. `ChatEngine.process()` takes caregiver input
 
 **Deterministic classification** still lives in `imci_protocol.py` — WHO thresholds are code, never LLM output. The skills pattern cleanly separates Gemma 4 perception from deterministic medical logic.
 
-### Voice Pipeline (Tasha-Style Architecture)
+### Voice Pipeline (Phase 1 prototype)
 
-Real-time voice interaction via a single WebSocket connection:
+Real-time voice interaction via a single WebSocket connection (legacy path; current
+demo uses the on-phone native STT/TTS in `malaika_flutter/` and the web portal at `web/`):
 
 ```
-Browser mic → PCM16 audio → Smallest AI STT → transcript
+Browser mic → PCM16 audio → Whisper-small (local STT) → transcript
 → ChatEngine (Gemma 4 reasoning) → response text
-→ Smallest AI TTS (sentence-level) → audio chunks → Browser speaker
+→ Piper TTS (local, sentence-level) → audio chunks → Browser speaker
 ```
 
 Key features (`malaika/voice_session.py`, `malaika/voice_app.py`):
@@ -411,7 +412,7 @@ PHASE 5 (May 10-18): Video + Writeup + Submit
 | 4 | Connect Gemma 4 vision to UI, spectrogram pipeline, real data testing | DONE — 227 tests, spectrogram baseline 25% |
 | 4+ | Fine-tuning iterations v1-v5, Colab deployment | DONE — 5 LoRA iterations, best v5 = 40% accuracy |
 | 5 | Skills-based agentic architecture, ChatEngine | DONE — 12 skills in SkillRegistry, BeliefState |
-| 5+ | Voice pipeline (Tasha-style WebSocket + sentence TTS + filler audio) | DONE — real-time voice on Colab |
+| 5+ | Voice pipeline (WebSocket + sentence TTS + filler audio, local STT/TTS) | DONE — real-time voice on Colab (Phase 1 prototype) |
 | 7 | **MILESTONE**: Full voice assessment pipeline working | DONE |
 
 **Phase 1 Accomplishments:**
@@ -419,7 +420,7 @@ PHASE 5 (May 10-18): Video + Writeup + Submit
 - 21/21 golden scenarios at 100% accuracy (deterministic WHO classification)
 - 5/5 JSON reliability (100%) after thinking-mode suppression fix
 - Skills-based agentic architecture with 12 clinical skills
-- Voice pipeline: WebSocket + Smallest AI STT/TTS + sentence-level streaming + filler audio
+- Voice pipeline: WebSocket + Whisper-small (local STT) + Piper (local TTS) + sentence-level streaming + filler audio
 - Colab deployment working (`notebooks/10_voice_agent_colab.ipynb`)
 - Fine-tuning: 5 iterations (v1-v5), best v5 = 40% overall, 85% crackle detection
 - Spectrogram approach validated: audio → mel-spectrogram PNG → Gemma 4 vision

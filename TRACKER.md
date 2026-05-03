@@ -48,9 +48,9 @@
 - [ ] Download jaundice dataset, test with real clinical images
 
 ### Day 5 (Apr 15) — COMPLETED
-- [x] Real-time voice pipeline — Tasha-style single WebSocket architecture
+- [x] Real-time voice pipeline (Phase 1 prototype, single WebSocket)
 - [x] voice_app.py (FastAPI), voice_session.py (WebSocket handler)
-- [x] Smallest AI Pulse STT + Waves TTS integration
+- [x] Local STT (Whisper-small) + local TTS (Piper) integration
 - [x] Browser VAD (Voice Activity Detection) + audio streaming
 - [x] static/index.html — orb UI, camera capture, text input
 
@@ -63,7 +63,7 @@
 - [x] NEW: notebooks/10_voice_agent_colab.ipynb — Colab T4 deployment via ngrok
 - [x] 104 tests passing (78 protocol + 26 engine), zero regressions
 - [x] Full flow tested: 12mo child → lethargic → RED Urgent Referral, fever + malaria → YELLOW Malaria
-- [x] Graceful degradation without SMALLEST_API_KEY (text + image still work)
+- [x] Graceful degradation without speech runtime — text + image flow still works
 - [ ] Test voice agent end-to-end on Colab with real model
 
 ---

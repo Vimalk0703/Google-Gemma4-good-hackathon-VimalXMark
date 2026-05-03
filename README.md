@@ -191,10 +191,6 @@ npm run build && npm start
 
 Open `http://localhost:3000` for the landing page, `/portal` for the clinical portal. Sign in with `malaika`. Drop or record audio. See the classification + Clinical Note land in ~7 seconds.
 
-### Option C — Voice agent on Colab (supplementary)
-
-`notebooks/10_voice_agent_colab.ipynb` — full Tasha-style voice loop with sentence-level TTS over WebSocket.
-
 ---
 
 ## Why this wins

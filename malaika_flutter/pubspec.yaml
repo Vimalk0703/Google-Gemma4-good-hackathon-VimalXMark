@@ -50,5 +50,6 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
-  assets:
-    - assets/animations/
+  # NOTE: re-add an `assets:` block when actual asset files exist.
+  # An empty `assets/animations/` directory was previously declared but
+  # never populated, which made `flutter analyze` warn on every run.

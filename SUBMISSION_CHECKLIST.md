@@ -92,18 +92,21 @@ Kaggle explicitly highlights "multimodal power and native function calling" as t
 
 ## Side-by-Side Benchmark — Why Only Gemma 4 Works
 
-We tested four open small models against the constraints of a sixty-dollar Android phone running offline. Only Gemma 4 E2B fits all four requirements.
+We tested the open small models that come closest to the four constraints of a sixty-dollar Android phone running offline IMCI. *Only Gemma 4 E2B meets all four:* fits in ~2.5 GB, has vision, speaks the African languages our users actually use, and supports the agentic tool-use orchestration the assessment requires.
 
-| Model | Size on disk | Vision support | Multilingual | Tok/s on Mali-G68 | Fits all 4? |
-|-------|-------------:|:--------------:|:------------:|------------------:|:-----------:|
-| **Gemma 4 E2B** | **2.58 GB** | **Yes** | **140+ languages** | **~50** | **YES** |
-| Llama 3.2 1B | 2.5 GB | No (text only) | English-heavy | ~60 | No vision |
-| Phi-3 mini 3.8B | 4.0 GB | No (text only) | English-heavy | ~25 | Doesn't fit + no vision |
-| Qwen 2.5 1.5B | 3.0 GB | No (text only) | Strong CJK | ~35 | No vision |
+We are explicit about *each* competitor's vision variant — not just its text variant — so a fact-checker can verify the differentiation.
 
-*Benchmarks run by us on Samsung A53, Mali-G68, Android 13, April 2026. Reproducible script: `scripts/benchmark_models.py` (planned).*
+| Model | Size (4-bit) | Vision | Multilingual coverage | Misses |
+|-------|-------------:|:------:|-----------------------|--------|
+| **Gemma 4 E2B** | **2.58 GB** | **Yes** | **140+ languages, incl. Swahili / Hausa / Yoruba** | **— (meets all 4)** |
+| Llama 3.2 1B / 3B | 1.3 / 2.0 GB | No | EN + 7 EU / Asian langs | Vision |
+| Llama 3.2 11B-Vision | ~8 GB | Yes | EN + 7 EU / Asian langs | Doesn't fit |
+| Phi-3.5-Vision 4.2B | ~2.5 GB | Yes | Primarily English | African languages |
+| Qwen 2.5-VL 3B | ~2 GB | Yes | EN / ZH + handful of EU | African languages |
 
-This is the receipt for the script's claim: *"There is no other model in the world that does text and vision and multilingual reasoning, at this size, on this device."*
+*Benchmarks: Gemma 4 E2B verified by us on Samsung A53, Mali-G68, Android 13, April 2026 (~50 tok/s). Competitor sizes from official model cards. Multilingual coverage from each model's published language list.*
+
+This is the receipt for the script's §7 claim: *"Gemma 4 E2B is the only model that combines all four — small enough to fit, vision-capable, multilingual across the African languages our users actually speak, and agentic."*
 
 ---
 

@@ -143,6 +143,31 @@ There is no `lib/` and no `hooks/` because we do not need them yet. Resist the u
 
 ---
 
+## Data flow — how `/portal` actually works
+
+```
+  Browser (nurse)              Vercel / localhost:3000          Kaggle / Colab T4
+  ─────────────────            ───────────────────────          ───────────────────
+   /portal
+   ↓ (records WAV in browser)
+   POST /api/breath  ────►   Next.js route handler
+                              · checks session cookie
+                              · reads BREATH_API_URL env
+                              · forwards FormData
+                              ─── POST {URL}/breath ──────►  notebooks/12_village_clinic_finetuned.ipynb
+                                                                  · loads Vimal0703/malaika-breath-sounds-E4B-merged
+                                                                  · FastAPI: /breath + /health
+                                                                  · ngrok tunnel → public URL
+                                                                  · second Gemma pass = clinical note
+                              ◄── JSON {abnormal, conf, note} ───
+                              ◄── parsed JSON
+   result card ◄────
+```
+
+**Why proxy server-side?** `BREATH_API_URL` never leaks to the browser. The 25 MB upload limit is enforced server-side in `app/api/breath/route.ts`. Notebook 12 itself has no auth — the session cookie at the proxy is the only gate.
+
+---
+
 ## Connecting the portal to a live model
 
 1. Run `notebooks/12_village_clinic_finetuned.ipynb` on Kaggle T4. It prints a public URL in cell 7 (something like `https://abc123.ngrok-free.app`).

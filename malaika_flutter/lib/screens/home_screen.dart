@@ -829,13 +829,25 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   /// Phase 3 — build a "acknowledge prior answer + ask next question" prompt.
-  /// Same anti-greeting rules; references the caregiver's last text so the
-  /// transition feels natural.
+  ///
+  /// Includes BOTH the prior question and the caregiver's answer so Gemma
+  /// has context — without this, a bare answer like "2" gets hallucinated
+  /// (e.g. "the child has a temperature of 2"). The "MUST contain the
+  /// question" rule stops Gemma from emitting just an empathy line + ? and
+  /// dropping the real question.
   String _buildAcknowledgeAndAsk(String previousAnswer, ImciQuestion q) {
-    return 'The caregiver just said: "$previousAnswer". '
-        'Acknowledge it briefly with concern if needed, then ask ONE warm '
-        'short question. Do NOT greet, do NOT introduce yourself. '
-        'The question to ask: "${q.question}"';
+    final priorQ = _q.qaPairs.isNotEmpty
+        ? _q.qaPairs.last['question'] ?? ''
+        : '';
+    final priorContext = priorQ.isEmpty
+        ? ''
+        : 'You asked: "$priorQ" ';
+    return '${priorContext}Caregiver answered: "$previousAnswer". '
+        'In ONE sentence: briefly acknowledge their answer with care, then '
+        'ask the EXACT question below. The reply MUST contain the question. '
+        'Do NOT greet, do NOT introduce yourself, do NOT invent details '
+        'the caregiver did not say. '
+        'Question to ask: ${q.question}';
   }
 
   /// Phase 3 — build the comprehensive photo-request prompt without

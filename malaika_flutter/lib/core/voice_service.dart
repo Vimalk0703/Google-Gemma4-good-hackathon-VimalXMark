@@ -13,6 +13,7 @@ class VoiceService {
   bool _sttAvailable = false;
   bool _ttsEnabled = true;
   bool _isSpeaking = false;
+  int _speakSeq = 0;
   Timer? _ttsWatchdog;
 
   bool get isSttAvailable => _sttAvailable;
@@ -101,15 +102,26 @@ class VoiceService {
       await _tts.setSpeechRate(0.48);
       await _tts.setPitch(1.05); // Slightly warm tone
       await _tts.setVolume(1.0);
-      // ALL terminal TTS states — completion, error, cancel — must clear
-      // _isSpeaking and fire onSpeakingDone. Without this, audio focus
-      // loss or engine errors leave the UI stuck on "speaking".
+
+      // Make _tts.speak() resolve at audio completion (not at queue time).
+      // Without this, the speak future fires immediately after queueing and
+      // we cannot distinguish "completed naturally" from "queued but silent".
+      await _tts.awaitSpeakCompletion(true);
+
+      // Completion / error fire onSpeakingDone via _finishSpeaking. The
+      // cancel handler is intentionally NOT wired to _finishSpeaking:
+      // cancellations originate from either (a) speak() stopping a prior
+      // utterance to start a new one — the new utterance will fire its own
+      // completion later, so firing here would be premature; or
+      // (b) stopSpeaking() — that path already calls _finishSpeaking itself.
+      // Wiring the cancel handler caused a spurious onSpeakingDone that the
+      // home screen interpreted as "TTS done, start STT" while the new
+      // utterance was just beginning — voice would cut out audibly.
       _tts.setCompletionHandler(_finishSpeaking);
       _tts.setErrorHandler((msg) {
         debugPrint('[VOICE] TTS error: $msg');
         _finishSpeaking();
       });
-      _tts.setCancelHandler(_finishSpeaking);
     } catch (e) {
       debugPrint('[VOICE] TTS init failed: $e');
     }
@@ -141,8 +153,16 @@ class VoiceService {
           }
         },
         listenFor: const Duration(seconds: 15),
-        pauseFor: const Duration(seconds: 3),
-        listenOptions: SpeechListenOptions(listenMode: ListenMode.dictation),
+        pauseFor: const Duration(seconds: 4),
+        // onDevice: true FORCES the offline recognizer. Without this,
+        // Android's SpeechRecognizer tries to reach Google's cloud and
+        // fires error_server_disconnected when the network is missing —
+        // exactly what we hit on the A53 in offline-only operation.
+        listenOptions: SpeechListenOptions(
+          listenMode: ListenMode.dictation,
+          onDevice: true,
+          partialResults: true,
+        ),
       );
       // The speech_to_text plugin's return value is unreliable on Android —
       // it can return false even when the engine started listening (the
@@ -164,33 +184,80 @@ class VoiceService {
     } catch (_) {}
   }
 
-  /// Speak text via TTS. No-op if TTS is disabled.
+  /// Speak text via TTS.
   ///
-  /// A watchdog timer guarantees [onSpeakingDone] fires even if the engine
-  /// silently drops the request (audio focus loss, Bluetooth disconnect,
-  /// engine swap). Estimate is generous — ~0.5s per word + 3s buffer,
-  /// capped at 30s — so genuine completion still wins.
+  /// Reliability layers (in order of authority):
+  ///   1. setCompletionHandler — fires onSpeakingDone when audio truly
+  ///      finishes (the source of truth for "speech done").
+  ///   2. setErrorHandler — fires onSpeakingDone if the engine reports an
+  ///      error during playback.
+  ///   3. Watchdog — hard backstop if the engine wedges mid-speech and
+  ///      neither handler fires.
+  ///
+  /// Concurrency: each call increments _speakSeq. When this call's stop()
+  /// later resolves, any handlers from the PREVIOUS utterance that fire
+  /// async are matched against _speakSeq and short-circuited — without
+  /// this, an earlier utterance's deferred .then() would call
+  /// _finishSpeaking on the new utterance and cut its audio short.
   Future<void> speak(String text) async {
     if (!_ttsEnabled || text.isEmpty) {
       onSpeakingDone?.call();
       return;
     }
-    _isSpeaking = true;
+
+    // Bump the sequence and clear _isSpeaking BEFORE stopping the engine.
+    // Any handler from the previous utterance that fires during stop() will
+    // see _isSpeaking == false and short-circuit in _finishSpeaking, so the
+    // home screen does not receive a spurious "speech done" mid-replacement.
+    final mySeq = ++_speakSeq;
+    _isSpeaking = false;
     _ttsWatchdog?.cancel();
+    _ttsWatchdog = null;
+
+    // Stop any in-flight TTS and STT — overlapping audio sessions are the
+    // single biggest cause of "speaking but no audio".
+    try { await _tts.stop(); } catch (_) {}
+    if (_stt.isListening) {
+      try { await _stt.stop(); } catch (_) {}
+    }
+
+    // Always wait for the audio session to switch back to MEDIA before the
+    // new speak. Even when STT was not running, the TTS engine itself needs
+    // a beat after stop() to fully release its audio track — without this
+    // delay, ~1 in 3 utterances on the Samsung A53 plays silently: speak()
+    // returns success and the completion handler fires, but no audio ever
+    // reaches the speaker. 250ms is the minimum that reliably works on A53.
+    await Future.delayed(const Duration(milliseconds: 250));
+
+    // Bail if a newer speak() came in while we were stopping/waiting.
+    if (mySeq != _speakSeq) return;
+
+    _isSpeaking = true;
     final wordCount = text.split(RegExp(r'\s+')).length;
-    final estimateMs = (wordCount * 500 + 3000).clamp(3000, 30000);
+    final estimateMs = (wordCount * 500 + 4000).clamp(4000, 30000);
     _ttsWatchdog = Timer(Duration(milliseconds: estimateMs), () {
-      if (_isSpeaking) {
+      if (mySeq == _speakSeq && _isSpeaking) {
         debugPrint('[VOICE] TTS watchdog fired after ${estimateMs}ms — forcing onSpeakingDone');
         _finishSpeaking();
       }
     });
-    try {
-      await _tts.speak(text);
-    } catch (e) {
+
+    // Fire-and-forget. With awaitSpeakCompletion(true) the future resolves
+    // at completion (or cancellation) — we use it only to detect "engine
+    // refused" (result != 1) so the watchdog doesn't have to wait it out.
+    // The seq guard prevents the previous utterance's late-resolving future
+    // from firing _finishSpeaking after a new speak() has started.
+    _tts.speak(text).then((result) {
+      if (mySeq != _speakSeq) return;
+      if (result != 1) {
+        debugPrint('[VOICE] TTS speak returned $result — engine skipped audio');
+        _finishSpeaking();
+      }
+    }).catchError((e) {
+      if (mySeq != _speakSeq) return;
       debugPrint('[VOICE] TTS speak error: $e');
       _finishSpeaking();
-    }
+    });
   }
 
   void _finishSpeaking() {

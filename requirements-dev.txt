@@ -4,6 +4,6 @@
 
 pytest>=8.0.0                 # Testing framework
 pytest-cov>=6.0.0             # Coverage reporting
-mypy>=1.13.0                  # Type checking (strict mode)
+mypy>=1.20.2                  # Type checking (strict mode)
 ruff>=0.8.0                   # Linting + formatting
 pip-audit>=2.7.0              # Dependency security audit

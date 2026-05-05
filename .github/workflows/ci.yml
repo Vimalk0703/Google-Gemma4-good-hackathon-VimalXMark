@@ -60,7 +60,7 @@ jobs:
         # remove the trailing `|| true` once requirements-test.txt is wired up.
       - name: Upload coverage
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: coverage-xml
           path: coverage.xml

@@ -6,6 +6,6 @@ torch>=2.4.0                  # PyTorch backend for Transformers
 bitsandbytes>=0.44.0          # 4-bit quantization for GPU memory efficiency
 accelerate>=1.2.0             # Device mapping for quantized models
 gradio>=5.10.0                # Web UI for demo
-piper-tts>=1.2.0              # Offline text-to-speech
+piper-tts>=1.4.2              # Offline text-to-speech
 opencv-python-headless>=4.10.0  # Video frame extraction (headless = no GUI deps)
 structlog>=24.4.0             # Structured logging

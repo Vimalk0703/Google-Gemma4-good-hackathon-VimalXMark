@@ -9,14 +9,16 @@ Feature flag: config.features.enable_tts
 from __future__ import annotations
 
 import atexit
+import contextlib
 import shutil
 import tempfile
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import structlog
 
-from malaika.config import MalaikaConfig
+if TYPE_CHECKING:
+    from malaika.config import MalaikaConfig
 
 logger = structlog.get_logger()
 
@@ -64,6 +66,7 @@ class MalaikaTTS:
         # Try importing piper
         try:
             import piper  # type: ignore[import-untyped]
+
             self._piper_module = piper
             self._piper_available = True
             logger.info("tts_initialized", backend="piper-tts")
@@ -71,7 +74,7 @@ class MalaikaTTS:
             logger.warning(
                 "tts_piper_unavailable",
                 msg="piper-tts not installed. TTS will be disabled. "
-                    "Install with: pip install piper-tts",
+                "Install with: pip install piper-tts",
             )
 
         # Create temp directory for generated audio
@@ -129,7 +132,10 @@ class MalaikaTTS:
             return None
 
     def _generate_audio(
-        self, text: str, voice: str, output_path: Path,
+        self,
+        text: str,
+        voice: str,
+        output_path: Path,
     ) -> Path | None:
         """Generate audio using Piper TTS.
 
@@ -186,7 +192,5 @@ class MalaikaTTS:
 
     def _cleanup_atexit(self) -> None:
         """Atexit hook for cleanup — silent on errors."""
-        try:
+        with contextlib.suppress(Exception):
             self.cleanup()
-        except Exception:
-            pass

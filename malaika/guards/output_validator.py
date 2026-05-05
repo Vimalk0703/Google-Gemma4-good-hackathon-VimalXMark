@@ -8,11 +8,13 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from malaika.config import GuardConfig
-from malaika.prompts.base import PromptTemplate
 from malaika.types import ValidatedOutput
+
+if TYPE_CHECKING:
+    from malaika.config import GuardConfig
+    from malaika.prompts.base import PromptTemplate
 
 
 class OutputParseError(Exception):
@@ -27,13 +29,13 @@ class OutputParseError(Exception):
 # ---------------------------------------------------------------------------
 
 _PLAUSIBLE_RANGES: dict[str, tuple[float, float]] = {
-    "breath_count": (0, 30),          # Max for 15s video (120/min)
-    "breathing_rate": (5, 120),       # Breaths per minute (pediatric)
+    "breath_count": (0, 30),  # Max for 15s video (120/min)
+    "breathing_rate": (5, 120),  # Breaths per minute (pediatric)
     "estimated_rate_per_minute": (5, 120),
-    "heart_rate": (60, 220),          # BPM (pediatric)
+    "heart_rate": (60, 220),  # BPM (pediatric)
     "estimated_bpm": (60, 220),
     "confidence": (0.0, 1.0),
-    "muac_mm": (50, 250),             # Mid-upper arm circumference
+    "muac_mm": (50, 250),  # Mid-upper arm circumference
 }
 
 
@@ -99,19 +101,17 @@ def _validate_json_output(
             lo, hi = _PLAUSIBLE_RANGES[field_name]
             if not (lo <= value <= hi):
                 raise OutputParseError(
-                    f"Implausible value for '{field_name}': {value} "
-                    f"(expected range: {lo}-{hi})"
+                    f"Implausible value for '{field_name}': {value} (expected range: {lo}-{hi})"
                 )
 
     # 4. Confidence gating
     confidence = parsed.get("confidence")
-    if isinstance(confidence, (int, float)):
-        if confidence < config.minimum_confidence:
-            return ValidatedOutput(
-                status="uncertain",
-                parsed=parsed,
-                raw_output=raw_output,
-            )
+    if isinstance(confidence, (int, float)) and confidence < config.minimum_confidence:
+        return ValidatedOutput(
+            status="uncertain",
+            parsed=parsed,
+            raw_output=raw_output,
+        )
 
     return ValidatedOutput(
         status="valid",
@@ -193,8 +193,7 @@ def _check_required_fields(parsed: dict[str, Any], schema: dict[str, Any]) -> No
     missing = [f for f in required if f not in parsed]
     if missing:
         raise OutputParseError(
-            f"Missing required fields in model output: {missing}. "
-            f"Got fields: {list(parsed.keys())}"
+            f"Missing required fields in model output: {missing}. Got fields: {list(parsed.keys())}"
         )
 
 
@@ -233,5 +232,5 @@ def build_correction_prompt(
     return (
         "Please respond with ONLY a JSON object on a single line. "
         "Include at minimum a 'confidence' field (0.0 to 1.0). "
-        "Example format: {\"confidence\": 0.8, \"description\": \"your observation\"}"
+        'Example format: {"confidence": 0.8, "description": "your observation"}'
     )

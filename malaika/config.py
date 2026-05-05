@@ -9,7 +9,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
-
 # ---------------------------------------------------------------------------
 # Paths
 # ---------------------------------------------------------------------------
@@ -24,21 +23,23 @@ CONFIGS_DIR = PROJECT_ROOT / "configs"
 # Feature Flags
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class FeatureFlags:
     """Feature flags — toggle modules without code changes."""
 
-    enable_heart_rate: bool = False      # MEMS heart module (GO/NO-GO pending)
-    enable_tts: bool = True              # Piper TTS spoken output
+    enable_heart_rate: bool = False  # MEMS heart module (GO/NO-GO pending)
+    enable_tts: bool = True  # Piper TTS spoken output
     enable_video_breathing: bool = True  # Breathing rate from video (vs frame fallback)
-    enable_multilingual: bool = True     # Multi-language support
-    enable_response_cache: bool = True   # Hash-based inference cache
+    enable_multilingual: bool = True  # Multi-language support
+    enable_response_cache: bool = True  # Hash-based inference cache
     enable_self_correction: bool = True  # Retry with correction prompt on parse failure
 
 
 # ---------------------------------------------------------------------------
 # Model Configuration
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class ModelConfig:
@@ -72,6 +73,7 @@ class ModelConfig:
 # Guard Configuration
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class GuardConfig:
     """Security guard thresholds."""
@@ -91,6 +93,7 @@ class GuardConfig:
 # ---------------------------------------------------------------------------
 # Audio / Video Configuration
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class MediaConfig:
@@ -120,6 +123,7 @@ class MediaConfig:
 # Observability Configuration
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class ObservabilityConfig:
     """Tracing and cost tracking settings."""
@@ -135,6 +139,7 @@ class ObservabilityConfig:
 # ---------------------------------------------------------------------------
 # Master Config
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class MalaikaConfig:

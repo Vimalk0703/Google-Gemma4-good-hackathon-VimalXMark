@@ -21,15 +21,14 @@ from malaika.types import (
     Severity,
 )
 
-
 # ============================================================================
 # WHO THRESHOLDS — Constants
 # ============================================================================
 
 # Breathing rate thresholds (breaths per minute)
 # Source: IMCI Chart Booklet, p.5
-FAST_BREATHING_THRESHOLD_2_TO_11_MONTHS: int = 50   # >= 50 = fast breathing
-FAST_BREATHING_THRESHOLD_12_TO_59_MONTHS: int = 40   # >= 40 = fast breathing
+FAST_BREATHING_THRESHOLD_2_TO_11_MONTHS: int = 50  # >= 50 = fast breathing
+FAST_BREATHING_THRESHOLD_12_TO_59_MONTHS: int = 40  # >= 40 = fast breathing
 
 # Diarrhea duration thresholds (days)
 # Source: IMCI Chart Booklet, p.9
@@ -41,7 +40,7 @@ FEVER_DURATION_CONCERN_DAYS: int = 7  # >= 7 days = prolonged fever
 
 # MUAC thresholds (mm)
 # Source: IMCI Chart Booklet, p.14
-MUAC_SEVERE_THRESHOLD_MM: int = 115   # < 115mm = severe acute malnutrition
+MUAC_SEVERE_THRESHOLD_MM: int = 115  # < 115mm = severe acute malnutrition
 MUAC_MODERATE_THRESHOLD_MM: int = 125  # 115-124mm = moderate acute malnutrition
 
 # Dehydration classification requires this many signs
@@ -51,14 +50,15 @@ SOME_DEHYDRATION_MIN_SIGNS: int = 2
 
 # Heart rate thresholds (BPM) — pediatric
 # Source: Pediatric Advanced Life Support (PALS) guidelines
-HEART_RATE_TACHYCARDIA_INFANT: int = 160   # > 160 in <1yr
-HEART_RATE_TACHYCARDIA_CHILD: int = 140    # > 140 in 1-5yr
-HEART_RATE_BRADYCARDIA: int = 60           # < 60 at any age
+HEART_RATE_TACHYCARDIA_INFANT: int = 160  # > 160 in <1yr
+HEART_RATE_TACHYCARDIA_CHILD: int = 140  # > 140 in 1-5yr
+HEART_RATE_BRADYCARDIA: int = 60  # < 60 at any age
 
 
 # ============================================================================
 # Classification Result
 # ============================================================================
+
 
 @dataclass(frozen=True)
 class DomainClassification:
@@ -119,6 +119,7 @@ class AggregateClassification:
 # DANGER SIGNS — IMCI Chart Booklet p.2
 # ============================================================================
 
+
 def classify_danger_signs(
     *,
     lethargic: bool = False,
@@ -168,13 +169,14 @@ def classify_danger_signs(
         severity=Severity.RED,
         referral=ReferralUrgency.IMMEDIATE,
         reasoning=f"General danger sign(s): {', '.join(signs_present)}. "
-                  f"WHO IMCI p.2: Any danger sign → urgent referral.",
+        f"WHO IMCI p.2: Any danger sign → urgent referral.",
     )
 
 
 # ============================================================================
 # BREATHING / PNEUMONIA — IMCI Chart Booklet p.5
 # ============================================================================
+
 
 def classify_breathing(
     *,
@@ -209,9 +211,7 @@ def classify_breathing(
         ValueError: If age_months is outside 2-59 range.
     """
     if not (2 <= age_months <= 59):
-        raise ValueError(
-            f"age_months must be between 2 and 59 for IMCI, got {age_months}"
-        )
+        raise ValueError(f"age_months must be between 2 and 59 for IMCI, got {age_months}")
 
     # SEVERE PNEUMONIA: chest indrawing or stridor at rest
     # Source: IMCI Chart Booklet p.5, pink row
@@ -238,7 +238,7 @@ def classify_breathing(
                 severity=Severity.YELLOW,
                 referral=ReferralUrgency.WITHIN_24H,
                 reasoning=f"Pneumonia: breathing rate {breathing_rate}/min "
-                          f"≥ threshold {threshold}/min for age {age_months}mo. WHO IMCI p.5.",
+                f"≥ threshold {threshold}/min for age {age_months}mo. WHO IMCI p.5.",
             )
 
     # NO PNEUMONIA: cough or cold
@@ -248,7 +248,7 @@ def classify_breathing(
         severity=Severity.GREEN,
         referral=ReferralUrgency.NONE,
         reasoning=f"No pneumonia: {'cough present, ' if has_cough else ''}"
-                  f"no fast breathing, no indrawing. WHO IMCI p.5.",
+        f"no fast breathing, no indrawing. WHO IMCI p.5.",
     )
 
 
@@ -285,6 +285,7 @@ def is_fast_breathing(rate: int, age_months: int) -> bool:
 # ============================================================================
 # DIARRHEA / DEHYDRATION — IMCI Chart Booklet p.8-9
 # ============================================================================
+
 
 def classify_diarrhea(
     *,
@@ -329,12 +330,14 @@ def classify_diarrhea(
 
     # Count severe dehydration signs
     # Source: IMCI Chart Booklet p.8, pink row
-    severe_signs = sum([
-        lethargic,              # Lethargic or unconscious
-        sunken_eyes,            # Sunken eyes
-        unable_to_drink,        # Unable to drink or drinks poorly
-        skin_pinch_very_slow,   # Skin pinch goes back very slowly
-    ])
+    severe_signs = sum(
+        [
+            lethargic,  # Lethargic or unconscious
+            sunken_eyes,  # Sunken eyes
+            unable_to_drink,  # Unable to drink or drinks poorly
+            skin_pinch_very_slow,  # Skin pinch goes back very slowly
+        ]
+    )
 
     if severe_signs >= SEVERE_DEHYDRATION_MIN_SIGNS:
         return DomainClassification(
@@ -342,17 +345,19 @@ def classify_diarrhea(
             severity=Severity.RED,
             referral=ReferralUrgency.IMMEDIATE,
             reasoning=f"Severe dehydration: {severe_signs} signs present "
-                      f"(≥{SEVERE_DEHYDRATION_MIN_SIGNS} required). WHO IMCI p.8.",
+            f"(≥{SEVERE_DEHYDRATION_MIN_SIGNS} required). WHO IMCI p.8.",
         )
 
     # Count some dehydration signs
     # Source: IMCI Chart Booklet p.8, yellow row
-    some_signs = sum([
-        restless_irritable,     # Restless, irritable
-        sunken_eyes,            # Sunken eyes
-        drinks_eagerly,         # Drinks eagerly, thirsty
-        skin_pinch_slow,        # Skin pinch goes back slowly
-    ])
+    some_signs = sum(
+        [
+            restless_irritable,  # Restless, irritable
+            sunken_eyes,  # Sunken eyes
+            drinks_eagerly,  # Drinks eagerly, thirsty
+            skin_pinch_slow,  # Skin pinch goes back slowly
+        ]
+    )
 
     if some_signs >= SOME_DEHYDRATION_MIN_SIGNS:
         return DomainClassification(
@@ -360,7 +365,7 @@ def classify_diarrhea(
             severity=Severity.YELLOW,
             referral=ReferralUrgency.WITHIN_24H,
             reasoning=f"Some dehydration: {some_signs} signs present "
-                      f"(≥{SOME_DEHYDRATION_MIN_SIGNS} required). WHO IMCI p.8.",
+            f"(≥{SOME_DEHYDRATION_MIN_SIGNS} required). WHO IMCI p.8.",
         )
 
     # Persistent diarrhea (≥14 days)
@@ -373,14 +378,14 @@ def classify_diarrhea(
                 severity=Severity.RED,
                 referral=ReferralUrgency.IMMEDIATE,
                 reasoning=f"Severe persistent diarrhea: {duration_days} days "
-                          f"with dehydration signs. WHO IMCI p.9.",
+                f"with dehydration signs. WHO IMCI p.9.",
             )
         return DomainClassification(
             classification=ClassificationType.PERSISTENT_DIARRHEA,
             severity=Severity.YELLOW,
             referral=ReferralUrgency.WITHIN_24H,
             reasoning=f"Persistent diarrhea: {duration_days} days "
-                      f"(≥{PERSISTENT_DIARRHEA_THRESHOLD_DAYS}). WHO IMCI p.9.",
+            f"(≥{PERSISTENT_DIARRHEA_THRESHOLD_DAYS}). WHO IMCI p.9.",
         )
 
     # Dysentery (blood in stool)
@@ -406,6 +411,7 @@ def classify_diarrhea(
 # ============================================================================
 # FEVER — IMCI Chart Booklet p.11
 # ============================================================================
+
 
 def classify_fever(
     *,
@@ -452,8 +458,7 @@ def classify_fever(
             classification=ClassificationType.MALARIA,
             severity=Severity.YELLOW,
             referral=ReferralUrgency.WITHIN_24H,
-            reasoning=f"Malaria: fever {duration_days} days in malaria-risk area. "
-                      f"WHO IMCI p.11.",
+            reasoning=f"Malaria: fever {duration_days} days in malaria-risk area. WHO IMCI p.11.",
         )
 
     # MEASLES WITH COMPLICATIONS
@@ -481,14 +486,14 @@ def classify_fever(
         classification=ClassificationType.FEVER_NO_MALARIA,
         severity=Severity.YELLOW,
         referral=ReferralUrgency.WITHIN_24H,
-        reasoning=f"Fever {duration_days} days, no malaria risk, "
-                  f"no stiff neck. WHO IMCI p.11.",
+        reasoning=f"Fever {duration_days} days, no malaria risk, no stiff neck. WHO IMCI p.11.",
     )
 
 
 # ============================================================================
 # NUTRITION — IMCI Chart Booklet p.14
 # ============================================================================
+
 
 def classify_nutrition(
     *,
@@ -512,9 +517,7 @@ def classify_nutrition(
     # Source: IMCI Chart Booklet p.14, pink row
     # Visible severe wasting OR edema both feet OR MUAC < 115mm
     is_severe = (
-        visible_wasting
-        or edema
-        or (muac_mm is not None and muac_mm < MUAC_SEVERE_THRESHOLD_MM)
+        visible_wasting or edema or (muac_mm is not None and muac_mm < MUAC_SEVERE_THRESHOLD_MM)
     )
 
     if is_severe:
@@ -542,7 +545,7 @@ def classify_nutrition(
             severity=Severity.YELLOW,
             referral=ReferralUrgency.WITHIN_24H,
             reasoning=f"Moderate malnutrition: MUAC {muac_mm}mm "
-                      f"(threshold: {MUAC_MODERATE_THRESHOLD_MM}mm). WHO IMCI p.14.",
+            f"(threshold: {MUAC_MODERATE_THRESHOLD_MM}mm). WHO IMCI p.14.",
         )
 
     # NO MALNUTRITION
@@ -551,14 +554,15 @@ def classify_nutrition(
         severity=Severity.GREEN,
         referral=ReferralUrgency.NONE,
         reasoning="No malnutrition: no wasting, no edema"
-                  + (f", MUAC {muac_mm}mm" if muac_mm else "")
-                  + ". WHO IMCI p.14.",
+        + (f", MUAC {muac_mm}mm" if muac_mm else "")
+        + ". WHO IMCI p.14.",
     )
 
 
 # ============================================================================
 # HEART (MEMS — Pluggable) — Not standard IMCI
 # ============================================================================
+
 
 def classify_heart(
     *,
@@ -584,8 +588,7 @@ def classify_heart(
     # Check for tachycardia or bradycardia
     if estimated_bpm is not None:
         threshold = (
-            HEART_RATE_TACHYCARDIA_INFANT if age_months < 12
-            else HEART_RATE_TACHYCARDIA_CHILD
+            HEART_RATE_TACHYCARDIA_INFANT if age_months < 12 else HEART_RATE_TACHYCARDIA_CHILD
         )
 
         if estimated_bpm > threshold or estimated_bpm < HEART_RATE_BRADYCARDIA:
@@ -594,7 +597,7 @@ def classify_heart(
                 severity=Severity.YELLOW,
                 referral=ReferralUrgency.WITHIN_24H,
                 reasoning=f"Heart rate {estimated_bpm} BPM outside normal range "
-                          f"for age {age_months}mo. PALS guidelines.",
+                f"for age {age_months}mo. PALS guidelines.",
             )
 
     if abnormal_sounds:
@@ -616,6 +619,7 @@ def classify_heart(
 # ============================================================================
 # AGGREGATE CLASSIFICATION
 # ============================================================================
+
 
 def classify_assessment(
     *,
@@ -682,11 +686,13 @@ def classify_assessment(
 
     # If no classifications at all → healthy
     if not result.classifications:
-        result.classifications.append(DomainClassification(
-            classification=ClassificationType.HEALTHY,
-            severity=Severity.GREEN,
-            referral=ReferralUrgency.NONE,
-            reasoning="No IMCI classifications triggered. Child appears healthy.",
-        ))
+        result.classifications.append(
+            DomainClassification(
+                classification=ClassificationType.HEALTHY,
+                severity=Severity.GREEN,
+                referral=ReferralUrgency.NONE,
+                reasoning="No IMCI classifications triggered. Child appears healthy.",
+            )
+        )
 
     return result

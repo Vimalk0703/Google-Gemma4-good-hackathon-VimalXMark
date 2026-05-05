@@ -7,15 +7,17 @@ This module has ZERO dependencies on other malaika modules.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum, auto
-from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
+if TYPE_CHECKING:
+    from pathlib import Path
 
 # ---------------------------------------------------------------------------
 # IMCI State Machine
 # ---------------------------------------------------------------------------
+
 
 class IMCIState(Enum):
     """States in the WHO IMCI assessment flow.
@@ -38,19 +40,20 @@ class IMCIState(Enum):
 # Severity & Classification
 # ---------------------------------------------------------------------------
 
+
 class Severity(Enum):
     """WHO IMCI severity classification — the traffic light system."""
 
-    GREEN = "green"    # Home care
+    GREEN = "green"  # Home care
     YELLOW = "yellow"  # Specific treatment / referral within 24h
-    RED = "red"        # Urgent referral — go NOW
+    RED = "red"  # Urgent referral — go NOW
 
 
 class ReferralUrgency(Enum):
     """How urgently the child needs a health facility."""
 
-    NONE = "none"          # Green — treat at home
-    WITHIN_24H = "24h"     # Yellow — see a health worker within a day
+    NONE = "none"  # Green — treat at home
+    WITHIN_24H = "24h"  # Yellow — see a health worker within a day
     IMMEDIATE = "immediate"  # Red — transport to facility NOW
 
 
@@ -107,18 +110,20 @@ class ClassificationType(Enum):
 # Finding Status (perception results)
 # ---------------------------------------------------------------------------
 
+
 class FindingStatus(Enum):
     """Status of a single clinical finding from AI perception."""
 
-    DETECTED = "detected"       # AI found this sign with sufficient confidence
+    DETECTED = "detected"  # AI found this sign with sufficient confidence
     NOT_DETECTED = "not_detected"  # AI checked and did not find this sign
-    UNCERTAIN = "uncertain"     # AI couldn't determine — recommend human check
+    UNCERTAIN = "uncertain"  # AI couldn't determine — recommend human check
     NOT_ASSESSED = "not_assessed"  # Module skipped (disabled or unavailable)
 
 
 # ---------------------------------------------------------------------------
 # Perception Results (output of vision.py / audio.py)
 # ---------------------------------------------------------------------------
+
 
 @dataclass(frozen=True)
 class PerceptionResult:
@@ -135,7 +140,7 @@ class BreathingRateResult(PerceptionResult):
     """Result of breathing rate analysis from video."""
 
     breath_count: int | None = None  # Breaths counted in the video
-    duration_seconds: int = 15       # Duration of the video
+    duration_seconds: int = 15  # Duration of the video
     estimated_rate_per_minute: int | None = None  # Calculated rate
 
 
@@ -214,6 +219,7 @@ class SpeechUnderstanding(PerceptionResult):
 # Clinical Findings (per IMCI step)
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class ClinicalFinding:
     """A single clinical finding at one IMCI step."""
@@ -223,25 +229,27 @@ class ClinicalFinding:
     perception_results: list[PerceptionResult] = field(default_factory=list)
     classifications: list[ClassificationType] = field(default_factory=list)
     notes: str = ""
-    timestamp: datetime = field(default_factory=lambda: datetime.now(tz=timezone.utc))
+    timestamp: datetime = field(default_factory=lambda: datetime.now(tz=UTC))
 
 
 # ---------------------------------------------------------------------------
 # Treatment
 # ---------------------------------------------------------------------------
 
+
 @dataclass(frozen=True)
 class Treatment:
     """A single treatment instruction."""
 
-    action: str          # What to do: "Give oral amoxicillin 250mg twice daily for 5 days"
-    urgency: str         # "immediate", "before_referral", "at_home"
-    category: str        # "antibiotic", "ors", "referral", "follow_up"
+    action: str  # What to do: "Give oral amoxicillin 250mg twice daily for 5 days"
+    urgency: str  # "immediate", "before_referral", "at_home"
+    category: str  # "antibiotic", "ors", "referral", "follow_up"
 
 
 # ---------------------------------------------------------------------------
 # Assessment Result (final output)
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class AssessmentResult:
@@ -264,7 +272,7 @@ class AssessmentResult:
     treatment_text: str = ""  # Full treatment text in caregiver's language
 
     # Metadata
-    started_at: datetime = field(default_factory=lambda: datetime.now(tz=timezone.utc))
+    started_at: datetime = field(default_factory=lambda: datetime.now(tz=UTC))
     completed_at: datetime | None = None
     model_used: str = ""
     prompt_versions: dict[str, str] = field(default_factory=dict)
@@ -274,12 +282,13 @@ class AssessmentResult:
 # Validated Input (output of guards)
 # ---------------------------------------------------------------------------
 
+
 @dataclass(frozen=True)
 class ValidatedInput:
     """Result of input guard validation — confirmed safe for processing."""
 
     file_path: Path
-    media_type: str       # "image", "audio", "video"
+    media_type: str  # "image", "audio", "video"
     format_detected: str  # "JPEG", "PNG", "WAV", etc.
     size_bytes: int
 
@@ -288,7 +297,7 @@ class ValidatedInput:
 class ValidatedOutput:
     """Result of output guard validation — confirmed safe for clinical use."""
 
-    status: str           # "valid", "uncertain", "invalid"
+    status: str  # "valid", "uncertain", "invalid"
     parsed: dict[str, Any] = field(default_factory=dict)
     raw_output: str = ""
     retries_used: int = 0
@@ -298,6 +307,7 @@ class ValidatedOutput:
 # Observability
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class StepTrace:
     """Trace record for a single IMCI step."""
@@ -305,16 +315,16 @@ class StepTrace:
     imci_state: IMCIState
     prompt_name: str
     prompt_version: str
-    input_hash: str           # Hash of input media/text (not the actual data)
-    raw_output: str           # Truncated model output
-    parsed_result: str        # String repr of parsed PerceptionResult
+    input_hash: str  # Hash of input media/text (not the actual data)
+    raw_output: str  # Truncated model output
+    parsed_result: str  # String repr of parsed PerceptionResult
     confidence: float
     latency_ms: float
     tokens_in: int = 0
     tokens_out: int = 0
     retries: int = 0
     cache_hit: bool = False
-    timestamp: datetime = field(default_factory=lambda: datetime.now(tz=timezone.utc))
+    timestamp: datetime = field(default_factory=lambda: datetime.now(tz=UTC))
 
 
 @dataclass
@@ -325,5 +335,5 @@ class AssessmentTrace:
     steps: list[StepTrace] = field(default_factory=list)
     total_tokens: int = 0
     total_latency_ms: float = 0.0
-    started_at: datetime = field(default_factory=lambda: datetime.now(tz=timezone.utc))
+    started_at: datetime = field(default_factory=lambda: datetime.now(tz=UTC))
     completed_at: datetime | None = None

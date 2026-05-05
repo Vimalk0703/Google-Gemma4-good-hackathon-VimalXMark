@@ -11,15 +11,17 @@ from __future__ import annotations
 
 import hashlib
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import structlog
 
-from malaika.config import MalaikaConfig
 from malaika.guards.output_validator import OutputParseError, build_correction_prompt
 from malaika.observability.cost_tracker import CostTracker
-from malaika.prompts.base import PromptTemplate
 from malaika.types import ValidatedOutput
+
+if TYPE_CHECKING:
+    from malaika.config import MalaikaConfig
+    from malaika.prompts.base import PromptTemplate
 
 logger = structlog.get_logger()
 
@@ -28,6 +30,7 @@ logger = structlog.get_logger()
 # Exceptions
 # ---------------------------------------------------------------------------
 
+
 class ModelError(Exception):
     """Gemma 4 inference failed (OOM, load failure, generation error)."""
 
@@ -35,6 +38,7 @@ class ModelError(Exception):
 # ---------------------------------------------------------------------------
 # Response Cache
 # ---------------------------------------------------------------------------
+
 
 class _ResponseCache:
     """Hash-based dict cache for inference responses.
@@ -93,6 +97,7 @@ class _ResponseCache:
 # ---------------------------------------------------------------------------
 # MalaikaInference
 # ---------------------------------------------------------------------------
+
 
 class MalaikaInference:
     """Single Gemma 4 model loaded once via Transformers + BitsAndBytes 4-bit.
@@ -176,10 +181,13 @@ class MalaikaInference:
             # Try merged model first, fall back to base model
             try:
                 self._processor = AutoProcessor.from_pretrained(
-                    model_name, trust_remote_code=True,
+                    model_name,
+                    trust_remote_code=True,
                 )
                 self._model = AutoModelForCausalLM.from_pretrained(
-                    model_name, trust_remote_code=True, **load_kwargs,
+                    model_name,
+                    trust_remote_code=True,
+                    **load_kwargs,
                 )
                 logger.info("model_loaded_merged", model_name=model_name)
             except Exception as e:
@@ -191,10 +199,13 @@ class MalaikaInference:
                     )
                     model_name = self._config.model.base_model_name
                     self._processor = AutoProcessor.from_pretrained(
-                        model_name, trust_remote_code=True,
+                        model_name,
+                        trust_remote_code=True,
                     )
                     self._model = AutoModelForCausalLM.from_pretrained(
-                        model_name, trust_remote_code=True, **load_kwargs,
+                        model_name,
+                        trust_remote_code=True,
+                        **load_kwargs,
                     )
                 else:
                     raise
@@ -213,11 +224,15 @@ class MalaikaInference:
                         self._model = PeftModel.from_pretrained(self._model, str(adapter_path))
                         logger.info("lora_adapter_loaded", adapter_path=str(adapter_path))
                     except ImportError:
-                        logger.warning("peft_not_installed", msg="LoRA adapter skipped — install peft")
+                        logger.warning(
+                            "peft_not_installed", msg="LoRA adapter skipped — install peft"
+                        )
                     except Exception as e:
                         logger.warning("lora_adapter_failed", error=str(e))
             else:
-                logger.info("lora_skip_merged_model", msg="Using merged model — LoRA already baked in")
+                logger.info(
+                    "lora_skip_merged_model", msg="Using merged model — LoRA already baked in"
+                )
 
             self._model_loaded = True
             self._cache.clear()
@@ -241,6 +256,7 @@ class MalaikaInference:
 
         try:
             import torch
+
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
         except ImportError:
@@ -249,7 +265,8 @@ class MalaikaInference:
         logger.info("model_unloaded")
 
     def _extract_images_from_messages(
-        self, messages: list[dict[str, Any]],
+        self,
+        messages: list[dict[str, Any]],
     ) -> list[Any]:
         """Extract image paths from multimodal messages and load as PIL Images.
 
@@ -314,7 +331,9 @@ class MalaikaInference:
             raise ModelError("Model not loaded. Call load_model() first.")
 
         max_tokens = max_tokens or self._config.model.default_max_tokens
-        temperature = temperature if temperature is not None else self._config.model.default_temperature
+        temperature = (
+            temperature if temperature is not None else self._config.model.default_temperature
+        )
 
         with self.cost_tracker.track_call() as cost:
             try:
@@ -362,7 +381,8 @@ class MalaikaInference:
 
                     generated_tokens = outputs[0][input_len:]
                     response = self._processor.decode(
-                        generated_tokens, skip_special_tokens=True,
+                        generated_tokens,
+                        skip_special_tokens=True,
                     )
 
                     cost.tokens_in = input_len
@@ -405,7 +425,9 @@ class MalaikaInference:
 
         max_tokens = max_tokens or prompt.max_tokens
         temperature = temperature if temperature is not None else prompt.temperature
-        max_retries = self._config.model.max_retries if self._config.features.enable_self_correction else 0
+        max_retries = (
+            self._config.model.max_retries if self._config.features.enable_self_correction else 0
+        )
 
         # Check cache (disabled for treatment prompts)
         is_treatment = "treatment" in prompt.name
@@ -433,7 +455,9 @@ class MalaikaInference:
 
                 # Cache successful response (not treatment)
                 if self._config.features.enable_response_cache and not is_treatment:
-                    self._cache.put(prompt.name, prompt.version, input_hash, temperature, raw_output)
+                    self._cache.put(
+                        prompt.name, prompt.version, input_hash, temperature, raw_output
+                    )
 
                 return raw_output, validated, retries_used
 
@@ -467,12 +491,16 @@ class MalaikaInference:
             last_error=last_error[:200],
         )
 
-        return raw_output, ValidatedOutput(
-            status="uncertain",
-            parsed={},
-            raw_output=raw_output,
-            retries_used=retries_used,
-        ), retries_used
+        return (
+            raw_output,
+            ValidatedOutput(
+                status="uncertain",
+                parsed={},
+                raw_output=raw_output,
+                retries_used=retries_used,
+            ),
+            retries_used,
+        )
 
     # -------------------------------------------------------------------
     # Convenience methods for each modality
@@ -501,8 +529,11 @@ class MalaikaInference:
             **variables,
         )
         return self.generate_with_retry(
-            messages, prompt, input_hash=input_hash,
-            max_tokens=prompt.max_tokens, temperature=prompt.temperature,
+            messages,
+            prompt,
+            input_hash=input_hash,
+            max_tokens=prompt.max_tokens,
+            temperature=prompt.temperature,
         )
 
     def analyze_audio(
@@ -528,8 +559,11 @@ class MalaikaInference:
             **variables,
         )
         return self.generate_with_retry(
-            messages, prompt, input_hash=input_hash,
-            max_tokens=prompt.max_tokens, temperature=prompt.temperature,
+            messages,
+            prompt,
+            input_hash=input_hash,
+            max_tokens=prompt.max_tokens,
+            temperature=prompt.temperature,
         )
 
     def analyze_video(
@@ -555,8 +589,11 @@ class MalaikaInference:
             **variables,
         )
         return self.generate_with_retry(
-            messages, prompt, input_hash=input_hash,
-            max_tokens=prompt.max_tokens, temperature=prompt.temperature,
+            messages,
+            prompt,
+            input_hash=input_hash,
+            max_tokens=prompt.max_tokens,
+            temperature=prompt.temperature,
         )
 
     def reason(
@@ -577,6 +614,9 @@ class MalaikaInference:
         """
         messages = prompt.render(**variables)
         return self.generate_with_retry(
-            messages, prompt, input_hash=input_hash,
-            max_tokens=prompt.max_tokens, temperature=prompt.temperature,
+            messages,
+            prompt,
+            input_hash=input_hash,
+            max_tokens=prompt.max_tokens,
+            temperature=prompt.temperature,
         )

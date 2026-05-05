@@ -10,11 +10,13 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from pathlib import Path
-from typing import Any
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING, Any
 
-from malaika.evaluation.golden_scenarios import GoldenScenario
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from malaika.evaluation.golden_scenarios import GoldenScenario
 
 
 @dataclass
@@ -36,7 +38,7 @@ class EvaluationReport:
 
     level: str  # "protocol", "perception", "e2e"
     results: list[ScenarioResult] = field(default_factory=list)
-    timestamp: datetime = field(default_factory=lambda: datetime.now(tz=timezone.utc))
+    timestamp: datetime = field(default_factory=lambda: datetime.now(tz=UTC))
 
     @property
     def total(self) -> int:
@@ -66,9 +68,14 @@ class EvaluationReport:
             "accuracy": round(self.accuracy, 3),
             "timestamp": self.timestamp.isoformat(),
             "failures": [
-                {"name": r.scenario_name, "expected": r.expected_classifications,
-                 "actual": r.actual_classifications, "notes": r.notes}
-                for r in self.results if not r.passed
+                {
+                    "name": r.scenario_name,
+                    "expected": r.expected_classifications,
+                    "actual": r.actual_classifications,
+                    "notes": r.notes,
+                }
+                for r in self.results
+                if not r.passed
             ],
         }
 

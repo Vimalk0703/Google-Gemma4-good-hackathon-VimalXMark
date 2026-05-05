@@ -9,11 +9,10 @@ This module MUST NOT contain clinical logic or thresholds.
 from __future__ import annotations
 
 import hashlib
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import structlog
 
-from malaika.inference import MalaikaInference
 from malaika.prompts import PromptRegistry
 from malaika.types import (
     AlertnessAssessment,
@@ -23,7 +22,13 @@ from malaika.types import (
     FindingStatus,
     NutritionAssessment,
     SkinColorAssessment,
+    ValidatedOutput,
 )
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from malaika.inference import MalaikaInference
 
 logger = structlog.get_logger()
 
@@ -31,6 +36,7 @@ logger = structlog.get_logger()
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _file_hash(path: Path) -> str:
     """Compute a short SHA-256 hash of a file for cache keying."""
@@ -66,6 +72,7 @@ def _description_from_parsed(parsed: dict) -> str:
 # Vision Functions
 # ---------------------------------------------------------------------------
 
+
 def assess_alertness(
     image_path: Path,
     inference: MalaikaInference,
@@ -83,8 +90,10 @@ def assess_alertness(
     input_hash = _file_hash(image_path)
 
     try:
-        raw_output, validated, retries = inference.analyze_image(
-            image_path, prompt, input_hash=input_hash,
+        raw_output, validated, _retries = inference.analyze_image(
+            image_path,
+            prompt,
+            input_hash=input_hash,
         )
     except Exception as e:
         logger.error("vision_alertness_failed", error=str(e))
@@ -105,9 +114,8 @@ def assess_alertness(
     is_unconscious = alertness_level == "unconscious"
 
     # If detecting danger signs, override status
-    if is_lethargic or is_unconscious:
-        if status == FindingStatus.UNCERTAIN:
-            pass  # Keep uncertain — we are not confident
+    if (is_lethargic or is_unconscious) and status == FindingStatus.UNCERTAIN:
+        pass  # Keep uncertain — we are not confident
         # Status stays DETECTED since _status_from_validated handles "valid"
 
     return AlertnessAssessment(
@@ -138,8 +146,10 @@ def detect_chest_indrawing(
     input_hash = _file_hash(image_path)
 
     try:
-        raw_output, validated, retries = inference.analyze_image(
-            image_path, prompt, input_hash=input_hash,
+        raw_output, validated, _retries = inference.analyze_image(
+            image_path,
+            prompt,
+            input_hash=input_hash,
         )
     except Exception as e:
         logger.error("vision_chest_indrawing_failed", error=str(e))
@@ -188,8 +198,10 @@ def assess_skin_color(
     input_hash = _file_hash(image_path)
 
     try:
-        raw_output, validated, retries = inference.analyze_image(
-            image_path, prompt, input_hash=input_hash,
+        raw_output, validated, _retries = inference.analyze_image(
+            image_path,
+            prompt,
+            input_hash=input_hash,
         )
     except Exception as e:
         logger.error("vision_skin_color_failed", error=str(e))
@@ -240,8 +252,10 @@ def assess_wasting(
     input_hash = _file_hash(image_path)
 
     try:
-        raw_output, validated, retries = inference.analyze_image(
-            image_path, prompt, input_hash=input_hash,
+        raw_output, validated, _retries = inference.analyze_image(
+            image_path,
+            prompt,
+            input_hash=input_hash,
         )
     except Exception as e:
         logger.error("vision_wasting_failed", error=str(e))
@@ -287,8 +301,10 @@ def detect_edema(
     input_hash = _file_hash(image_path)
 
     try:
-        raw_output, validated, retries = inference.analyze_image(
-            image_path, prompt, input_hash=input_hash,
+        raw_output, validated, _retries = inference.analyze_image(
+            image_path,
+            prompt,
+            input_hash=input_hash,
         )
     except Exception as e:
         logger.error("vision_edema_failed", error=str(e))
@@ -338,8 +354,10 @@ def assess_dehydration_signs(
     input_hash = _file_hash(image_path)
 
     try:
-        raw_output, validated, retries = inference.analyze_image(
-            image_path, prompt, input_hash=input_hash,
+        raw_output, validated, _retries = inference.analyze_image(
+            image_path,
+            prompt,
+            input_hash=input_hash,
         )
     except Exception as e:
         logger.error("vision_dehydration_failed", error=str(e))
@@ -394,8 +412,10 @@ def count_breathing_rate(
     input_hash = _file_hash(video_path)
 
     try:
-        raw_output, validated, retries = inference.analyze_video(
-            video_path, prompt, input_hash=input_hash,
+        raw_output, validated, _retries = inference.analyze_video(
+            video_path,
+            prompt,
+            input_hash=input_hash,
             duration_seconds=duration_seconds,
         )
     except Exception as e:

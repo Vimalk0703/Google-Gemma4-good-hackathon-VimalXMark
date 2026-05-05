@@ -26,8 +26,8 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import contextlib
 import json
-import os
 import random
 import re
 from typing import Any
@@ -43,7 +43,7 @@ PULSE_STT_URL = "wss://waves-api.smallest.ai/api/v1/pulse/get_text"
 WAVES_TTS_URL = "https://waves-api.smallest.ai/api/v1/lightning-v3.1/get_speech"
 
 # Sentence boundary regex for TTS streaming
-_SENTENCE_BOUNDARY = re.compile(r'(?<=[.!?])\s+')
+_SENTENCE_BOUNDARY = re.compile(r"(?<=[.!?])\s+")
 
 # Filler phrases for dead air prevention during thinking
 _FILLER_PHRASES = [
@@ -86,10 +86,10 @@ class VoiceSessionHandler:
             return True
         try:
             # websockets v15+
-            if hasattr(self.stt_ws, 'protocol'):
+            if hasattr(self.stt_ws, "protocol"):
                 return self.stt_ws.protocol.state != 1
             # websockets v13-14
-            if hasattr(self.stt_ws, 'closed'):
+            if hasattr(self.stt_ws, "closed"):
                 return self.stt_ws.closed
             return False
         except Exception:
@@ -139,10 +139,8 @@ class VoiceSessionHandler:
             logger.info("voice_session_ended")
         except Exception as e:
             logger.error("voice_session_error", error=str(e))
-            try:
+            with contextlib.suppress(Exception):
                 await self._send_error(str(e))
-            except Exception:
-                pass
         finally:
             await self._cleanup()
 
@@ -204,7 +202,9 @@ class VoiceSessionHandler:
                 await self.stt_ws.send(pcm_data)
                 self._audio_chunks_sent += 1
                 if self._audio_chunks_sent % 20 == 0:
-                    logger.debug("audio_streaming", chunks=self._audio_chunks_sent, bytes=len(pcm_data))
+                    logger.debug(
+                        "audio_streaming", chunks=self._audio_chunks_sent, bytes=len(pcm_data)
+                    )
             except Exception as e:
                 logger.error("audio_send_failed", error=str(e))
 
@@ -220,10 +220,8 @@ class VoiceSessionHandler:
 
         # Close STT connection (Pulse requires fresh connection per utterance)
         if self.stt_ws:
-            try:
+            with contextlib.suppress(Exception):
                 await self.stt_ws.close()
-            except Exception:
-                pass
             self.stt_ws = None
 
         # Process the accumulated transcript
@@ -244,7 +242,7 @@ class VoiceSessionHandler:
             while True:
                 try:
                     message = await asyncio.wait_for(self.stt_ws.recv(), timeout=30.0)
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     break
 
                 if isinstance(message, bytes):
@@ -283,7 +281,10 @@ class VoiceSessionHandler:
         # Run Gemma 4 inference (blocking — runs in thread pool)
         loop = asyncio.get_event_loop()
         result = await loop.run_in_executor(
-            None, self.engine.process, text, None,
+            None,
+            self.engine.process,
+            text,
+            None,
         )
 
         # Cancel filler if it hasn't played yet
@@ -319,13 +320,14 @@ class VoiceSessionHandler:
         await self._send_state("thinking")
 
         # Image analysis filler (more specific)
-        filler_task = asyncio.create_task(
-            self._send_filler(_IMAGE_FILLER_PHRASES)
-        )
+        filler_task = asyncio.create_task(self._send_filler(_IMAGE_FILLER_PHRASES))
 
         loop = asyncio.get_event_loop()
         result = await loop.run_in_executor(
-            None, self.engine.process, "", tmp.name,
+            None,
+            self.engine.process,
+            "",
+            tmp.name,
         )
 
         filler_task.cancel()
@@ -425,7 +427,8 @@ class VoiceSessionHandler:
         logger.debug("tts_sentence", length=len(sentence), audio_size=len(response.content))
 
     async def _send_filler(
-        self, phrases: list[str] | None = None,
+        self,
+        phrases: list[str] | None = None,
     ) -> None:
         """Send filler audio after a delay to prevent dead air during thinking.
 
@@ -448,8 +451,6 @@ class VoiceSessionHandler:
     async def _cleanup(self) -> None:
         """Clean up connections."""
         if self.stt_ws and not self._is_stt_closed():
-            try:
+            with contextlib.suppress(Exception):
                 await self.stt_ws.close()
-            except Exception:
-                pass
         self.stt_ws = None

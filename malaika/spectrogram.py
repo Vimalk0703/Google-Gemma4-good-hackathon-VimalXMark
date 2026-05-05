@@ -25,13 +25,13 @@ logger = structlog.get_logger()
 
 # Spectrogram generation parameters — tuned for pediatric breath sounds
 # Breath sounds: 100-2000 Hz range, so we use a lower fmax than music
-DEFAULT_SR = 22050          # Sample rate (Hz) — librosa default
-DEFAULT_N_FFT = 2048        # FFT window size
-DEFAULT_HOP_LENGTH = 512    # Hop between frames
-DEFAULT_N_MELS = 128        # Number of mel bands
-DEFAULT_FMIN = 50           # Min frequency (Hz) — captures low grunting
-DEFAULT_FMAX = 4000         # Max frequency (Hz) — captures high wheeze/stridor
-DEFAULT_IMAGE_WIDTH = 512   # Output image width (pixels)
+DEFAULT_SR = 22050  # Sample rate (Hz) — librosa default
+DEFAULT_N_FFT = 2048  # FFT window size
+DEFAULT_HOP_LENGTH = 512  # Hop between frames
+DEFAULT_N_MELS = 128  # Number of mel bands
+DEFAULT_FMIN = 50  # Min frequency (Hz) — captures low grunting
+DEFAULT_FMAX = 4000  # Max frequency (Hz) — captures high wheeze/stridor
+DEFAULT_IMAGE_WIDTH = 512  # Output image width (pixels)
 DEFAULT_IMAGE_HEIGHT = 256  # Output image height (pixels)
 
 
@@ -88,8 +88,7 @@ def audio_to_spectrogram(
         from PIL import Image
     except ImportError as e:
         raise RuntimeError(
-            "Pillow is required for spectrogram image generation. "
-            "Install with: pip install Pillow"
+            "Pillow is required for spectrogram image generation. Install with: pip install Pillow"
         ) from e
 
     logger.debug("generating_spectrogram", audio_path=str(audio_path))
@@ -97,7 +96,10 @@ def audio_to_spectrogram(
     # Load audio
     try:
         y, loaded_sr = librosa.load(
-            str(audio_path), sr=sr, duration=duration, mono=True,
+            str(audio_path),
+            sr=sr,
+            duration=duration,
+            mono=True,
         )
     except Exception as e:
         raise ValueError(f"Failed to load audio file: {e}") from e
@@ -107,9 +109,13 @@ def audio_to_spectrogram(
 
     # Compute mel spectrogram
     mel_spec: Any = librosa.feature.melspectrogram(
-        y=y, sr=loaded_sr,
-        n_fft=n_fft, hop_length=hop_length, n_mels=n_mels,
-        fmin=fmin, fmax=fmax,
+        y=y,
+        sr=loaded_sr,
+        n_fft=n_fft,
+        hop_length=hop_length,
+        n_mels=n_mels,
+        fmin=fmin,
+        fmax=fmax,
     )
 
     # Convert to dB scale (log scale for better visualization)
@@ -119,9 +125,7 @@ def audio_to_spectrogram(
     spec_min = float(np.min(mel_spec_db))
     spec_max = float(np.max(mel_spec_db))
     if spec_max - spec_min > 0:
-        normalized = ((mel_spec_db - spec_min) / (spec_max - spec_min) * 255).astype(
-            np.uint8
-        )
+        normalized = ((mel_spec_db - spec_min) / (spec_max - spec_min) * 255).astype(np.uint8)
     else:
         normalized = np.zeros_like(mel_spec_db, dtype=np.uint8)
 
@@ -148,7 +152,7 @@ def audio_to_spectrogram(
         "spectrogram_generated",
         audio_path=str(audio_path),
         output_path=str(output_path),
-        audio_duration=f"{len(y)/loaded_sr:.1f}s",
+        audio_duration=f"{len(y) / loaded_sr:.1f}s",
         image_size=f"{image_width}x{image_height}",
     )
 

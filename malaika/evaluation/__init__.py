@@ -8,7 +8,7 @@ Usage:
     print(report.summary())
 """
 
+from malaika.evaluation.evaluator import EvaluationReport, Evaluator
 from malaika.evaluation.golden_scenarios import GOLDEN_SCENARIOS, GoldenScenario
-from malaika.evaluation.evaluator import Evaluator, EvaluationReport
 
-__all__ = ["GOLDEN_SCENARIOS", "GoldenScenario", "Evaluator", "EvaluationReport"]
+__all__ = ["GOLDEN_SCENARIOS", "EvaluationReport", "Evaluator", "GoldenScenario"]

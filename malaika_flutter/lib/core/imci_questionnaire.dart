@@ -181,6 +181,13 @@ const List<ImciQuestion> imciQuestions = [
     type: AnswerType.age,
     label: 'Age',
   ),
+  ImciQuestion(
+    id: 'weight_kg',
+    step: 'greeting',
+    question: 'How much does your child weigh in kilograms? If you are not sure, that is okay — just say "not sure".',
+    type: AnswerType.number,
+    label: 'Weight',
+  ),
 
   // --- Danger Signs (IMCI p.2) ---
   ImciQuestion(
@@ -348,6 +355,9 @@ class ImciQuestionnaire {
   /// Child's age in months.
   int ageMonths = 0;
 
+  /// Child's weight in kg. 0 = unknown (will use age-based estimation).
+  double weightKg = 0;
+
   /// Extracted clinical findings.
   final Map<String, dynamic> findings = {};
 
@@ -372,18 +382,24 @@ class ImciQuestionnaire {
   }
 
   /// The current question to ask, or null if assessment is complete.
-  /// Automatically skips conditional questions whose trigger is false.
+  /// Skips:
+  ///   - Conditional questions whose trigger is false
+  ///   - Questions whose finding is already in [rawAnswers] (set by vision
+  ///     pre-population or a prior multi-value extract)
   ImciQuestion? get currentQuestion {
     while (_index < imciQuestions.length) {
       final q = imciQuestions[_index];
-      // Skip conditional questions if trigger finding is false/absent
       if (q.triggerKey != null && findings[q.triggerKey] != true) {
+        _index++;
+        continue;
+      }
+      if (rawAnswers.containsKey(q.id)) {
         _index++;
         continue;
       }
       return q;
     }
-    return null; // All questions asked
+    return null;
   }
 
   /// The step of the current question (for progress bar).
@@ -411,6 +427,37 @@ class ImciQuestionnaire {
 
   /// Whether the assessment is complete (all questions asked).
   bool get isComplete => currentQuestion == null;
+
+  /// All ImciQuestions belonging to the given IMCI step. Used by the
+  /// agentic orchestrator to build a per-step extraction schema.
+  List<ImciQuestion> questionsForStep(String step) =>
+      imciQuestions.where((q) => q.step == step).toList();
+
+  /// Questions remaining to ask within [step]: not photo, not yet answered,
+  /// trigger gate (if any) is satisfied. Used by the Phase 2 next-question
+  /// picker to constrain the LLM's choice to clinically valid options.
+  List<ImciQuestion> remainingQuestionsInStep(String step) {
+    return imciQuestions.where((q) {
+      if (q.step != step) return false;
+      if (q.type == AnswerType.photo) return false;
+      if (rawAnswers.containsKey(q.id)) return false;
+      if (q.triggerKey != null && findings[q.triggerKey] != true) return false;
+      return true;
+    }).toList();
+  }
+
+  /// Jump _index to the slot of [questionId] in [imciQuestions]. The next
+  /// call to [currentQuestion] will return that question (or skip it and
+  /// advance if it's already answered/its trigger is unmet — same rules
+  /// as the linear walk). No-op if the id isn't found.
+  void setIndexToQuestion(String questionId) {
+    for (var i = 0; i < imciQuestions.length; i++) {
+      if (imciQuestions[i].id == questionId) {
+        _index = i;
+        return;
+      }
+    }
+  }
 
   /// Record the user's answer to the current question.
   ///
@@ -445,7 +492,12 @@ class ImciQuestionnaire {
         }
         findings[q.id] = value ?? false; // Default to false if still ambiguous
       case AnswerType.number:
-        findings[q.id] = _extractNumber(text);
+        final num = _extractNumber(text);
+        findings[q.id] = num;
+        if (q.id == 'weight_kg') {
+          // 0 means "not sure" — will use age-based estimation in treatment
+          weightKg = num > 0 ? num.toDouble() : 0;
+        }
       case AnswerType.age:
         ageMonths = _extractAge(text);
         findings[q.id] = ageMonths;
@@ -483,6 +535,91 @@ class ImciQuestionnaire {
     return null;
   }
 
+  /// Apply multiple findings extracted in a single LLM call.
+  ///
+  /// Phase 1 of the agentic enhancements: rather than asking the model
+  /// "yes or no?" and discarding the rest of the user's sentence, the
+  /// caller invokes the model once with a JSON schema for the whole step
+  /// and feeds the result here. We type-cast each value, update findings
+  /// + qaPairs, and advance _index past every question whose finding has
+  /// just been answered (within the same step).
+  ///
+  /// Returns the step name if that step just completed (so the caller
+  /// can run classification), otherwise null.
+  ///
+  /// Defensive: silently drops keys that aren't in [imciQuestions], that
+  /// have a triggerKey whose trigger isn't true, or whose type doesn't
+  /// fit the value. Caller is responsible for doing fallback if the
+  /// returned map was empty (this method assumes findings is non-empty).
+  String? recordMultipleFindings(
+    Map<String, dynamic> extracted,
+    String originalText,
+  ) {
+    final currentQ = currentQuestion;
+    if (currentQ == null) return null;
+
+    final previousStep = currentQ.step;
+    final byId = {for (final q in imciQuestions) q.id: q};
+
+    for (final entry in extracted.entries) {
+      final q = byId[entry.key];
+      if (q == null) continue;
+
+      // Respect conditional triggers — don't apply a follow-up before its
+      // gate is open.
+      if (q.triggerKey != null && findings[q.triggerKey] != true) continue;
+
+      final value = entry.value;
+      switch (q.type) {
+        case AnswerType.yesNo:
+          if (value is bool) findings[q.id] = value;
+        case AnswerType.number:
+          if (value is int) {
+            findings[q.id] = value;
+            if (q.id == 'weight_kg') {
+              weightKg = value > 0 ? value.toDouble() : 0;
+            }
+          }
+        case AnswerType.age:
+          if (value is int && value > 0) {
+            ageMonths = value;
+            findings[q.id] = value;
+          }
+        case AnswerType.photo:
+          continue;
+      }
+
+      rawAnswers[q.id] = '$value';
+      qaPairs.add({
+        'question': q.question,
+        'answer': '$value (extracted from "$originalText")',
+        'id': q.id,
+      });
+    }
+
+    // Advance _index past every question (in this step) we just answered,
+    // honoring conditional gates as we go.
+    while (_index < imciQuestions.length) {
+      final q = imciQuestions[_index];
+      if (q.step != previousStep) break;
+      if (q.triggerKey != null && findings[q.triggerKey] != true) {
+        _index++;
+        continue;
+      }
+      if (rawAnswers.containsKey(q.id)) {
+        _index++;
+        continue;
+      }
+      break;
+    }
+
+    final nextQ = currentQuestion;
+    if (nextQ == null || nextQ.step != previousStep) {
+      return previousStep;
+    }
+    return null;
+  }
+
   /// Scan the user's text for answers to upcoming questions in the same step.
   /// Fills in number values and keyword-detected booleans automatically.
   void _autoFillFromText(String text, String currentStep) {
@@ -496,6 +633,8 @@ class ImciQuestionnaire {
 
       switch (q.type) {
         case AnswerType.number:
+          // Don't auto-fill weight from age — they're unrelated numbers
+          if (q.id == 'weight_kg') continue;
           // "yes for last 2 days" → extract the number
           final num = _extractNumber(text);
           if (num > 0) {
@@ -805,5 +944,35 @@ class ImciQuestionnaire {
   /// Extract age in months from text.
   static int _extractAge(String text) {
     return _extractNumber(text);
+  }
+
+  // --------------------------------------------------------------------------
+  // Serialization — for persisting assessment results
+  // --------------------------------------------------------------------------
+
+  /// Serialize the complete assessment state to JSON.
+  Map<String, dynamic> toJson() {
+    final classMap = <String, String>{};
+    for (final entry in classifications.entries) {
+      if (entry.value != null) {
+        classMap[entry.key] = entry.value!.classification.value;
+      }
+    }
+
+    // Filter findings to only serializable types
+    final serializableFindings = <String, dynamic>{};
+    findings.forEach((key, value) {
+      if (value is bool || value is int || value is double || value is String) {
+        serializableFindings[key] = value;
+      }
+    });
+
+    return {
+      'ageMonths': ageMonths,
+      'weightKg': weightKg,
+      'severity': overallSeverity,
+      'findings': serializableFindings,
+      'classifications': classMap,
+    };
   }
 }

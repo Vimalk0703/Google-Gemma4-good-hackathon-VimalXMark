@@ -1,6 +1,8 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_gemma/flutter_gemma.dart';
-import 'package:image_picker/image_picker.dart';
+import 'package:image/image.dart' as img;
 import '../theme/malaika_theme.dart';
 import '../widgets/chat_bubble.dart';
 import '../widgets/imci_progress_bar.dart';
@@ -8,24 +10,27 @@ import '../widgets/classification_card.dart';
 import '../widgets/skill_event_card.dart';
 import '../widgets/benchmark_card.dart';
 import '../core/imci_questionnaire.dart';
+import '../core/imci_protocol.dart';
 import '../core/reconciliation_engine.dart';
+import '../core/treatment_protocol.dart';
+import '../core/assessment_store.dart';
+import '../core/agentic_assessor.dart';
+import '../core/agentic_orchestrator.dart';
 import '../core/voice_service.dart';
 import '../core/skills.dart';
 import '../core/tool_call_tracker.dart';
 import '../widgets/voice_waveform.dart';
 import 'camera_monitor_screen.dart';
+import 'capture_screen.dart';
 
-/// IMCI assessment using structured Q&A collection + LLM narration.
+/// Vision-First IMCI Assessment — "Show me your child."
 ///
-/// Phase 1: COLLECT — Walk through predefined IMCI questions in order.
-///   LLM rephrases each question naturally. User answers.
-///   Reasoning card shows extracted findings after each answer.
-///
-/// Phase 2: CLASSIFY — After each step completes, run deterministic WHO
-///   classification (imci_protocol.dart). Show classification card.
-///
-/// Phase 3: NARRATE — After all questions, LLM generates a comprehensive
-///   report from all Q&A pairs + classifications.
+/// Phase 1: GREET — Collect age + weight.
+/// Phase 2: SEE — Photo first. Gemma 4 vision detects clinical signs.
+/// Phase 3: ASK — Targeted questions based on what Gemma saw (~3-8, not 20).
+/// Phase 4: CLASSIFY — Deterministic WHO IMCI (imci_protocol.dart).
+/// Phase 5: TREAT — Exact medicines + doses (treatment_protocol.dart).
+/// Phase 6: GUIDE — Gemma generates care instructions in caregiver's language.
 
 class HomeScreen extends StatefulWidget {
   final bool modelLoaded;
@@ -48,6 +53,15 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _voiceMode = false; // Continuous voice — one tap to activate
   String _partialText = '';
 
+  /// Tracks consecutive STT errors to break runaway re-listen loops. When
+  /// the engine refuses repeated starts (error_busy, error_client) the
+  /// auto-restart can spin many times per second; if 3 errors land in <5s
+  /// we exit voice mode so the user can manually retry.
+  int _sttErrorCount = 0;
+  DateTime? _lastSttError;
+  static const _sttErrorWindow = Duration(seconds: 5);
+  static const _sttErrorThreshold = 3;
+
   /// The questionnaire manages all IMCI Q&A state.
   final ImciQuestionnaire _q = ImciQuestionnaire();
 
@@ -64,18 +78,36 @@ class _HomeScreenState extends State<HomeScreen> {
   /// Track the previous step for transition banners.
   String _lastDisplayedStep = 'greeting';
 
-  /// System prompt for the LLM — just persona and tone.
+  /// Whether the vision-first phase has been done.
+  bool _visionFirstDone = false;
+
+  /// Vision findings from the comprehensive photo analysis.
+  Map<String, bool> _visionFindings = {};
+
+  /// Treatment plan generated after classification.
+  TreatmentPlan? _treatmentPlan;
+
+  /// User's preferred language code (loaded from store).
+  String _language = 'en';
+
+  /// First-turn system prompt — used only for the very first message, where
+  /// a brief introduction is appropriate. After that, every subsequent
+  /// session uses _systemPromptMidConversation, which forbids re-greeting.
   static const _systemPrompt =
-      'You are Malaika, a warm and caring child health assistant. '
-      'You help caregivers check on their child\'s health.\n'
-      'RULES:\n'
-      '- Keep responses to 1-2 short sentences\n'
-      '- Be warm and reassuring\n'
-      '- ONLY ask the question you are told to ask\n'
-      '- Do NOT add extra questions or ask about other topics\n'
-      '- Do NOT assume any symptoms\n'
-      '- Acknowledge what the caregiver says briefly, then ask the given question\n'
-      '- Never diagnose';
+      'You are Malaika, a warm child-health assistant starting a new '
+      'conversation. Greet briefly. Ask the question given. '
+      '1-2 short sentences total. Never diagnose.';
+
+  /// Mid-conversation system prompt — used for every Gemma call AFTER the
+  /// initial greeting. Critically, this forbids re-introducing or saying
+  /// "Hi/Hello/I'm Malaika" because each session is recreated per turn
+  /// (memory constraint) and Gemma defaults to greeting in fresh sessions.
+  static const _systemPromptMidConversation =
+      'You are continuing an active conversation with the caregiver about '
+      'their sick child. NEVER re-introduce yourself. NEVER say "Hi", '
+      '"Hello", or "I am Malaika". Be warm but brief. ONE short sentence '
+      'ending in a question mark. Reference what is already known when '
+      'helpful. Ask only the question given. Never diagnose.';
 
   /// Report-specific system prompt (no "only ask questions" rule).
   static const _reportPrompt =
@@ -84,12 +116,23 @@ class _HomeScreenState extends State<HomeScreen> {
       'Explain findings simply. Be caring but direct. '
       'Never diagnose — recommend seeing a health worker.';
 
+  /// Get language directive for Gemma prompts.
+  String get _langDirective => _language != 'en'
+      ? ' Respond in ${AssessmentStore.languageName(_language)}.'
+      : '';
+
   @override
   void initState() {
     super.initState();
     registerAllSkills();
+    _loadLanguage();
     _startAssessment();
     _initVoice();
+  }
+
+  Future<void> _loadLanguage() async {
+    final lang = await AssessmentStore.getLanguage();
+    if (mounted) setState(() => _language = lang);
   }
 
   Future<void> _initVoice() async {
@@ -102,36 +145,59 @@ class _HomeScreenState extends State<HomeScreen> {
     };
     _voice.onListeningStopped = () {
       if (!mounted) return;
+      // STT genuinely stopped. Always reflect that in visible state — voice
+      // mode is a *user-intent* flag and must not be tied to a stale "still
+      // listening" state. Without this reset the mic icon gets stuck on
+      // "stop" while nothing is actually listening.
       if (_voiceState == VoiceState.listening) {
-        // In voice mode, re-listen after timeout (no speech detected)
-        if (_voiceMode) {
-          Future.delayed(const Duration(milliseconds: 300), () {
-            if (mounted && _voiceMode && _voiceState == VoiceState.listening) {
-              _startListening();
-            }
-          });
-        } else {
-          setState(() {
-            _voiceState = VoiceState.idle;
-            _partialText = '';
-          });
-        }
-      }
-    };
-    _voice.onSpeakingDone = _onSpeakingDone;
-    _voice.onError = () {
-      if (mounted) {
         setState(() {
           _voiceState = VoiceState.idle;
           _partialText = '';
         });
       }
+      // If user still wants voice mode, schedule a clean re-listen. The
+      // 600ms delay gives Android's SpeechRecognizer time to release its
+      // resources — back-to-back starts under 300ms silently fail on A53.
+      if (_voiceMode && !_q.isComplete) {
+        Future.delayed(const Duration(milliseconds: 600), () {
+          if (mounted && _voiceMode && _voiceState == VoiceState.idle) {
+            _startListening();
+          }
+        });
+      }
+    };
+    _voice.onSpeakingDone = _onSpeakingDone;
+    _voice.onError = () {
+      if (!mounted) return;
+
+      // Track STT error rate — break runaway auto-listen loop on repeated
+      // engine errors (error_busy / error_client / error_speech_timeout
+      // followed immediately by another timeout, etc.).
+      final now = DateTime.now();
+      if (_lastSttError != null &&
+          now.difference(_lastSttError!) < _sttErrorWindow) {
+        _sttErrorCount++;
+      } else {
+        _sttErrorCount = 1;
+      }
+      _lastSttError = now;
+
+      if (_sttErrorCount >= _sttErrorThreshold && _voiceMode) {
+        debugPrint('[VOICE] $_sttErrorCount STT errors in window — exiting voice mode');
+        _voiceMode = false;
+        _sttErrorCount = 0;
+        _voice.stopListening();
+      }
+
+      setState(() {
+        _voiceState = VoiceState.idle;
+        _partialText = '';
+      });
     };
   }
 
   void _onSttResult(String recognizedText) {
     if (recognizedText.trim().isEmpty) {
-      // Empty result — re-listen if in voice mode
       if (_voiceMode && mounted) {
         _startListening();
       } else if (mounted && _voiceState != VoiceState.speaking) {
@@ -139,6 +205,9 @@ class _HomeScreenState extends State<HomeScreen> {
       }
       return;
     }
+    // Successful recognition — reset the error rate-limiter.
+    _sttErrorCount = 0;
+    _lastSttError = null;
 
     _partialText = '';
     _textController.text = recognizedText.trim();
@@ -169,39 +238,39 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _onMicTap() async {
-    // If voice mode is active and user taps mic, exit voice mode
-    if (_voiceMode && _voiceState != VoiceState.idle) {
+    // If voice mode is on (regardless of inner state — even if stuck idle),
+    // tapping the mic means "exit voice mode". Clean stop both STT and TTS,
+    // reset all flags, and let the user tap again to start fresh.
+    if (_voiceMode) {
       await _voice.stopListening();
       await _voice.stopSpeaking();
-      setState(() {
-        _voiceMode = false;
-        _voiceState = VoiceState.idle;
-        _partialText = '';
-      });
-      return;
-    }
-
-    switch (_voiceState) {
-      case VoiceState.idle:
-        if (!_voiceReady) {
-          _showVoiceUnavailableSnackbar();
-          return;
-        }
-        // Activate continuous voice mode
-        setState(() => _voiceMode = true);
-    
-        await _startListening();
-      case VoiceState.listening:
-        await _voice.stopListening();
-      case VoiceState.speaking:
-        await _voice.stopSpeaking();
+      if (mounted) {
         setState(() {
           _voiceMode = false;
           _voiceState = VoiceState.idle;
+          _partialText = '';
         });
-      case VoiceState.thinking:
-        break;
+      }
+      return;
     }
+
+    // Voice mode is off. Tapping while thinking is a no-op — model is busy.
+    if (_voiceState == VoiceState.thinking) return;
+
+    if (!_voiceReady) {
+      _showVoiceUnavailableSnackbar();
+      return;
+    }
+
+    // Activate voice mode and start listening. The brief delay lets any
+    // prior STT session fully release before we start a new one — without
+    // this, Android's SpeechRecognizer occasionally accepts the call but
+    // emits no results.
+    setState(() => _voiceMode = true);
+    await _voice.stopListening();
+    await Future.delayed(const Duration(milliseconds: 200));
+    if (!mounted || !_voiceMode) return;
+    await _startListening();
   }
 
   void _showVoiceUnavailableSnackbar() {
@@ -225,10 +294,14 @@ class _HomeScreenState extends State<HomeScreen> {
     await _closeChat();
     try {
       final model = await FlutterGemma.getActiveModel(maxTokens: maxTokens);
+      // Default to mid-conversation prompt — greeting path passes _systemPrompt
+      // explicitly. Each session is recreated per turn (memory constraint),
+      // so without this Gemma re-greets the caregiver on every prompt.
       _chat = await model.createChat(
         temperature: 0.4,
         topK: 40,
-        systemInstruction: systemPrompt ?? _systemPrompt,
+        systemInstruction:
+            systemPrompt ?? '$_systemPromptMidConversation$_langDirective',
       );
       _chatStep = step;
       debugPrint('[MALAIKA] Session: $step');
@@ -245,6 +318,103 @@ class _HomeScreenState extends State<HomeScreen> {
         await (_chat as dynamic).close();
       } catch (_) {}
       _chat = null;
+    }
+  }
+
+  /// Fully unload Gemma 4 — frees ~2.3GB so the camera HAL can allocate
+  /// without triggering Android's LMKD on the A53. The .litertlm file stays
+  /// on disk; subsequent getActiveModel re-mmaps in 3-5s.
+  Future<void> _unloadFullModel() async {
+    await _closeChat();
+    try {
+      final model = await FlutterGemma.getActiveModel(maxTokens: 200);
+      await model.close();
+      debugPrint('[MALAIKA] Model fully unloaded — RAM freed for camera');
+    } catch (e) {
+      debugPrint('[MALAIKA] Model unload error (continuing): $e');
+    }
+  }
+
+  static const String _modelUrl =
+      'https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/main/gemma-4-E2B-it.litertlm';
+
+  /// Re-bind the cached .litertlm file with the native LiteRT-LM runtime.
+  /// Called after a full closeModel — the platform forgets the model path,
+  /// so we replay installModel (no redownload since the file is on disk).
+  Future<void> _reinstallCachedModel() async {
+    await FlutterGemma.installModel(
+      modelType: ModelType.gemmaIt,
+      fileType: ModelFileType.litertlm,
+    ).fromNetwork(_modelUrl).install();
+  }
+
+  /// Reload Gemma 4 with vision support after the camera has closed.
+  /// Returns a vision-capable chat session ready for image queries.
+  Future<dynamic> _reloadModelForVision({String? systemInstruction}) async {
+    await _reinstallCachedModel();
+    final model = await FlutterGemma.getActiveModel(
+      maxTokens: 200,
+      preferredBackend: PreferredBackend.gpu,
+      supportImage: true,
+      maxNumImages: 1,
+    );
+    final chat = await model.createChat(
+      temperature: 0.2,
+      topK: 40,
+      supportImage: true,
+      systemInstruction: systemInstruction ?? visionSystemPrompt,
+    );
+    _chat = chat;
+    _chatStep = 'vision';
+    debugPrint('[MALAIKA] Model reloaded with vision support');
+    return chat;
+  }
+
+  /// Reload Gemma 4 for plain text Q&A (used on capture-cancel so the
+  /// rest of the assessment can proceed).
+  Future<void> _reloadModelForText() async {
+    try {
+      await _reinstallCachedModel();
+      await FlutterGemma.getActiveModel(
+        maxTokens: 200,
+        preferredBackend: PreferredBackend.gpu,
+      );
+      debugPrint('[MALAIKA] Model reloaded for text Q&A');
+    } catch (e) {
+      debugPrint('[MALAIKA] Text reload error: $e');
+    }
+  }
+
+  /// Resize a captured JPEG down to ~256×192 (preserving aspect) and re-encode
+  /// as JPEG so Gemma 4 vision sees it under the model's 200-token context.
+  ///
+  /// Gemma 4 E2B is loaded once at splash with maxTokens=200 (proven stable —
+  /// 256/512 OOM at startup). flutter_gemma's getActiveModel returns the
+  /// cached singleton, so context cannot be widened later. The image must
+  /// instead be small enough that vision tokens + prompt fit under 200.
+  ///
+  /// PNG re-encode (Flutter's built-in toByteData) doesn't bind to the vision
+  /// adapter — Gemma replies "please provide an image" without seeing it.
+  /// Only JPEG bytes work.
+  Future<Uint8List> _shrinkForVision(Uint8List jpegBytes) async {
+    try {
+      final src = img.decodeJpg(jpegBytes);
+      if (src == null) {
+        debugPrint('[MALAIKA] Vision input: decode failed, '
+            'sending original ${jpegBytes.length} bytes');
+        return jpegBytes;
+      }
+      final resized = img.copyResize(src, width: 256);
+      final out = Uint8List.fromList(img.encodeJpg(resized, quality: 80));
+      debugPrint(
+        '[MALAIKA] Vision input: ${out.length} bytes JPEG '
+        '(${(out.length / 1024).toStringAsFixed(1)} KB) '
+        '${resized.width}x${resized.height}',
+      );
+      return out;
+    } catch (e) {
+      debugPrint('[MALAIKA] Image resize failed: $e — sending original');
+      return jpegBytes;
     }
   }
 
@@ -287,7 +457,12 @@ class _HomeScreenState extends State<HomeScreen> {
     setState(() => _voiceState = VoiceState.thinking);
     _addTyping();
 
-    if (await _initSession('greeting')) {
+    // First-turn ONLY: use the greeting-friendly system prompt. Every other
+    // _initSession call defaults to _systemPromptMidConversation.
+    if (await _initSession(
+      'greeting',
+      systemPrompt: '$_systemPrompt$_langDirective',
+    )) {
       final greeting = await _ask(
         'Greet the caregiver warmly and ask: ${_q.currentQuestion!.question}',
       );
@@ -300,6 +475,214 @@ class _HomeScreenState extends State<HomeScreen> {
       _addBot('Hello! I am Malaika, your child health assistant. '
           '${_q.currentQuestion!.question}');
     }
+
+    if (mounted && _voiceState != VoiceState.speaking) setState(() => _voiceState = VoiceState.idle);
+  }
+
+  // --------------------------------------------------------------------------
+  // VISION FIRST — Photo before questions (the key innovation)
+  // --------------------------------------------------------------------------
+
+  /// After greeting completes, prompt for a photo of the child.
+  /// Gemma 4 vision analyzes the photo for ALL clinical signs at once.
+  /// Pre-populates findings so we only need to ask targeted questions.
+  Future<void> _handleVisionFirst(String previousAnswer) async {
+    _visionFirstDone = true;
+
+    // Show vision step banner
+    _addStepBanner('Vision Assessment');
+    _lastDisplayedStep = 'vision';
+
+    // Ask for photo with Gemma narration — mid-conversation prompt
+    // (default in _initSession) keeps it from re-greeting.
+    setState(() => _voiceState = VoiceState.thinking);
+    _addTyping();
+    await _initSession('vision');
+    final askPhoto = await _ask(_buildPhotoAskPrompt());
+    _removeTyping();
+    _addBot(askPhoto.isNotEmpty
+        ? askPhoto
+        : 'Can you show me a photo of your child? You can type "skip" if no photo.');
+
+    // Show photo prompt card
+    _chatItems.add(_ChatItem(
+      type: _ChatItemType.photoPrompt,
+      metadata: {'step': 'vision', 'label': 'Take or choose a photo of your child'},
+    ));
+    if (mounted && _voiceState != VoiceState.speaking) {
+      setState(() => _voiceState = VoiceState.idle);
+    }
+  }
+
+  /// Run comprehensive vision analysis on the selected photo.
+  Future<void> _runComprehensiveVision() async {
+    setState(() => _voiceState = VoiceState.thinking);
+
+    _tracker.startCall('comprehensive_vision', step: 'vision', inputType: 'image');
+
+    try {
+      // Path A: unload Gemma fully BEFORE opening camera. The A53 cannot host
+      // both the 2.3GB model and Camera2 HAL buffers simultaneously — LMKD
+      // kills our app within ~2s otherwise.
+      await _unloadFullModel();
+      if (!mounted) return;
+
+      final captureBytes = await Navigator.of(context).push<Uint8List>(
+        MaterialPageRoute(
+          builder: (_) => const CaptureScreen(
+            title: 'Visual Assessment',
+            hint: 'Frame the whole child. Good light. Hold steady.',
+          ),
+        ),
+      );
+
+      if (captureBytes == null || captureBytes.isEmpty) {
+        _tracker.endCall(success: false, parseMethod: 'vision_analysis', confidence: 0.0);
+        await _reloadModelForText();
+        _skipVisionAndContinue();
+        return;
+      }
+
+      final imageBytes = await _shrinkForVision(captureBytes);
+      _addBot('Analyzing the photo...');
+
+      // Reload Gemma with vision adapter. Image is ~256px wide so vision
+      // tokens + prompt fit in the 200-token context set at splash.
+      _chat = await _reloadModelForVision();
+
+      await _chat!.addQuery(Message(
+        text: comprehensiveVisionPrompt,
+        isUser: true,
+        imageBytes: imageBytes,
+      ));
+
+      final response = await _chat!.generateChatResponse();
+      final analysisText =
+          response is TextResponse ? response.token.trim() : '';
+
+      if (analysisText.isNotEmpty) {
+        debugPrint('[MALAIKA] Comprehensive vision: $analysisText');
+
+        // Parse structured response
+        _visionFindings = parseVisionResponse(analysisText);
+
+        _tracker.endCall(
+          findings: _visionFindings.map((k, v) => MapEntry(k, v.toString())),
+          success: true,
+          parseMethod: 'comprehensive_vision',
+          confidence: 0.85,
+          inputTokens: (comprehensiveVisionPrompt.split(' ').length * 1.3).round(),
+          outputTokens: analysisText.split(' ').length,
+        );
+
+        // Show vision findings card
+        _chatItems.add(_ChatItem(
+          type: _ChatItemType.skillEvent,
+          metadata: {
+            'event': _tracker.lastEvent,
+            'autoFilled': <String>[],
+            'stepIndex': _q.stepProgress,
+          },
+        ));
+        setState(() {});
+
+        // Show what Gemma saw
+        final detected = _visionFindings.entries
+            .where((e) => e.value)
+            .map((e) => e.key.replaceAll('vision_', '').replaceAll('_', ' '))
+            .toList();
+        final clear = _visionFindings.entries
+            .where((e) => !e.value && !e.key.contains('dehydrated') && !e.key.contains('measles'))
+            .map((e) => e.key.replaceAll('vision_', '').replaceAll('_', ' '))
+            .toList();
+
+        // Show Gemma's own summary if available, else list findings
+        final summary = extractVisionSummary(analysisText);
+        if (summary.isNotEmpty) {
+          _addBot(summary.endsWith('.')
+              ? '$summary Let me ask a few more questions.'
+              : '$summary. Let me ask a few more questions.');
+        } else if (detected.isNotEmpty) {
+          _addBot('I can see some signs: ${detected.join(', ')}. '
+              'Let me ask a few more questions to be sure.');
+        } else {
+          _addBot('The child looks okay from the photo. '
+              'Let me ask a few questions to check for things I cannot see.');
+        }
+
+        // Pre-populate IMCI findings from vision. Also stamp rawAnswers
+        // so the questionnaire's _index advance treats these as "answered"
+        // and the bot doesn't re-ask the same question verbally.
+        final imciFindings = visionToImciFindings(_visionFindings);
+        imciFindings.forEach((key, value) {
+          _q.findings[key] = value;
+          _q.rawAnswers[key] = '(seen in photo: $value)';
+          _q.qaPairs.add({
+            'question': '(Photo finding: $key)',
+            'answer': '$value',
+            'id': key,
+          });
+        });
+        debugPrint('[MALAIKA] Vision pre-populated: $imciFindings');
+
+        final saved = questionsSaved(
+          visionFindings: _visionFindings,
+          ageMonths: _q.ageMonths,
+        );
+        debugPrint('[MALAIKA] Questions saved by vision: $saved');
+      } else {
+        _tracker.endCall(success: false, parseMethod: 'vision_analysis', confidence: 0.0);
+        _addBot('I had trouble analyzing the photo. Let me ask you some questions instead.');
+      }
+    } catch (e) {
+      debugPrint('[MALAIKA] Comprehensive vision error: $e');
+      _tracker.endCall(success: false, parseMethod: 'vision_analysis', confidence: 0.0);
+      _addBot('I had trouble with the photo. Let me continue with questions.');
+    }
+
+    // Continue to targeted Q&A
+    await _continueToTargetedQA();
+  }
+
+  /// Skip vision and continue with full questionnaire.
+  void _skipVisionAndContinue() {
+    _addBot('No photo — no problem. Let me ask you some questions about your child.');
+    _continueToTargetedQA();
+  }
+
+  /// After vision (or skip), continue to the targeted Q&A phase.
+  Future<void> _continueToTargetedQA() async {
+    // Show first clinical step banner
+    final nextStep = _q.currentStep;
+    if (nextStep != 'greeting' && nextStep != 'complete') {
+      _addStepBanner(nextStep);
+      _lastDisplayedStep = nextStep;
+    }
+    _progressStep = _q.stepProgress;
+
+    if (_q.isComplete) {
+      await _generateFinalReport();
+      if (mounted && _voiceState != VoiceState.speaking) setState(() => _voiceState = VoiceState.idle);
+      return;
+    }
+
+    // Phase 2: pick the most clinically important question for this step.
+    await _pickAgenticNextQuestion(_q.currentStep);
+
+    final nextQ = _q.currentQuestion!;
+    // Skip per-step photo prompts (we already did comprehensive vision)
+    if (nextQ.type == AnswerType.photo) {
+      _q.skipPhoto();
+      return _continueToTargetedQA(); // Recurse to next question
+    }
+
+    // Ask the first targeted question — default mid-conversation prompt.
+    await _initSession(nextQ.step);
+    _addTyping();
+    final response = await _ask(_buildContextualAsk(nextQ));
+    _removeTyping();
+    _addBot(response.isNotEmpty && response.contains('?')
+        ? response : nextQ.question);
 
     if (mounted && _voiceState != VoiceState.speaking) setState(() => _voiceState = VoiceState.idle);
   }
@@ -347,6 +730,137 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  /// Phase 2 — agentic next-question selection.
+  ///
+  /// When 2+ questions remain in the current IMCI step, ask Gemma which is
+  /// most clinically important to ask next. The picker stays inside the
+  /// current step (we never reorder across IMCI domains — that flow is set
+  /// by the WHO protocol). On any failure (parse, no valid id, exception)
+  /// we fall through silently and the linear `currentQuestion` walk runs.
+  Future<void> _pickAgenticNextQuestion(String step) async {
+    if (!kAgenticOrchestration) return;
+    try {
+      final remaining = _q.remainingQuestionsInStep(step);
+      if (remaining.length < 2) return; // nothing to choose
+
+      final prompt = pickNextQuestionPrompt(
+        knownFindings: _q.findings,
+        remaining: remaining,
+      );
+
+      _tracker.startCall('select_next_question', step: step);
+      await _initSession(step,
+          maxTokens: 200,
+          systemPrompt:
+              'You are a clinical assistant. Reply with ONLY the question id.');
+      final raw = await _ask(prompt, minLength: 1);
+      debugPrint('[MALAIKA] Picker raw: "$raw"');
+
+      final pickedId = parseNextQuestionId(
+        raw,
+        remaining.map((q) => q.id).toSet(),
+      );
+      if (pickedId == null) {
+        debugPrint('[MALAIKA] Picker invalid — keeping linear order');
+        _tracker.endCall(
+          success: false,
+          parseMethod: 'picker_invalid',
+          confidence: 0.0,
+        );
+        return;
+      }
+
+      final currentNext = _q.currentQuestion;
+      if (currentNext != null && currentNext.id == pickedId) {
+        debugPrint('[MALAIKA] Picker chose linear next ($pickedId) — no jump');
+        _tracker.endCall(
+          findings: {'picked': pickedId, 'jumped': 'false'},
+          success: true,
+          parseMethod: 'agentic_pick',
+          confidence: 0.9,
+        );
+        return;
+      }
+
+      debugPrint(
+          '[MALAIKA] Picker chose: $pickedId (linear next: ${currentNext?.id})');
+      _q.setIndexToQuestion(pickedId);
+      _tracker.endCall(
+        findings: {'picked': pickedId, 'jumped_from': currentNext?.id ?? '?'},
+        success: true,
+        parseMethod: 'agentic_pick',
+        confidence: 0.9,
+      );
+    } catch (e) {
+      debugPrint('[MALAIKA] Picker error (falling through): $e');
+    }
+  }
+
+  /// Phase 3 — build a Gemma user-prompt for asking ONE question naturally,
+  /// with explicit anti-greeting and known-context injection.
+  ///
+  /// The model has just been initialized in a fresh session (memory pattern)
+  /// so we re-introduce the conversation state in the prompt itself: positive
+  /// findings from belief, observed signs from vision, then the question.
+  /// All call sites use _systemPromptMidConversation, but the user prompt
+  /// reinforces "do not greet" because Gemma's instruction-following on a
+  /// 2.3B model is imperfect.
+  String _buildContextualAsk(ImciQuestion q) {
+    final lines = <String>[];
+    final belief = formatBeliefForPrompt(_q.findings);
+    if (belief.isNotEmpty) lines.add(belief);
+
+    if (_visionFindings.isNotEmpty) {
+      final seen = _visionFindings.entries
+          .where((e) => e.value)
+          .map((e) =>
+              e.key.replaceAll('vision_', '').replaceAll('_', ' '))
+          .toList();
+      if (seen.isNotEmpty) {
+        lines.add('Photo showed: ${seen.join(', ')}.');
+      }
+    }
+
+    final context = lines.isEmpty ? '' : '${lines.join('\n')}\n';
+    return '${context}Ask ONE warm short question. '
+        'Reference what you already know if relevant. '
+        'Do NOT greet, do NOT introduce yourself, do NOT say Hi/Hello. '
+        'The question to ask: "${q.question}"';
+  }
+
+  /// Phase 3 — build a "acknowledge prior answer + ask next question" prompt.
+  ///
+  /// Includes BOTH the prior question and the caregiver's answer so Gemma
+  /// has context — without this, a bare answer like "2" gets hallucinated
+  /// (e.g. "the child has a temperature of 2"). The "MUST contain the
+  /// question" rule stops Gemma from emitting just an empathy line + ? and
+  /// dropping the real question.
+  String _buildAcknowledgeAndAsk(String previousAnswer, ImciQuestion q) {
+    final priorQ = _q.qaPairs.isNotEmpty
+        ? _q.qaPairs.last['question'] ?? ''
+        : '';
+    final priorContext = priorQ.isEmpty
+        ? ''
+        : 'You asked: "$priorQ" ';
+    return '${priorContext}Caregiver answered: "$previousAnswer". '
+        'In ONE sentence: briefly acknowledge their answer with care, then '
+        'ask the EXACT question below. The reply MUST contain the question. '
+        'Do NOT greet, do NOT introduce yourself, do NOT invent details '
+        'the caregiver did not say. '
+        'Question to ask: ${q.question}';
+  }
+
+  /// Phase 3 — build the comprehensive photo-request prompt without
+  /// re-greeting. Used right after greeting completes.
+  String _buildPhotoAskPrompt() {
+    final belief = formatBeliefForPrompt(_q.findings);
+    final preface = belief.isEmpty ? '' : '$belief\n';
+    return '${preface}You are mid-conversation. In ONE short caring sentence, '
+        'ask the caregiver to show a photo of the child so you can check '
+        'health signs. Mention they can type "skip" if no photo is available. '
+        'Do NOT greet, do NOT introduce yourself, do NOT say Hi/Hello.';
+  }
+
   Future<void> _sendText() async {
     final text = _textController.text.trim();
     if (text.isEmpty) return;
@@ -380,17 +894,86 @@ class _HomeScreenState extends State<HomeScreen> {
 
     final currentQ = _q.currentQuestion!;
     final prevStep = _q.currentStep;
+    final prevRawKeys = Set<String>.from(_q.rawAnswers.keys);
 
     // =====================================================================
-    // TOOL CALL 1: parse_caregiver_response (EXTRACT)
-    // Gemma 4 reads the caregiver's answer and returns ONE WORD.
-    // No regex parsing — just string comparison. The LLM does the work.
+    // PHASE 1: Structured multi-value extraction (Gemma returns JSON)
+    // One model call extracts every finding the caregiver mentioned in
+    // their answer — fixes the "fever for 2 days" bug where days got
+    // dropped because the previous code asked for a single yes/no word.
+    // Falls back to the original single-value path on any failure.
     // =====================================================================
+    String? completedStep;
+    String parseMethod = 'gemma4_reasoning';
+    bool structuredHandled = false;
+    bool typingAdded = false;
+
+    if (kAgenticOrchestration) {
+      final stepQuestions = _q.questionsForStep(prevStep);
+      final structuredPrompt = buildStructuredExtractPrompt(
+        currentQuestion: currentQ,
+        stepQuestions: stepQuestions,
+        knownFindings: _q.findings,
+        answeredIds: _q.rawAnswers.keys.toSet(),
+        userText: text,
+      );
+
+      if (structuredPrompt.isNotEmpty) {
+        _tracker.startCall('extract_structured_findings', step: prevStep);
+        _addTyping();
+        typingAdded = true;
+
+        await _initSession(prevStep,
+            maxTokens: 200,
+            systemPrompt:
+                'You are a clinical assistant. Reply ONLY with valid JSON.');
+        final raw = await _ask(structuredPrompt, minLength: 1);
+        debugPrint('[MALAIKA] Structured raw: "$raw"');
+
+        final parsed = parseStructuredResponse(
+          raw: raw,
+          stepQuestions: stepQuestions,
+        );
+
+        if (parsed != null && parsed.isNotEmpty) {
+          debugPrint('[MALAIKA] Structured parsed: $parsed');
+          completedStep = _q.recordMultipleFindings(parsed, text);
+          parseMethod = 'gemma4_structured';
+          structuredHandled = true;
+          _tracker.endCall(
+            findings: parsed.map((k, v) => MapEntry(k, v.toString())),
+            success: true,
+            parseMethod: parseMethod,
+            confidence: 0.9,
+            inputTokens: (structuredPrompt.split(' ').length * 1.3).round(),
+            outputTokens: raw.split(' ').length,
+          );
+        } else {
+          _tracker.endCall(
+            success: false,
+            parseMethod: 'structured_fallback',
+            confidence: 0.0,
+          );
+          debugPrint(
+              '[MALAIKA] Structured parse failed — falling back to single-value');
+        }
+      }
+    }
+
+    // =====================================================================
+    // FALLBACK: original single-value extraction (proven path).
+    // Runs whenever the structured attempt was skipped, parsed empty, or
+    // disabled by feature flag. Behaviour identical to pre-Phase-1.
+    // =====================================================================
+    if (!structuredHandled) {
     _tracker.startCall('parse_caregiver_response', step: prevStep);
-    _addTyping();
+    if (!typingAdded) {
+      _addTyping();
+      typingAdded = true;
+    }
 
     final extractPrompt = _buildExtractPrompt(currentQ, text);
-    await _initSession(prevStep, maxTokens: 256,
+    await _initSession(prevStep, maxTokens: 200,
         systemPrompt: 'You are a clinical assistant. Reply with ONLY what is asked. One word or number only.');
     final extractRaw = await _ask(extractPrompt, minLength: 1);
 
@@ -432,14 +1015,32 @@ class _HomeScreenState extends State<HomeScreen> {
       return;
     }
 
-    // ── CLEAR ANSWER: Feed original text for auto-fill, override primary finding ──
-    // Pass original text so auto-fill can detect numbers/keywords for upcoming Qs
-    // (e.g., "yes fever for 2 days" auto-fills fever_days=2)
-    final prevRawKeys = Set<String>.from(_q.rawAnswers.keys);
-    final completedStep = _q.recordAnswer(text);
-    // Override the primary finding with LLM-extracted value (more reliable)
-    _q.findings[currentQ.id] = extraction.value;
+    // ── CLEAR ANSWER: Feed LLM-extracted value to state machine ──
+    // Use clean value (not original text) to prevent false auto-fills
+    // across different question types (e.g., age "12" → weight "12")
+    String cleanInput;
+    if (extraction.value == true) {
+      cleanInput = 'yes';
+    } else if (extraction.value == false) {
+      cleanInput = 'no';
+    } else if (extraction.value is int) {
+      cleanInput = '${extraction.value}';
+    } else {
+      cleanInput = text;
+    }
 
+    completedStep = _q.recordAnswer(cleanInput);
+    _tracker.endCall(
+      findings: {currentQ.id: cleanInput},
+      success: true,
+      parseMethod: 'gemma4_reasoning',
+      confidence: 0.9,
+      inputTokens: (extractPrompt.split(' ').length * 1.3).round(),
+      outputTokens: extractRaw.split(' ').length,
+    );
+    } // end !structuredHandled fallback
+
+    // === Shared post-record logic — runs for both structured and fallback ===
     final newKeys = _q.rawAnswers.keys
         .where((k) => !prevRawKeys.contains(k))
         .toList();
@@ -449,16 +1050,7 @@ class _HomeScreenState extends State<HomeScreen> {
       reasoningFindings[key] = _q.findings[key];
     }
 
-    _tracker.endCall(
-      findings: reasoningFindings,
-      success: true,
-      parseMethod: 'gemma4_reasoning',
-      confidence: 0.9,
-      inputTokens: (extractPrompt.split(' ').length * 1.3).round(),
-      outputTokens: extractRaw.split(' ').length,
-    );
-
-    debugPrint('[MALAIKA] Extracted: $reasoningFindings (auto: $autoFilledKeys)');
+    debugPrint('[MALAIKA] Recorded ($parseMethod): $reasoningFindings (auto: $autoFilledKeys)');
 
     // Show agentic skill event card
     if (reasoningFindings.isNotEmpty) {
@@ -476,6 +1068,14 @@ class _HomeScreenState extends State<HomeScreen> {
     // Classify if step completed
     if (completedStep != null && completedStep != 'greeting') {
       _classifyAndShowCard(completedStep);
+    }
+
+    // ── VISION FIRST: After greeting (age+weight), prompt for photo ──
+    if (completedStep == 'greeting' && !_visionFirstDone) {
+      _removeTyping();
+      await _handleVisionFirst(text);
+      if (mounted && _voiceState != VoiceState.speaking) setState(() => _voiceState = VoiceState.idle);
+      return;
     }
 
     // Step transition banner
@@ -496,10 +1096,33 @@ class _HomeScreenState extends State<HomeScreen> {
       return;
     }
 
+    // Phase 2: pick the most clinically important next question (within step).
+    await _pickAgenticNextQuestion(_q.currentStep);
+
     final nextQ = _q.currentQuestion!;
 
     if (nextQ.type == AnswerType.photo) {
       _removeTyping();
+      // Skip per-step photo prompts — we already did comprehensive vision
+      if (_visionFirstDone) {
+        _q.skipPhoto();
+        _progressStep = _q.stepProgress;
+        // Continue to next question
+        final next = _q.currentQuestion;
+        if (next == null) {
+          await _generateFinalReport();
+          if (mounted && _voiceState != VoiceState.speaking) setState(() => _voiceState = VoiceState.idle);
+          return;
+        }
+        await _initSession(next.step);
+        _addTyping();
+        final response = await _ask(_buildContextualAsk(next));
+        _removeTyping();
+        _addBot(response.isNotEmpty && response.contains('?')
+            ? response : next.question);
+        if (mounted && _voiceState != VoiceState.speaking) setState(() => _voiceState = VoiceState.idle);
+        return;
+      }
       await _handlePhotoQuestion(nextQ, text);
       if (mounted && _voiceState != VoiceState.speaking) setState(() => _voiceState = VoiceState.idle);
       return;
@@ -510,13 +1133,9 @@ class _HomeScreenState extends State<HomeScreen> {
     // Gemma 4 generates a warm, natural follow-up with the next question.
     // =====================================================================
     _tracker.startCall('speak_to_caregiver', step: nextQ.step);
-    await _initSession(nextQ.step, systemPrompt:
-        'You are Malaika, a caring child health assistant. '
-        'NEVER say "I\'m glad" or "that\'s great" about symptoms. '
-        'Show gentle concern when the child is unwell. Be brief.');
-    final response = await _ask(
-      'Caregiver said: "$text". Acknowledge with concern if needed, then ask: "${nextQ.question}"',
-    );
+    // Mid-conversation prompt is the default — no re-greeting.
+    await _initSession(nextQ.step);
+    final response = await _ask(_buildAcknowledgeAndAsk(text, nextQ));
     _tracker.endCall(
       success: response.isNotEmpty,
       parseMethod: 'gemma4_generation',
@@ -549,8 +1168,10 @@ class _HomeScreenState extends State<HomeScreen> {
     await _initSession(q.step);
     _addTyping();
     final askResponse = await _ask(
-      'Caregiver said: "$previousAnswer". Acknowledge briefly, then say: ${vp.askText} '
-      'Also mention they can type "skip" if they don\'t have a camera.',
+      'The caregiver just said: "$previousAnswer". '
+      'In ONE short caring sentence, ask: ${vp.askText} '
+      'Mention they can type "skip" if no photo. '
+      'Do NOT greet, do NOT introduce yourself.',
     );
     _removeTyping();
     _addBot(askResponse.isNotEmpty ? askResponse : vp.askText);
@@ -580,40 +1201,34 @@ class _HomeScreenState extends State<HomeScreen> {
     _tracker.startCall(visionSkill, step: vp.step, inputType: 'image');
 
     try {
-      await _closeChat();
-      final picker = ImagePicker();
-      final image = await picker.pickImage(
-        source: ImageSource.gallery,
-        maxWidth: 256,
-        maxHeight: 256,
-        imageQuality: 50,
+      // Path A: free 2.3GB before opening Camera2 to dodge LMKD on the A53.
+      await _unloadFullModel();
+      if (!mounted) return;
+      final captureBytes = await Navigator.of(context).push<Uint8List>(
+        MaterialPageRoute(
+          builder: (_) => const CaptureScreen(
+            title: 'Photo Assessment',
+            hint: 'Frame the whole child. Good light. Hold steady.',
+          ),
+        ),
       );
 
-      if (image == null) {
+      if (captureBytes == null || captureBytes.isEmpty) {
         _tracker.endCall(success: false, parseMethod: 'vision_analysis', confidence: 0.0);
+        await _reloadModelForText();
         if (mounted && _voiceState != VoiceState.speaking) setState(() => _voiceState = VoiceState.idle);
         return;
       }
 
-      final imageBytes = await image.readAsBytes();
+      final imageBytes = await _shrinkForVision(captureBytes);
       _addBot('Analyzing the photo...');
 
-      await _closeChat();
-      final model = await FlutterGemma.getActiveModel(
-        maxTokens: 200,
-        supportImage: true,
-        maxNumImages: 1,
-      );
-      _chat = await model.createChat(
-        temperature: 0.2,
-        topK: 40,
-        supportImage: true,
+      _chat = await _reloadModelForVision(
         systemInstruction:
             'You are a clinical health assistant. '
             'Analyze the image with the specific checklist given. '
             'Be precise and only report what you can see.',
       );
-      _chatStep = 'vision';
 
       await _chat!.addQuery(Message(
         text: vp.analysisPrompt,
@@ -667,14 +1282,14 @@ class _HomeScreenState extends State<HomeScreen> {
     if (_q.isComplete) {
       await _generateFinalReport();
     } else {
+      await _pickAgenticNextQuestion(_q.currentStep);
       final nextQ = _q.currentQuestion!;
       if (nextQ.type == AnswerType.photo) {
         await _handlePhotoQuestion(nextQ, '');
       } else {
         await _initSession(nextQ.step);
         _addTyping();
-        final response =
-            await _ask('Ask the caregiver: ${nextQ.question}');
+        final response = await _ask(_buildContextualAsk(nextQ));
         _removeTyping();
         if (response.isEmpty || !response.contains('?')) {
           _addBot(nextQ.question);
@@ -699,11 +1314,11 @@ class _HomeScreenState extends State<HomeScreen> {
     if (_q.isComplete) {
       await _generateFinalReport();
     } else {
+      await _pickAgenticNextQuestion(_q.currentStep);
       final nextQ = _q.currentQuestion!;
       await _initSession(nextQ.step);
       _addTyping();
-      final response =
-          await _ask('Ask the caregiver: ${nextQ.question}');
+      final response = await _ask(_buildContextualAsk(nextQ));
       _removeTyping();
       if (response.isEmpty || !response.contains('?')) {
         _addBot(nextQ.question);
@@ -786,80 +1401,21 @@ class _HomeScreenState extends State<HomeScreen> {
       }
     }
 
-    // Q&A severity before vision
-    final qaSeverity = _q.overallSeverity;
+    final finalSeverity = _q.overallSeverity;
 
-    // --- Vision Monitoring Phase ---
-    _chatItems.add(_ChatItem(
-      type: _ChatItemType.stepBanner,
-      text: 'Vision Assessment',
-      metadata: {'step': 'vision'},
-    ));
-    setState(() {});
-    _scrollToBottom();
+    // ── TREATMENT PLAN — deterministic, from WHO dosing tables ──
+    final classificationList = _q.classifications.values
+        .where((c) => c != null)
+        .cast<DomainClassification>()
+        .toList();
 
-    _addBot(
-      'The questionnaire is complete. Now let\'s do a visual check. '
-      'I\'ll use the camera to look for clinical signs.',
+    _treatmentPlan = generateTreatmentPlan(
+      classifications: classificationList,
+      ageMonths: _q.ageMonths,
+      weightKg: _q.weightKg,
     );
-
-    // CRITICAL: Close the text session so the vision session can be created.
-    // The model only supports ONE active session at a time.
-    await _closeChat();
-
-    // Let native memory from the text session be reclaimed before vision.
-    // Without this delay, the vision prefill OOMs on low-RAM devices (A53).
-    await Future.delayed(const Duration(seconds: 1));
-
-    final visionResult = await _launchVisionMonitoring();
-    debugPrint('[MALAIKA] Vision returned: ${visionResult?.framesAnalyzed ?? 0} frames, '
-        'findings: ${visionResult?.findings.keys.toList() ?? []}');
-
-    if (visionResult != null && visionResult.framesAnalyzed > 0) {
-      // Run reconciliation
-      _reconciliation = ReconciliationEngine.reconcile(
-        qaFindings: _q.findings,
-        visionFindings: visionResult.findings,
-        qaSeverity: qaSeverity,
-      );
-
-      // Show vision findings summary with model's own notes
-      _chatItems.add(_ChatItem(
-        type: _ChatItemType.visionSummary,
-        metadata: {
-          'findings': visionResult.findings,
-          'framesAnalyzed': visionResult.framesAnalyzed,
-          'notes': visionResult.notes,
-        },
-      ));
-      setState(() {});
-
-      // Show warnings if any
-      if (_reconciliation!.hasWarnings) {
-        for (final warning in _reconciliation!.warnings) {
-          _chatItems.add(_ChatItem(
-            type: _ChatItemType.reconciliationWarning,
-            metadata: {
-              'category': warning.category,
-              'qaValue': warning.qaValue,
-              'visionValue': warning.visionValue,
-              'confidence': warning.confidence,
-              'message': warning.message,
-              'recommendation': warning.recommendation,
-              'severity': warning.severity,
-            },
-          ));
-        }
-        setState(() {});
-      }
-    } else {
-      _addBot('Vision assessment skipped. Generating report from questionnaire only.');
-    }
-
-    // Determine final severity (may be upgraded by vision)
-    final finalSeverity = _reconciliation?.severityUpgraded == true
-        ? _reconciliation!.upgradedSeverity!
-        : qaSeverity;
+    debugPrint('[MALAIKA] Treatment: ${_treatmentPlan!.medicines.length} medicines, '
+        'ORS: ${_treatmentPlan!.orsGuide?.planType ?? "none"}');
 
     // Overall assessment card
     const urgencyMap = {
@@ -868,67 +1424,104 @@ class _HomeScreenState extends State<HomeScreen> {
       'green': 'Treat at home with follow-up in 5 days',
     };
 
-    final overallLabel = _reconciliation?.severityUpgraded == true
-        ? 'Overall: ${finalSeverity.toUpperCase()} (upgraded by vision)'
-        : 'Overall: ${finalSeverity.toUpperCase()}';
-
     _chatItems.add(_ChatItem(
       type: _ChatItemType.classification,
       metadata: {
         'step': 'Overall Assessment',
         'severity': finalSeverity,
-        'label': overallLabel,
+        'label': 'Overall: ${finalSeverity.toUpperCase()}',
         'reasoning': urgencyMap[finalSeverity] ?? 'Consult a health worker',
       },
     ));
     setState(() {});
 
-    // LLM generates caring summary — with hard reset after vision
+    // ── TREATMENT CARDS — show exact medicines + doses inline ──
+    if (_treatmentPlan!.preReferralActions.isNotEmpty) {
+      _addStepBanner('Urgent Actions');
+      for (final action in _treatmentPlan!.preReferralActions) {
+        _chatItems.add(_ChatItem(
+          type: _ChatItemType.treatmentAction,
+          text: action,
+          metadata: {'urgent': true},
+        ));
+      }
+      setState(() {});
+    }
+
+    if (_treatmentPlan!.medicines.isNotEmpty || _treatmentPlan!.orsGuide != null) {
+      _addStepBanner('Treatment');
+    }
+
+    // Medicine cards
+    for (final medicine in _treatmentPlan!.medicines) {
+      _chatItems.add(_ChatItem(
+        type: _ChatItemType.medicineCard,
+        metadata: {
+          'name': medicine.medicineName,
+          'formulation': medicine.formulation,
+          'dose': medicine.doseDescription,
+          'duration': '${medicine.durationDays} days',
+          'preparation': medicine.preparation,
+          'reference': medicine.whoReference,
+        },
+      ));
+    }
+
+    // ORS Guide card
+    if (_treatmentPlan!.orsGuide != null) {
+      final ors = _treatmentPlan!.orsGuide!;
+      _chatItems.add(_ChatItem(
+        type: _ChatItemType.orsGuideCard,
+        metadata: {
+          'planType': ors.planType,
+          'volumeMl': ors.volumeMl,
+          'frequency': ors.frequency,
+          'zincDoseMg': ors.zincDoseMg,
+          'zincDays': ors.zincDays,
+          'homemadeRecipe': OrsGuide.homemadeRecipe,
+          'reference': ors.whoReference,
+        },
+      ));
+    }
+    setState(() {});
+    _scrollToBottom();
+
+    // ── LLM REPORT — caring summary in caregiver's language ──
     _addTyping();
     await _closeChat();
-    // Hard reset: re-acquire the model to clear any corrupted native state
-    // from vision monitoring (E2B LiteRT can't process images, leaves bad state)
-    try {
-      await FlutterGemma.getActiveModel(maxTokens: 200, preferredBackend: PreferredBackend.gpu);
-    } catch (_) {}
-    await Future.delayed(const Duration(milliseconds: 300));
-    await _initSession('report', systemPrompt: _reportPrompt, maxTokens: 512);
+    await Future.delayed(const Duration(milliseconds: 800));
+    await _initSession('report',
+        systemPrompt: '$_reportPrompt$_langDirective', maxTokens: 512);
     final reportContext = _q.buildReportContext();
-    // Build detailed vision context for the report prompt.
-    var visionContext = '';
-    if (_reconciliation != null) {
-      final vf = _reconciliation!.visionFindings;
-      final visionParts = <String>[];
-      for (final entry in vf.entries) {
-        final label = entry.key.replaceAll('_', ' ');
-        visionParts.add('$label: ${entry.value.detected ? "YES" : "no"}');
-      }
-      visionContext = ' Photo assessment: ${visionParts.join(", ")}.';
-      if (_reconciliation!.hasWarnings) {
-        final warnMsgs = _reconciliation!.warnings
-            .map((w) => '${w.category}: ${w.message}')
-            .join('; ');
-        visionContext += ' Warnings: $warnMsgs.';
-      }
+
+    // Build treatment context for the report
+    var treatmentContext = '';
+    if (_treatmentPlan!.medicines.isNotEmpty) {
+      final meds = _treatmentPlan!.medicines
+          .map((m) => '${m.medicineName}: ${m.doseDescription}')
+          .join(', ');
+      treatmentContext = ' Treatment: $meds.';
     }
+    if (_treatmentPlan!.orsGuide != null) {
+      final ors = _treatmentPlan!.orsGuide!;
+      treatmentContext += ' ORS Plan ${ors.planType}: ${ors.volumeMl.round()}ml ${ors.frequency}.';
+    }
+
     var report = await _ask(
       'Write 2-3 short plain-text sentences summarizing the child\'s condition '
-      'for a caregiver. No bullet points, no markdown, no asterisks, no formatting. '
-      'Just simple caring sentences.\n\n$reportContext$visionContext',
+      'and what the caregiver should do RIGHT NOW. No bullet points, no markdown. '
+      'Just simple caring sentences.$_langDirective\n\n'
+      '$reportContext$treatmentContext',
     );
-    // If model crashed from vision, retry one more time with fresh session
     if (report.isEmpty) {
-      debugPrint('[MALAIKA] Report retry after model reset...');
+      debugPrint('[MALAIKA] Report retry...');
       await _closeChat();
       await Future.delayed(const Duration(milliseconds: 500));
-      try {
-        await FlutterGemma.getActiveModel(maxTokens: 200, preferredBackend: PreferredBackend.gpu);
-      } catch (_) {}
-      if (await _initSession('report', systemPrompt: _reportPrompt, maxTokens: 512)) {
+      if (await _initSession('report',
+          systemPrompt: '$_reportPrompt$_langDirective', maxTokens: 512)) {
         report = await _ask(
-          'Write 2-3 short plain-text sentences summarizing the child\'s condition '
-          'for a caregiver. No bullet points, no markdown, no asterisks, no formatting. '
-          'Just simple caring sentences.\n\n$reportContext',
+          'Write 2-3 short caring sentences about this child\'s health '
+          'and what to do.$_langDirective\n\n$reportContext',
         );
       }
     }
@@ -962,6 +1555,50 @@ class _HomeScreenState extends State<HomeScreen> {
       _addBot(cleanReport);
     } else {
       _addBot('The assessment is complete. Please show these results to a health worker.');
+    }
+
+    // Home care + follow-up
+    if (_treatmentPlan!.homeCare.isNotEmpty) {
+      for (final care in _treatmentPlan!.homeCare) {
+        _chatItems.add(_ChatItem(
+          type: _ChatItemType.treatmentAction,
+          text: care,
+          metadata: {'urgent': false},
+        ));
+      }
+    }
+
+    // Return immediately signs
+    _chatItems.add(_ChatItem(
+      type: _ChatItemType.treatmentAction,
+      text: _treatmentPlan!.followUp,
+      metadata: {'urgent': finalSeverity == 'red'},
+    ));
+    setState(() {});
+    _scrollToBottom();
+
+    // ── SAVE ASSESSMENT ──
+    try {
+      final assessment = SavedAssessment(
+        id: DateTime.now().millisecondsSinceEpoch.toString(),
+        timestamp: DateTime.now(),
+        ageMonths: _q.ageMonths,
+        weightKg: _q.weightKg,
+        severity: finalSeverity,
+        findings: Map<String, dynamic>.from(_q.findings)
+          ..removeWhere((_, v) => v is! bool && v is! int && v is! double && v is! String),
+        classifications: _q.classifications.entries
+            .where((e) => e.value != null)
+            .fold(<String, String>{}, (map, e) {
+              map[e.key] = e.value!.classification.value;
+              return map;
+            }),
+        language: _language,
+      );
+      await AssessmentStore.save(assessment);
+      debugPrint('[MALAIKA] Assessment saved: ${assessment.id}');
+    } catch (e) {
+      debugPrint('[MALAIKA] Save error: $e');
     }
   }
 
@@ -1212,14 +1849,27 @@ class _HomeScreenState extends State<HomeScreen> {
                       _ReportCard(data: item.metadata!),
                     _ChatItemType.photoPrompt => _PhotoPromptCard(
                         label: item.metadata!['label'] as String,
-                        onTakePhoto: _onTakePhoto,
-                        onSkip: _onSkipPhoto),
+                        onTakePhoto: item.metadata!['step'] == 'vision'
+                            ? _runComprehensiveVision
+                            : _onTakePhoto,
+                        onSkip: item.metadata!['step'] == 'vision'
+                            ? _skipVisionAndContinue
+                            : _onSkipPhoto),
                     _ChatItemType.visionSummary =>
                       _VisionSummaryCard(metadata: item.metadata!),
                     _ChatItemType.reconciliationWarning =>
                       _ReconciliationWarningCard(metadata: item.metadata!),
                     _ChatItemType.benchmark => BenchmarkCard(
                         summary: item.metadata!['summary'] as BenchmarkSummary),
+                    _ChatItemType.medicineCard =>
+                      _MedicineCardWidget(metadata: item.metadata!),
+                    _ChatItemType.orsGuideCard =>
+                      _OrsGuideWidget(metadata: item.metadata!),
+                    _ChatItemType.treatmentAction =>
+                      _TreatmentActionWidget(
+                        text: item.text ?? '',
+                        urgent: item.metadata?['urgent'] as bool? ?? false,
+                      ),
                   };
                 },
               ),
@@ -1404,6 +2054,9 @@ enum _ChatItemType {
   visionSummary,
   reconciliationWarning,
   benchmark,
+  medicineCard,
+  orsGuideCard,
+  treatmentAction,
 }
 
 class _ChatItem {
@@ -1429,6 +2082,8 @@ class _StepBannerWidget extends StatelessWidget {
     'Fever': Icons.thermostat_rounded,
     'Nutrition': Icons.restaurant_rounded,
     'Vision Assessment': Icons.visibility_rounded,
+    'Treatment': Icons.medication_rounded,
+    'Urgent Actions': Icons.local_hospital_rounded,
   };
 
   @override
@@ -2312,5 +2967,340 @@ class _ReconciliationWarningCard extends StatelessWidget {
         .map((w) =>
             w.isEmpty ? w : '${w[0].toUpperCase()}${w.substring(1)}')
         .join(' ');
+  }
+}
+
+// =============================================================================
+// Medicine Card — shows exact dose for one medicine
+// =============================================================================
+
+class _MedicineCardWidget extends StatelessWidget {
+  final Map<String, dynamic> metadata;
+  const _MedicineCardWidget({required this.metadata});
+
+  @override
+  Widget build(BuildContext context) {
+    final name = metadata['name'] as String;
+    final formulation = metadata['formulation'] as String;
+    final dose = metadata['dose'] as String;
+    final duration = metadata['duration'] as String;
+    final preparation = metadata['preparation'] as String;
+    final reference = metadata['reference'] as String;
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: MalaikaColors.surface,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: MalaikaColors.primary.withValues(alpha: 0.2)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Header
+            Row(
+              children: [
+                Container(
+                  width: 32,
+                  height: 32,
+                  decoration: BoxDecoration(
+                    color: MalaikaColors.primaryLight,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: const Icon(Icons.medication_rounded,
+                      size: 18, color: MalaikaColors.primary),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(name,
+                          style: const TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w700,
+                              color: MalaikaColors.text)),
+                      Text(formulation,
+                          style: const TextStyle(
+                              fontSize: 11, color: MalaikaColors.textSecondary)),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            // DOSE — large, clear, unmissable
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              decoration: BoxDecoration(
+                color: MalaikaColors.primaryLight,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Text(
+                dose,
+                style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w700,
+                  color: MalaikaColors.primary,
+                ),
+              ),
+            ),
+            const SizedBox(height: 8),
+            // Duration
+            Row(
+              children: [
+                const Icon(Icons.schedule_rounded,
+                    size: 13, color: MalaikaColors.textSecondary),
+                const SizedBox(width: 6),
+                Text('For $duration',
+                    style: const TextStyle(
+                        fontSize: 12, color: MalaikaColors.textSecondary)),
+              ],
+            ),
+            const SizedBox(height: 8),
+            // Preparation
+            Text(preparation,
+                style: const TextStyle(
+                    fontSize: 12, color: MalaikaColors.text, height: 1.4)),
+            const SizedBox(height: 6),
+            // WHO reference
+            Text(reference,
+                style: const TextStyle(
+                    fontSize: 9, color: MalaikaColors.textMuted)),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// =============================================================================
+// ORS Guide Card — visual rehydration instructions
+// =============================================================================
+
+class _OrsGuideWidget extends StatelessWidget {
+  final Map<String, dynamic> metadata;
+  const _OrsGuideWidget({required this.metadata});
+
+  @override
+  Widget build(BuildContext context) {
+    final planType = metadata['planType'] as String;
+    final volumeMl = (metadata['volumeMl'] as num).toDouble();
+    final frequency = metadata['frequency'] as String;
+    final zincDoseMg = (metadata['zincDoseMg'] as num).toDouble();
+    final zincDays = metadata['zincDays'] as int;
+    final homemadeRecipe = metadata['homemadeRecipe'] as String;
+    final reference = metadata['reference'] as String;
+
+    final isUrgent = planType == 'C';
+    final borderColor = isUrgent ? MalaikaColors.red : MalaikaColors.primary;
+    final bgColor = isUrgent ? MalaikaColors.redLight : Colors.blue.shade50;
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: bgColor,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: borderColor.withValues(alpha: 0.3)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Header
+            Row(
+              children: [
+                Icon(Icons.water_drop_rounded,
+                    size: 20, color: borderColor),
+                const SizedBox(width: 8),
+                Text(
+                  'ORS Rehydration — Plan $planType',
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
+                    color: borderColor,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+
+            // Volume — large and clear
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.8),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Column(
+                children: [
+                  Text(
+                    '${volumeMl.round()} ml',
+                    style: TextStyle(
+                      fontSize: 28,
+                      fontWeight: FontWeight.w800,
+                      color: borderColor,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    frequency,
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: borderColor,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 10),
+
+            // How to prepare
+            const Text(
+              'How to prepare ORS:',
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: MalaikaColors.text,
+              ),
+            ),
+            const SizedBox(height: 4),
+            const Text(
+              '1. Wash your hands\n'
+              '2. Pour 1 ORS packet into a clean container\n'
+              '3. Add 1 liter of clean water\n'
+              '4. Stir until dissolved\n'
+              '5. Give small sips frequently',
+              style: TextStyle(
+                  fontSize: 12, color: MalaikaColors.text, height: 1.5),
+            ),
+            const SizedBox(height: 10),
+
+            // Homemade recipe fallback
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: MalaikaColors.yellowLight,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(
+                    color: MalaikaColors.yellow.withValues(alpha: 0.3)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Row(
+                    children: [
+                      Icon(Icons.lightbulb_outline_rounded,
+                          size: 13, color: MalaikaColors.yellow),
+                      SizedBox(width: 6),
+                      Text('If no ORS packet available:',
+                          style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                              color: MalaikaColors.yellow)),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Text(homemadeRecipe,
+                      style: const TextStyle(
+                          fontSize: 11,
+                          color: MalaikaColors.text,
+                          height: 1.4)),
+                ],
+              ),
+            ),
+            const SizedBox(height: 10),
+
+            // Zinc reminder
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: MalaikaColors.greenLight,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.add_circle_outline_rounded,
+                      size: 16, color: MalaikaColors.green),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Also give Zinc ${zincDoseMg.round()}mg daily for $zincDays days '
+                      '— even after diarrhea stops',
+                      style: const TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: MalaikaColors.green,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(reference,
+                style: const TextStyle(
+                    fontSize: 9, color: MalaikaColors.textMuted)),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// =============================================================================
+// Treatment Action — single action item (home care / pre-referral)
+// =============================================================================
+
+class _TreatmentActionWidget extends StatelessWidget {
+  final String text;
+  final bool urgent;
+  const _TreatmentActionWidget({required this.text, this.urgent = false});
+
+  @override
+  Widget build(BuildContext context) {
+    final color = urgent ? MalaikaColors.red : MalaikaColors.green;
+    final bg = urgent ? MalaikaColors.redLight : MalaikaColors.greenLight;
+    final icon = urgent
+        ? Icons.warning_amber_rounded
+        : Icons.check_circle_outline_rounded;
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 3),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: BoxDecoration(
+          color: bg,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: color.withValues(alpha: 0.2)),
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(icon, size: 16, color: color),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                text,
+                style: TextStyle(
+                  fontSize: 13,
+                  color: urgent ? MalaikaColors.red : MalaikaColors.text,
+                  fontWeight: urgent ? FontWeight.w600 : FontWeight.normal,
+                  height: 1.4,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }

@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/klickgenai/deepmind-hackathon/blob/main/SECURITY.md
+    about: Please report security issues privately, not as public issues.
+  - name: Clinical-safety concern
+    url: https://github.com/klickgenai/deepmind-hackathon/blob/main/SECURITY.md
+    about: Use the private security channel for clinical-safety risks (wrong classifications, threshold bypasses, prompt-injection that affects medical output).
+  - name: Read CLAUDE.md and AGENTS.md first
+    url: https://github.com/klickgenai/deepmind-hackathon/blob/main/AGENTS.md
+    about: Many proposals are out of scope by design. The Absolute Rules in CLAUDE.md and AGENTS.md will save you (and us) time.

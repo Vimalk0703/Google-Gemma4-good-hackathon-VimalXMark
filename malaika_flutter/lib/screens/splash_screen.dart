@@ -93,6 +93,8 @@ class _SplashScreenState extends State<SplashScreen> {
         _status = 'Loading model into memory...';
       });
 
+      // maxTokens=200: proven stable on Samsung A53 Mali G68.
+      // 256 and 512 cause OOM on gallery return. Vision prompt must fit in 200.
       await FlutterGemma.getActiveModel(
         maxTokens: 200,
         preferredBackend: PreferredBackend.gpu,

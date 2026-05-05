@@ -186,8 +186,8 @@ The voice-first interface replaces the Gradio form with a conversational agent b
 ┌─────────────────────────────────────────────────────────────────────┐
 │              VoiceSessionHandler (voice_session.py)                    │
 │                                                                       │
-│  Browser mic → PCM → Smallest AI Pulse STT → transcript              │
-│  ChatEngine response → sentence-level TTS → Smallest AI Waves        │
+│  Browser mic → PCM → Whisper-small (local STT) → transcript          │
+│  ChatEngine response → sentence-level TTS → Piper (local TTS)        │
 │  Filler audio during Gemma 4 thinking time                            │
 │  State machine: idle → listening → thinking → speaking                │
 └──────────────────────────────┬──────────────────────────────────────┘
@@ -361,8 +361,8 @@ Input:  PCM16 audio chunks (browser mic) + JSON control messages
 Output: TTS audio chunks (base64) + structured events (JSON)
 ```
 
-- Manages STT via Smallest AI Pulse (optional, degrades to text-only)
-- Sends ChatEngine responses as sentence-level TTS chunks
+- Manages STT via Whisper-small running locally (degrades to typed text input if unavailable)
+- Sends ChatEngine responses as sentence-level Piper TTS chunks (fully offline)
 - Plays filler audio during Gemma 4 thinking time to prevent dead air
 - State machine: idle -> listening -> thinking -> speaking
 - Single WebSocket per session (no separate audio/control channels)
@@ -544,7 +544,7 @@ cache_key = hash(prompt_version + prompt_template + media_hash + temperature)
                     │
 5. VoiceSessionHandler receives audio
                     │
-6. Audio forwarded to Smallest AI Pulse STT (WebSocket) → transcript
+6. Audio forwarded to Whisper-small (local STT) → transcript
    (If STT unavailable: caregiver types text via REST /api/chat instead)
                     │
 7. transcript → ChatEngine.process(text, image=None)
@@ -568,7 +568,7 @@ cache_key = hash(prompt_version + prompt_template + media_hash + temperature)
                     │
 10. Response text split at sentence boundaries for streaming TTS
                     │
-11. Each sentence → Smallest AI Waves TTS → base64 audio chunk
+11. Each sentence → Piper TTS (local) → base64 audio chunk
     (Filler audio played during Gemma 4 thinking time)
                     │
 12. Browser queues audio chunks, plays sequentially
@@ -674,17 +674,19 @@ datasets              # HuggingFace datasets
 - No Ollama (unified Transformers runtime)
 - No database (local file storage only)
 - No Docker (direct Python execution for hackathon)
+- No third-party speech APIs — STT is local Whisper-small, TTS is local Piper, both run in-process.
 
-### Optional Cloud Services (voice pipeline only, graceful degradation)
+### Voice runtime (fully local)
 
 ```
-Smallest AI Pulse     # STT — degrades to typed text input if unavailable
-Smallest AI Waves     # TTS — degrades to text-only output if unavailable
+Whisper-small (244 MB)   # local STT, runs in-process
+Piper TTS                # local TTS, runs in-process
 ```
 
-These are used only by the voice pipeline (`voice_session.py`). All clinical
-intelligence (Gemma 4 inference, IMCI classification) remains fully offline.
-The Gradio form interface (`app.py`) has zero external API dependencies.
+All clinical intelligence (Gemma 4 inference, IMCI classification) is fully offline.
+The Gradio form interface (`app.py`) has zero external API dependencies. The web
+clinical portal (`web/`) is the current connected-mode surface and uses the
+browser's native MediaRecorder API for audio capture — no third-party voice SDK.
 
 ### Audio Pipeline Note
 

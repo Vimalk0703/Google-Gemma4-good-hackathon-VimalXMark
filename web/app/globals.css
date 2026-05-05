@@ -1,0 +1,146 @@
+@import "tailwindcss";
+
+@theme {
+  /* IBM Plex Sans + IBM Plex Serif. Clinical, neutral, designed for documentation. */
+  --font-sans: var(--font-plex-sans), "Helvetica Neue", Arial, system-ui, sans-serif;
+  --font-serif: var(--font-plex-serif), Georgia, "Times New Roman", serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+
+  /* Warm editorial palette. Avoids generic "AI gradient" feel. */
+  --color-cream: oklch(98.5% 0.006 80);     /* page background */
+  --color-paper: oklch(99.5% 0.003 80);     /* cards, slightly brighter */
+  --color-ink: oklch(18% 0.015 50);         /* primary foreground */
+  --color-ink-soft: oklch(28% 0.015 50);    /* secondary foreground */
+  --color-muted: oklch(45% 0.012 50);       /* tertiary, captions */
+  --color-faint: oklch(70% 0.008 50);       /* placeholders */
+  --color-line: oklch(91% 0.010 80);        /* hairline rules */
+  --color-line-strong: oklch(80% 0.015 80); /* emphasized rules */
+
+  --color-amber: oklch(58% 0.13 65);        /* primary accent */
+  --color-amber-deep: oklch(45% 0.13 60);   /* hover/active accent */
+  --color-amber-soft: oklch(94% 0.04 80);   /* subtle accent backgrounds */
+
+  --color-severe: oklch(52% 0.20 25);       /* WHO RED — emergency */
+  --color-warning: oklch(68% 0.14 75);      /* WHO YELLOW — refer */
+  --color-safe: oklch(50% 0.13 145);        /* WHO GREEN — home care */
+
+  --shadow-card: 0 1px 0 oklch(80% 0.012 80 / 0.6), 0 8px 24px -12px oklch(40% 0.02 50 / 0.08);
+  --shadow-elevated: 0 1px 0 oklch(80% 0.012 80 / 0.8), 0 24px 64px -24px oklch(35% 0.02 50 / 0.18);
+
+  --radius-card: 4px;
+  --radius-button: 2px;
+}
+
+* {
+  box-sizing: border-box;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+html {
+  background: var(--color-cream);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  text-rendering: optimizeLegibility;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  /* Bumped from 17 to 18 — clinicians range from new grads to senior physicians.
+     The body copy needs to be readable for the 60-year-old who didn't bring her glasses. */
+  font-size: 18px;
+  line-height: 1.6;
+  letter-spacing: 0;
+}
+
+@media (max-width: 640px) {
+  body { font-size: 17px; }
+}
+
+/* Display type — IBM Plex Serif. Calm, professional, scholarly.
+   Looks like a published paper, not a tech magazine cover. */
+.font-display {
+  font-family: var(--font-serif);
+  font-weight: 500;
+  letter-spacing: -0.012em;
+  line-height: 1.1;
+}
+
+.font-display-italic {
+  font-family: var(--font-serif);
+  font-weight: 400;
+  font-style: italic;
+  letter-spacing: -0.005em;
+}
+
+/* Section labels — uppercase Plex Sans 500. Reads like a chart-section header. */
+.eyebrow {
+  font-family: var(--font-sans);
+  font-size: 0.75rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  font-weight: 500;
+  color: var(--color-muted);
+}
+
+/* Focus rings — sober, not the generic blue glow. */
+:focus-visible {
+  outline: 2px solid var(--color-amber);
+  outline-offset: 3px;
+  border-radius: 1px;
+}
+
+/* Selection — warm rather than browser default. */
+::selection {
+  background: oklch(94% 0.04 80);
+  color: var(--color-ink);
+}
+
+/* Hairline rules — exactly 1px on retina, never thicker. */
+.hairline {
+  border-style: solid;
+  border-color: var(--color-line);
+  border-width: 0;
+}
+
+/* Animated underline for editorial links — like a magazine. */
+.link-underline {
+  background-image: linear-gradient(currentColor, currentColor);
+  background-size: 100% 1px;
+  background-position: 0 100%;
+  background-repeat: no-repeat;
+  text-decoration: none;
+  transition: color 200ms ease;
+}
+
+.link-underline:hover {
+  color: var(--color-amber-deep);
+}
+
+/* Tabular figures for numbers — important for any data display. */
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Reveal-on-scroll — controlled, never bouncy. */
+@media (prefers-reduced-motion: no-preference) {
+  .reveal {
+    opacity: 0;
+    transform: translateY(8px);
+    animation: reveal 700ms cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+  }
+}
+
+@keyframes reveal {
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Print: keep editorial readability. */
+@media print {
+  html { background: white; }
+  .no-print { display: none; }
+}

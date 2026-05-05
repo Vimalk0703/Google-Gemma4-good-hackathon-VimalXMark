@@ -6,7 +6,7 @@ deterministic expected classification. These are ground truth.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 from malaika.types import ClassificationType, ReferralUrgency, Severity
@@ -75,14 +75,17 @@ GOLDEN_SCENARIOS: list[GoldenScenario] = [
         who_source="IMCI Chart Booklet, p.2: General danger signs",
         age_months=18,
         findings={
-            "danger_signs": {"lethargic": False, "unable_to_drink": False,
-                             "convulsions": False, "vomits_everything": True},
+            "danger_signs": {
+                "lethargic": False,
+                "unable_to_drink": False,
+                "convulsions": False,
+                "vomits_everything": True,
+            },
         },
         expected_classifications=[ClassificationType.URGENT_REFERRAL],
         expected_severity=Severity.RED,
         expected_referral=ReferralUrgency.IMMEDIATE,
     ),
-
     # === BREATHING / PNEUMONIA ===
     GoldenScenario(
         name="breathing_fast_infant",
@@ -90,8 +93,13 @@ GOLDEN_SCENARIOS: list[GoldenScenario] = [
         who_source="IMCI Chart Booklet, p.5: 50+ breaths/min for 2-11 months",
         age_months=6,
         findings={
-            "breathing": {"breathing_rate": 55, "has_cough": True, "has_indrawing": False,
-                          "has_stridor": False, "has_wheeze": False},
+            "breathing": {
+                "breathing_rate": 55,
+                "has_cough": True,
+                "has_indrawing": False,
+                "has_stridor": False,
+                "has_wheeze": False,
+            },
         },
         expected_classifications=[ClassificationType.PNEUMONIA],
         expected_severity=Severity.YELLOW,
@@ -103,8 +111,13 @@ GOLDEN_SCENARIOS: list[GoldenScenario] = [
         who_source="IMCI Chart Booklet, p.5: 40+ breaths/min for 12-59 months",
         age_months=24,
         findings={
-            "breathing": {"breathing_rate": 45, "has_cough": True, "has_indrawing": False,
-                          "has_stridor": False, "has_wheeze": False},
+            "breathing": {
+                "breathing_rate": 45,
+                "has_cough": True,
+                "has_indrawing": False,
+                "has_stridor": False,
+                "has_wheeze": False,
+            },
         },
         expected_classifications=[ClassificationType.PNEUMONIA],
         expected_severity=Severity.YELLOW,
@@ -116,8 +129,13 @@ GOLDEN_SCENARIOS: list[GoldenScenario] = [
         who_source="IMCI Chart Booklet, p.5: Chest indrawing = severe pneumonia",
         age_months=10,
         findings={
-            "breathing": {"breathing_rate": 60, "has_cough": True, "has_indrawing": True,
-                          "has_stridor": True, "has_wheeze": False},
+            "breathing": {
+                "breathing_rate": 60,
+                "has_cough": True,
+                "has_indrawing": True,
+                "has_stridor": True,
+                "has_wheeze": False,
+            },
         },
         expected_classifications=[ClassificationType.SEVERE_PNEUMONIA],
         expected_severity=Severity.RED,
@@ -129,14 +147,18 @@ GOLDEN_SCENARIOS: list[GoldenScenario] = [
         who_source="IMCI Chart Booklet, p.5: No fast breathing, no indrawing",
         age_months=36,
         findings={
-            "breathing": {"breathing_rate": 30, "has_cough": True, "has_indrawing": False,
-                          "has_stridor": False, "has_wheeze": False},
+            "breathing": {
+                "breathing_rate": 30,
+                "has_cough": True,
+                "has_indrawing": False,
+                "has_stridor": False,
+                "has_wheeze": False,
+            },
         },
         expected_classifications=[ClassificationType.NO_PNEUMONIA_COUGH_OR_COLD],
         expected_severity=Severity.GREEN,
         expected_referral=ReferralUrgency.NONE,
     ),
-
     # === DIARRHEA ===
     GoldenScenario(
         name="diarrhea_severe_dehydration",
@@ -144,9 +166,14 @@ GOLDEN_SCENARIOS: list[GoldenScenario] = [
         who_source="IMCI Chart Booklet, p.8: 2+ signs of severe dehydration",
         age_months=8,
         findings={
-            "diarrhea": {"has_diarrhea": True, "duration_days": 3, "blood_in_stool": False,
-                         "sunken_eyes": True, "skin_pinch_very_slow": True,
-                         "unable_to_drink": True},
+            "diarrhea": {
+                "has_diarrhea": True,
+                "duration_days": 3,
+                "blood_in_stool": False,
+                "sunken_eyes": True,
+                "skin_pinch_very_slow": True,
+                "unable_to_drink": True,
+            },
         },
         expected_classifications=[ClassificationType.SEVERE_DEHYDRATION],
         expected_severity=Severity.RED,
@@ -158,9 +185,14 @@ GOLDEN_SCENARIOS: list[GoldenScenario] = [
         who_source="IMCI Chart Booklet, p.8: 2+ signs of some dehydration",
         age_months=14,
         findings={
-            "diarrhea": {"has_diarrhea": True, "duration_days": 2, "blood_in_stool": False,
-                         "sunken_eyes": True, "skin_pinch_slow": True,
-                         "unable_to_drink": False},
+            "diarrhea": {
+                "has_diarrhea": True,
+                "duration_days": 2,
+                "blood_in_stool": False,
+                "sunken_eyes": True,
+                "skin_pinch_slow": True,
+                "unable_to_drink": False,
+            },
         },
         expected_classifications=[ClassificationType.SOME_DEHYDRATION],
         expected_severity=Severity.YELLOW,
@@ -172,9 +204,14 @@ GOLDEN_SCENARIOS: list[GoldenScenario] = [
         who_source="IMCI Chart Booklet, p.8: No dehydration signs",
         age_months=20,
         findings={
-            "diarrhea": {"has_diarrhea": True, "duration_days": 2, "blood_in_stool": False,
-                         "sunken_eyes": False, "skin_pinch_slow": False,
-                         "unable_to_drink": False},
+            "diarrhea": {
+                "has_diarrhea": True,
+                "duration_days": 2,
+                "blood_in_stool": False,
+                "sunken_eyes": False,
+                "skin_pinch_slow": False,
+                "unable_to_drink": False,
+            },
         },
         expected_classifications=[ClassificationType.NO_DEHYDRATION],
         expected_severity=Severity.GREEN,
@@ -186,9 +223,14 @@ GOLDEN_SCENARIOS: list[GoldenScenario] = [
         who_source="IMCI Chart Booklet, p.9: Blood in stool = dysentery",
         age_months=30,
         findings={
-            "diarrhea": {"has_diarrhea": True, "duration_days": 4, "blood_in_stool": True,
-                         "sunken_eyes": False, "skin_pinch_slow": False,
-                         "unable_to_drink": False},
+            "diarrhea": {
+                "has_diarrhea": True,
+                "duration_days": 4,
+                "blood_in_stool": True,
+                "sunken_eyes": False,
+                "skin_pinch_slow": False,
+                "unable_to_drink": False,
+            },
         },
         expected_classifications=[ClassificationType.DYSENTERY],
         expected_severity=Severity.YELLOW,
@@ -200,15 +242,19 @@ GOLDEN_SCENARIOS: list[GoldenScenario] = [
         who_source="IMCI Chart Booklet, p.9: Diarrhea >= 14 days",
         age_months=16,
         findings={
-            "diarrhea": {"has_diarrhea": True, "duration_days": 16, "blood_in_stool": False,
-                         "sunken_eyes": False, "skin_pinch_slow": False,
-                         "unable_to_drink": False},
+            "diarrhea": {
+                "has_diarrhea": True,
+                "duration_days": 16,
+                "blood_in_stool": False,
+                "sunken_eyes": False,
+                "skin_pinch_slow": False,
+                "unable_to_drink": False,
+            },
         },
         expected_classifications=[ClassificationType.PERSISTENT_DIARRHEA],
         expected_severity=Severity.YELLOW,
         expected_referral=ReferralUrgency.WITHIN_24H,
     ),
-
     # === FEVER ===
     GoldenScenario(
         name="fever_very_severe",
@@ -216,8 +262,12 @@ GOLDEN_SCENARIOS: list[GoldenScenario] = [
         who_source="IMCI Chart Booklet, p.11: Stiff neck = very severe febrile disease",
         age_months=24,
         findings={
-            "fever": {"has_fever": True, "duration_days": 3, "stiff_neck": True,
-                      "malaria_risk": True},
+            "fever": {
+                "has_fever": True,
+                "duration_days": 3,
+                "stiff_neck": True,
+                "malaria_risk": True,
+            },
         },
         expected_classifications=[ClassificationType.VERY_SEVERE_FEBRILE_DISEASE],
         expected_severity=Severity.RED,
@@ -229,8 +279,12 @@ GOLDEN_SCENARIOS: list[GoldenScenario] = [
         who_source="IMCI Chart Booklet, p.11: Fever + malaria risk",
         age_months=36,
         findings={
-            "fever": {"has_fever": True, "duration_days": 3, "stiff_neck": False,
-                      "malaria_risk": True},
+            "fever": {
+                "has_fever": True,
+                "duration_days": 3,
+                "stiff_neck": False,
+                "malaria_risk": True,
+            },
         },
         expected_classifications=[ClassificationType.MALARIA],
         expected_severity=Severity.YELLOW,
@@ -242,14 +296,17 @@ GOLDEN_SCENARIOS: list[GoldenScenario] = [
         who_source="IMCI Chart Booklet, p.11: Fever without malaria risk",
         age_months=48,
         findings={
-            "fever": {"has_fever": True, "duration_days": 2, "stiff_neck": False,
-                      "malaria_risk": False},
+            "fever": {
+                "has_fever": True,
+                "duration_days": 2,
+                "stiff_neck": False,
+                "malaria_risk": False,
+            },
         },
         expected_classifications=[ClassificationType.FEVER_NO_MALARIA],
         expected_severity=Severity.YELLOW,
         expected_referral=ReferralUrgency.WITHIN_24H,
     ),
-
     # === NUTRITION ===
     GoldenScenario(
         name="nutrition_severe_wasting",
@@ -287,7 +344,6 @@ GOLDEN_SCENARIOS: list[GoldenScenario] = [
         expected_severity=Severity.GREEN,
         expected_referral=ReferralUrgency.NONE,
     ),
-
     # === HEALTHY CHILD ===
     GoldenScenario(
         name="healthy_child",
@@ -296,8 +352,13 @@ GOLDEN_SCENARIOS: list[GoldenScenario] = [
         age_months=18,
         findings={
             "danger_signs": {"lethargic": False, "unable_to_drink": False, "convulsions": False},
-            "breathing": {"breathing_rate": 28, "has_cough": False, "has_indrawing": False,
-                          "has_stridor": False, "has_wheeze": False},
+            "breathing": {
+                "breathing_rate": 28,
+                "has_cough": False,
+                "has_indrawing": False,
+                "has_stridor": False,
+                "has_wheeze": False,
+            },
             "diarrhea": {"has_diarrhea": False},
             "fever": {"has_fever": False},
             "nutrition": {"visible_wasting": False, "edema": False, "muac_mm": 150},
@@ -312,7 +373,6 @@ GOLDEN_SCENARIOS: list[GoldenScenario] = [
         expected_severity=Severity.GREEN,
         expected_referral=ReferralUrgency.NONE,
     ),
-
     # === COMBINED (multi-domain) ===
     GoldenScenario(
         name="combined_pneumonia_dehydration",
@@ -320,11 +380,21 @@ GOLDEN_SCENARIOS: list[GoldenScenario] = [
         who_source="IMCI Chart Booklet: Independent classification per domain",
         age_months=10,
         findings={
-            "breathing": {"breathing_rate": 55, "has_cough": True, "has_indrawing": False,
-                          "has_stridor": False, "has_wheeze": False},
-            "diarrhea": {"has_diarrhea": True, "duration_days": 2, "blood_in_stool": False,
-                         "sunken_eyes": True, "skin_pinch_slow": True,
-                         "unable_to_drink": False},
+            "breathing": {
+                "breathing_rate": 55,
+                "has_cough": True,
+                "has_indrawing": False,
+                "has_stridor": False,
+                "has_wheeze": False,
+            },
+            "diarrhea": {
+                "has_diarrhea": True,
+                "duration_days": 2,
+                "blood_in_stool": False,
+                "sunken_eyes": True,
+                "skin_pinch_slow": True,
+                "unable_to_drink": False,
+            },
         },
         expected_classifications=[
             ClassificationType.PNEUMONIA,
@@ -339,8 +409,13 @@ GOLDEN_SCENARIOS: list[GoldenScenario] = [
         who_source="IMCI Chart Booklet: Worst severity wins",
         age_months=8,
         findings={
-            "breathing": {"breathing_rate": 62, "has_cough": True, "has_indrawing": True,
-                          "has_stridor": False, "has_wheeze": False},
+            "breathing": {
+                "breathing_rate": 62,
+                "has_cough": True,
+                "has_indrawing": True,
+                "has_stridor": False,
+                "has_wheeze": False,
+            },
             "nutrition": {"visible_wasting": True, "edema": False, "muac_mm": 108},
         },
         expected_classifications=[

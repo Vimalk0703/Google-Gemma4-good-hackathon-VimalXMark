@@ -25,7 +25,6 @@ Run on Colab:
 
 from __future__ import annotations
 
-import os
 import tempfile
 import uuid
 from pathlib import Path
@@ -45,6 +44,7 @@ logger = structlog.get_logger()
 # API Models
 # ---------------------------------------------------------------------------
 
+
 class ChatRequest(BaseModel):
     text: str = Field(..., min_length=1, max_length=2000)
     language: str = Field(default="en")
@@ -60,6 +60,7 @@ class ChatResponse(BaseModel):
 # ---------------------------------------------------------------------------
 # Edge App State
 # ---------------------------------------------------------------------------
+
 
 class EdgeAppState:
     """Manages state for the fully offline edge app."""
@@ -85,9 +86,12 @@ class EdgeAppState:
         # Initialize offline TTS (Piper)
         try:
             from malaika.tts import MalaikaTTS
+
             self.tts = MalaikaTTS(self.config)
             if self.tts.available:
-                logger.info("edge_tts_ready", backend="piper", languages=self.tts.supported_languages)
+                logger.info(
+                    "edge_tts_ready", backend="piper", languages=self.tts.supported_languages
+                )
             else:
                 logger.warning("edge_tts_unavailable", msg="piper-tts not installed")
         except Exception as e:
@@ -97,6 +101,7 @@ class EdgeAppState:
         # Initialize offline STT (Whisper)
         try:
             from malaika.audio import WhisperTranscriber
+
             self.whisper = WhisperTranscriber()
             logger.info("edge_stt_ready", backend="whisper-small")
         except Exception as e:
@@ -159,6 +164,7 @@ app = FastAPI(
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
+
 
 @app.get("/", response_class=HTMLResponse)
 async def serve_ui() -> HTMLResponse:
@@ -270,9 +276,13 @@ async def get_mode() -> dict[str, Any]:
         "mode": "edge",
         "internet_required": False,
         "stt": "whisper-small (offline)",
-        "tts": "piper (offline)" if (_state and _state.tts and _state.tts.available) else "disabled",
+        "tts": "piper (offline)"
+        if (_state and _state.tts and _state.tts.available)
+        else "disabled",
         "inference": "gemma-4-local",
-        "model_loaded": _state is not None and _state.session is not None and _state.session.model_loaded,
+        "model_loaded": _state is not None
+        and _state.session is not None
+        and _state.session.model_loaded,
     }
 
 
@@ -299,7 +309,8 @@ async def voice_stream(websocket: WebSocket) -> None:
     engine.model_loaded = True
 
     handler = EdgeVoiceSessionHandler(
-        websocket, engine,
+        websocket,
+        engine,
         tts=_state.tts,
         whisper=_state.whisper,
     )
@@ -318,6 +329,7 @@ async def reset_session() -> dict[str, str]:
 # Application Factory
 # ---------------------------------------------------------------------------
 
+
 def create_edge_app(
     model: Any,
     processor: Any,
@@ -333,7 +345,7 @@ def create_edge_app(
     Returns:
         Configured FastAPI application.
     """
-    global _state  # noqa: PLW0603
+    global _state
 
     effective_config = config or load_config()
     _state = EdgeAppState(effective_config)
@@ -368,6 +380,7 @@ def create_edge_app(
 # Entry point (local development)
 # ---------------------------------------------------------------------------
 
+
 def main() -> None:
     """Launch the edge app locally."""
     import uvicorn
@@ -390,7 +403,7 @@ def main() -> None:
         config=config,
     )
 
-    print(f"\nMalaika Edge is running at http://localhost:8000")
+    print("\nMalaika Edge is running at http://localhost:8000")
     print("Fully offline — zero internet required.\n")
 
     uvicorn.run(app, host="0.0.0.0", port=8000, log_level="info")

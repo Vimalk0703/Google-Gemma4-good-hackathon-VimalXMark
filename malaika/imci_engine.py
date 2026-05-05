@@ -9,14 +9,11 @@ This module MUST NOT call Gemma 4 directly -- only through vision/audio modules.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from pathlib import Path
-from typing import Any
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 
 import structlog
 
-from malaika.config import MalaikaConfig
-from malaika.inference import MalaikaInference
 from malaika.types import (
     AssessmentResult,
     AssessmentTrace,
@@ -28,6 +25,12 @@ from malaika.types import (
     ReferralUrgency,
     Severity,
 )
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from malaika.config import MalaikaConfig
+    from malaika.inference import MalaikaInference
 
 logger = structlog.get_logger()
 
@@ -84,6 +87,7 @@ class IMCIEngine:
 
         # Observability
         from malaika.observability import Tracer
+
         self._tracer = Tracer(
             max_raw_output_length=config.observability.max_raw_output_length,
         )
@@ -143,11 +147,13 @@ class IMCIEngine:
                 state="HEART_MEMS",
                 reason="enable_heart_rate=False",
             )
-            self._findings.append(ClinicalFinding(
-                imci_state=IMCIState.HEART_MEMS,
-                finding_status=FindingStatus.NOT_ASSESSED,
-                notes="Heart MEMS module disabled",
-            ))
+            self._findings.append(
+                ClinicalFinding(
+                    imci_state=IMCIState.HEART_MEMS,
+                    finding_status=FindingStatus.NOT_ASSESSED,
+                    notes="Heart MEMS module disabled",
+                )
+            )
             self._current_state_index += 1
 
         new_state = self.current_state
@@ -212,7 +218,8 @@ class IMCIEngine:
             if audio_path is not None:
                 try:
                     raw, validated, retries = self._inference.analyze_audio(
-                        audio_path, prompt,
+                        audio_path,
+                        prompt,
                         caregiver_response=response_text or "audio input",
                     )
                     parsed = validated.parsed
@@ -222,8 +229,9 @@ class IMCIEngine:
                     logger.error("danger_signs_audio_failed", error=str(e))
             elif response_text:
                 try:
-                    raw, validated, retries = self._inference.reason(
-                        prompt, caregiver_response=response_text,
+                    _raw, validated, _retries = self._inference.reason(
+                        prompt,
+                        caregiver_response=response_text,
                     )
                     parsed = validated.parsed
                     unable_to_drink = not bool(parsed.get("able_to_drink", True))
@@ -233,6 +241,7 @@ class IMCIEngine:
 
         # Classify using protocol
         from malaika.imci_protocol import classify_danger_signs
+
         classification = classify_danger_signs(
             lethargic=lethargic,
             unconscious=unconscious,
@@ -241,10 +250,7 @@ class IMCIEngine:
         )
 
         classifications = [classification.classification] if classification else []
-        finding_status = (
-            FindingStatus.DETECTED if classification
-            else FindingStatus.NOT_DETECTED
-        )
+        finding_status = FindingStatus.DETECTED if classification else FindingStatus.NOT_DETECTED
 
         finding = ClinicalFinding(
             imci_state=IMCIState.DANGER_SIGNS,
@@ -275,7 +281,7 @@ class IMCIEngine:
         Returns:
             ClinicalFinding for breathing.
         """
-        from malaika import vision, audio
+        from malaika import audio, vision
 
         perception_results: list[PerceptionResult] = []
         breathing_rate: int | None = None
@@ -286,7 +292,8 @@ class IMCIEngine:
         # Breathing rate from video
         if video_path is not None:
             br_result = vision.count_breathing_rate(
-                video_path, self._inference,
+                video_path,
+                self._inference,
                 duration_seconds=self._config.media.breathing_video_duration_seconds,
             )
             perception_results.append(br_result)
@@ -301,7 +308,8 @@ class IMCIEngine:
         # Breath sounds from spectrogram image (preferred — uses fine-tuned adapter)
         if spectrogram_path is not None:
             sounds = audio.classify_breath_sounds_from_spectrogram_image(
-                spectrogram_path, self._inference,
+                spectrogram_path,
+                self._inference,
             )
             perception_results.append(sounds)
             has_stridor = sounds.stridor
@@ -315,6 +323,7 @@ class IMCIEngine:
 
         # Classify
         from malaika.imci_protocol import classify_breathing
+
         classification = classify_breathing(
             age_months=self._age_months,
             has_cough=has_cough,
@@ -326,7 +335,9 @@ class IMCIEngine:
 
         finding = ClinicalFinding(
             imci_state=IMCIState.BREATHING,
-            finding_status=FindingStatus.DETECTED if classification.severity != Severity.GREEN else FindingStatus.NOT_DETECTED,
+            finding_status=FindingStatus.DETECTED
+            if classification.severity != Severity.GREEN
+            else FindingStatus.NOT_DETECTED,
             perception_results=perception_results,
             classifications=[classification.classification],
         )
@@ -372,6 +383,7 @@ class IMCIEngine:
 
         # Classify
         from malaika.imci_protocol import classify_diarrhea
+
         classification = classify_diarrhea(
             has_diarrhea=has_diarrhea,
             duration_days=duration_days,
@@ -391,7 +403,9 @@ class IMCIEngine:
         else:
             finding = ClinicalFinding(
                 imci_state=IMCIState.DIARRHEA,
-                finding_status=FindingStatus.DETECTED if classification.severity != Severity.GREEN else FindingStatus.NOT_DETECTED,
+                finding_status=FindingStatus.DETECTED
+                if classification.severity != Severity.GREEN
+                else FindingStatus.NOT_DETECTED,
                 perception_results=perception_results,
                 classifications=[classification.classification],
             )
@@ -422,6 +436,7 @@ class IMCIEngine:
             ClinicalFinding for fever.
         """
         from malaika.imci_protocol import classify_fever
+
         classification = classify_fever(
             has_fever=has_fever,
             duration_days=duration_days,
@@ -440,7 +455,9 @@ class IMCIEngine:
         else:
             finding = ClinicalFinding(
                 imci_state=IMCIState.FEVER,
-                finding_status=FindingStatus.DETECTED if classification.severity != Severity.GREEN else FindingStatus.NOT_DETECTED,
+                finding_status=FindingStatus.DETECTED
+                if classification.severity != Severity.GREEN
+                else FindingStatus.NOT_DETECTED,
                 classifications=[classification.classification],
             )
 
@@ -483,6 +500,7 @@ class IMCIEngine:
 
         # Classify
         from malaika.imci_protocol import classify_nutrition
+
         classification = classify_nutrition(
             visible_wasting=visible_wasting,
             edema=edema_detected,
@@ -491,7 +509,9 @@ class IMCIEngine:
 
         finding = ClinicalFinding(
             imci_state=IMCIState.NUTRITION,
-            finding_status=FindingStatus.DETECTED if classification.severity != Severity.GREEN else FindingStatus.NOT_DETECTED,
+            finding_status=FindingStatus.DETECTED
+            if classification.severity != Severity.GREEN
+            else FindingStatus.NOT_DETECTED,
             perception_results=perception_results,
             classifications=[classification.classification],
         )
@@ -523,6 +543,7 @@ class IMCIEngine:
             abnormal_sounds = heart.abnormal_sounds
 
         from malaika.imci_protocol import classify_heart
+
         classification = classify_heart(
             age_months=self._age_months,
             estimated_bpm=estimated_bpm,
@@ -539,7 +560,9 @@ class IMCIEngine:
         else:
             finding = ClinicalFinding(
                 imci_state=IMCIState.HEART_MEMS,
-                finding_status=FindingStatus.DETECTED if classification.severity != Severity.GREEN else FindingStatus.NOT_DETECTED,
+                finding_status=FindingStatus.DETECTED
+                if classification.severity != Severity.GREEN
+                else FindingStatus.NOT_DETECTED,
                 perception_results=perception_results,
                 classifications=[classification.classification],
             )
@@ -557,7 +580,7 @@ class IMCIEngine:
         Each assess_* method already ran the protocol classification.
         This method gathers those results and determines overall severity.
         """
-        from malaika.imci_protocol import DomainClassification, AggregateClassification
+        from malaika.imci_protocol import AggregateClassification, DomainClassification
 
         aggregate = AggregateClassification()
 
@@ -607,21 +630,25 @@ class IMCIEngine:
                 severity = Severity.GREEN
                 referral = ReferralUrgency.NONE
 
-            aggregate.classifications.append(DomainClassification(
-                classification=ct,
-                severity=severity,
-                referral=referral,
-                reasoning=f"Classification {ct.value} from assessment",
-            ))
+            aggregate.classifications.append(
+                DomainClassification(
+                    classification=ct,
+                    severity=severity,
+                    referral=referral,
+                    reasoning=f"Classification {ct.value} from assessment",
+                )
+            )
 
         # If no classifications were found, add HEALTHY
         if not aggregate.classifications:
-            aggregate.classifications.append(DomainClassification(
-                classification=ClassificationType.HEALTHY,
-                severity=Severity.GREEN,
-                referral=ReferralUrgency.NONE,
-                reasoning="No IMCI classifications triggered. Child appears healthy.",
-            ))
+            aggregate.classifications.append(
+                DomainClassification(
+                    classification=ClassificationType.HEALTHY,
+                    severity=Severity.GREEN,
+                    referral=ReferralUrgency.NONE,
+                    reasoning="No IMCI classifications triggered. Child appears healthy.",
+                )
+            )
 
         # Update result
         self._result.classifications = aggregate.all_classification_types
@@ -651,11 +678,9 @@ class IMCIEngine:
         try:
             prompt = PromptRegistry.get("treatment.generate_plan")
 
-            classifications_str = ", ".join(
-                c.value for c in self._result.classifications
-            )
+            classifications_str = ", ".join(c.value for c in self._result.classifications)
 
-            raw, validated, retries = self._inference.reason(
+            raw, validated, _retries = self._inference.reason(
                 prompt,
                 child_age_months=str(self._age_months),
                 classifications=classifications_str,
@@ -669,8 +694,7 @@ class IMCIEngine:
         except Exception as e:
             logger.error("treatment_generation_failed", error=str(e))
             self._result.treatment_text = (
-                "Treatment plan could not be generated. "
-                "Please consult a health worker immediately."
+                "Treatment plan could not be generated. Please consult a health worker immediately."
             )
 
         finding = ClinicalFinding(
@@ -687,7 +711,7 @@ class IMCIEngine:
             Complete AssessmentResult.
         """
         self._result.findings = list(self._findings)
-        self._result.completed_at = datetime.now(tz=timezone.utc)
+        self._result.completed_at = datetime.now(tz=UTC)
         self._result.model_used = self._config.model.model_name
 
         try:

@@ -14,6 +14,7 @@ Run with:
 
 from __future__ import annotations
 
+import contextlib
 import os
 import tempfile
 import uuid
@@ -23,7 +24,6 @@ from typing import Any
 import structlog
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, HTMLResponse
-from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from malaika.config import MalaikaConfig, load_config
@@ -409,11 +409,7 @@ async def get_status() -> SessionStatus:
         raise HTTPException(status_code=503, detail="Not initialized")
 
     session = _state.session
-    findings_count = sum(
-        1
-        for v in session.findings.values()
-        if v and v != 0
-    )
+    findings_count = sum(1 for v in session.findings.values() if v and v != 0)
 
     return SessionStatus(
         step=session.step,
@@ -441,10 +437,9 @@ async def voice_stream(websocket: WebSocket) -> None:
 
     api_key = os.environ.get("SMALLEST_API_KEY", "")
 
-    from malaika.voice_session import VoiceSessionHandler
-
     # Create a fresh ChatEngine for this voice session
     from malaika.chat_engine import ChatEngine
+    from malaika.voice_session import VoiceSessionHandler
 
     engine = ChatEngine(_state.config)
     engine.model = _state.session.model
@@ -476,6 +471,7 @@ async def stt_proxy(websocket: WebSocket) -> None:
     if not smallest_key:
         # Try environment variable
         import os
+
         smallest_key = os.environ.get("SMALLEST_API_KEY", "")
 
     if not smallest_key:
@@ -493,7 +489,6 @@ async def stt_proxy(websocket: WebSocket) -> None:
             pulse_url,
             additional_headers={"Authorization": f"Bearer {smallest_key}"},
         ) as pulse_ws:
-
             logger.info("stt_proxy_connected")
 
             async def forward_to_pulse() -> None:
@@ -525,15 +520,11 @@ async def stt_proxy(websocket: WebSocket) -> None:
 
     except Exception as e:
         logger.error("stt_proxy_error", error=str(e))
-        try:
+        with contextlib.suppress(Exception):
             await websocket.send_json({"error": str(e)})
-        except Exception:
-            pass
     finally:
-        try:
+        with contextlib.suppress(Exception):
             await websocket.close()
-        except Exception:
-            pass
 
 
 @app.post("/api/speak")
@@ -610,7 +601,7 @@ def create_voice_app(
     Returns:
         Configured FastAPI application instance.
     """
-    global _state  # noqa: PLW0603
+    global _state
 
     effective_config = config or load_config()
     _state = VoiceAppState(effective_config)

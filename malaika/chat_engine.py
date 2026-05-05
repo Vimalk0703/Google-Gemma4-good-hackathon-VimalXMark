@@ -20,12 +20,14 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import structlog
 
-from malaika.config import MalaikaConfig
-from malaika.skills import BeliefState, SkillRegistry, SkillResult
+from malaika.skills import BeliefState, SkillRegistry
+
+if TYPE_CHECKING:
+    from malaika.config import MalaikaConfig
 
 logger = structlog.get_logger()
 
@@ -272,24 +274,28 @@ class ChatEngine:
         if image_path and self.model_loaded:
             self._image_received_this_step = True
             skill_name = self._get_vision_skill_for_step()
-            events.append({
-                "type": "skill_invoked",
-                "skill": skill_name,
-                "description": f"Analyzing photo with {skill_name.replace('_', ' ')}...",
-                "input_type": "image",
-            })
+            events.append(
+                {
+                    "type": "skill_invoked",
+                    "skill": skill_name,
+                    "description": f"Analyzing photo with {skill_name.replace('_', ' ')}...",
+                    "input_type": "image",
+                }
+            )
 
             image_observation = self._analyze_image(image_path)
             if image_observation:
                 self.observations.append(image_observation)
                 self.belief.mark_skill_invoked(skill_name)
-                events.append({
-                    "type": "skill_result",
-                    "skill": skill_name,
-                    "findings": {},
-                    "confidence": 0.8,
-                    "description": image_observation,
-                })
+                events.append(
+                    {
+                        "type": "skill_result",
+                        "skill": skill_name,
+                        "findings": {},
+                        "confidence": 0.8,
+                        "description": image_observation,
+                    }
+                )
 
         # Step 2: Build user message content
         user_content = ""
@@ -396,12 +402,10 @@ class ChatEngine:
                     ],
                 }
             ]
-            input_text = self.processor.apply_chat_template(
-                messages, add_generation_prompt=True
+            input_text = self.processor.apply_chat_template(messages, add_generation_prompt=True)
+            inputs = self.processor(text=input_text, images=[img], return_tensors="pt").to(
+                self.model.device
             )
-            inputs = self.processor(
-                text=input_text, images=[img], return_tensors="pt"
-            ).to(self.model.device)
 
             with torch.inference_mode():
                 outputs = self.model.generate(
@@ -411,10 +415,8 @@ class ChatEngine:
                     repetition_penalty=1.3,
                 )
 
-            generated = outputs[0][inputs["input_ids"].shape[-1]:]
-            observation = self.processor.decode(
-                generated, skip_special_tokens=True
-            ).strip()
+            generated = outputs[0][inputs["input_ids"].shape[-1] :]
+            observation = self.processor.decode(generated, skip_special_tokens=True).strip()
 
             logger.info("image_analyzed", step=self.step, observation_length=len(observation))
             return observation
@@ -440,12 +442,8 @@ class ChatEngine:
         messages.extend(self.conversation_history)
 
         try:
-            input_text = self.processor.apply_chat_template(
-                messages, add_generation_prompt=True
-            )
-            inputs = self.processor(
-                text=input_text, return_tensors="pt"
-            ).to(self.model.device)
+            input_text = self.processor.apply_chat_template(messages, add_generation_prompt=True)
+            inputs = self.processor(text=input_text, return_tensors="pt").to(self.model.device)
 
             with torch.inference_mode():
                 outputs = self.model.generate(
@@ -456,7 +454,7 @@ class ChatEngine:
                     repetition_penalty=1.3,
                 )
 
-            generated = outputs[0][inputs["input_ids"].shape[-1]:]
+            generated = outputs[0][inputs["input_ids"].shape[-1] :]
             return self.processor.decode(generated, skip_special_tokens=True).strip()
 
         except Exception as e:
@@ -506,14 +504,19 @@ class ChatEngine:
             context += "Already collected:\n" + "\n".join(collected) + "\n"
         if needed:
             context += "Still need to collect:\n" + "\n".join(needed) + "\n"
-            context += "\nIMPORTANT: Ask about the NEXT uncollected item. Ask ONE question at a time.\n"
+            context += (
+                "\nIMPORTANT: Ask about the NEXT uncollected item. Ask ONE question at a time.\n"
+            )
         else:
-            context += "All information collected for this step. Naturally transition to the next topic.\n"
+            context += (
+                "All information collected for this step. Naturally transition to the next topic.\n"
+            )
 
         # Show belief state summary
         if self.belief.confirmed:
             confirmed_str = ", ".join(
-                f"{k}={v}" for k, v in self.belief.confirmed.items()
+                f"{k}={v}"
+                for k, v in self.belief.confirmed.items()
                 if v is not False and v is not None and v != 0
             )
             if confirmed_str:
@@ -607,12 +610,14 @@ class ChatEngine:
                     self.belief.confirm_finding(finding_key, value)
                     for field in satisfies:
                         self._fields_answered.add(field)
-                    events.append({
-                        "type": "finding",
-                        "key": finding_key,
-                        "value": value,
-                        "label": finding_key.replace("_", " ").title(),
-                    })
+                    events.append(
+                        {
+                            "type": "finding",
+                            "key": finding_key,
+                            "value": value,
+                            "label": finding_key.replace("_", " ").title(),
+                        }
+                    )
 
         combined = ""
         if user_text:
@@ -671,9 +676,9 @@ class ChatEngine:
         extraction_prompt += "\n".join(f"- {f}" for f in fields)
 
         try:
-            inputs = self.processor(
-                text=extraction_prompt, return_tensors="pt"
-            ).to(self.model.device)
+            inputs = self.processor(text=extraction_prompt, return_tensors="pt").to(
+                self.model.device
+            )
 
             with torch.inference_mode():
                 outputs = self.model.generate(
@@ -683,7 +688,7 @@ class ChatEngine:
                     repetition_penalty=1.3,
                 )
 
-            generated = outputs[0][inputs["input_ids"].shape[-1]:]
+            generated = outputs[0][inputs["input_ids"].shape[-1] :]
             result = self.processor.decode(generated, skip_special_tokens=True).strip()
 
             # Parse "finding = value" lines and emit events
@@ -700,35 +705,41 @@ class ChatEngine:
                         self.findings[name] = True
                         self._fields_answered.add(name)
                         self.belief.confirm_finding(name, True)
-                        events.append({
-                            "type": "finding",
-                            "key": name,
-                            "value": True,
-                            "label": name.replace("_", " ").title(),
-                        })
+                        events.append(
+                            {
+                                "type": "finding",
+                                "key": name,
+                                "value": True,
+                                "label": name.replace("_", " ").title(),
+                            }
+                        )
                     elif val in ("false", "no", "none"):
                         self.findings[name] = False
                         self._fields_answered.add(name)
                         self.belief.confirm_finding(name, False)
-                        events.append({
-                            "type": "finding",
-                            "key": name,
-                            "value": False,
-                            "label": name.replace("_", " ").title(),
-                        })
+                        events.append(
+                            {
+                                "type": "finding",
+                                "key": name,
+                                "value": False,
+                                "label": name.replace("_", " ").title(),
+                            }
+                        )
                     elif val != "unknown":
-                        num = re.search(r'\d+', val)
+                        num = re.search(r"\d+", val)
                         if num:
                             numeric_val = int(num.group())
                             self.findings[name] = numeric_val
                             self._fields_answered.add(name)
                             self.belief.confirm_finding(name, numeric_val)
-                            events.append({
-                                "type": "finding",
-                                "key": name,
-                                "value": numeric_val,
-                                "label": name.replace("_", " ").title(),
-                            })
+                            events.append(
+                                {
+                                    "type": "finding",
+                                    "key": name,
+                                    "value": numeric_val,
+                                    "label": name.replace("_", " ").title(),
+                                }
+                            )
                     else:
                         self.belief.mark_uncertain(name, "LLM could not determine")
 
@@ -873,13 +884,15 @@ class ChatEngine:
         # Emit step change event
         if new_step in CLINICAL_STEPS:
             step_index = CLINICAL_STEPS.index(new_step)
-            events.append({
-                "type": "step_change",
-                "step": new_step,
-                "index": step_index + 1,
-                "total": len(CLINICAL_STEPS),
-                "label": new_step.replace("_", " ").title(),
-            })
+            events.append(
+                {
+                    "type": "step_change",
+                    "step": new_step,
+                    "index": step_index + 1,
+                    "total": len(CLINICAL_STEPS),
+                    "label": new_step.replace("_", " ").title(),
+                }
+            )
         elif new_step == "classification":
             # Emit assessment complete
             self._emit_assessment_complete(events)
@@ -1031,12 +1044,14 @@ class ChatEngine:
         for step in CLINICAL_STEPS:
             cls_event = self._classify_completed_step(step)
             if cls_event:
-                classifications.append({
-                    "domain": cls_event["step"].replace("_", " ").title(),
-                    "classification": cls_event["label"],
-                    "severity": cls_event["severity"],
-                    "reasoning": cls_event["reasoning"],
-                })
+                classifications.append(
+                    {
+                        "domain": cls_event["step"].replace("_", " ").title(),
+                        "classification": cls_event["label"],
+                        "severity": cls_event["severity"],
+                        "reasoning": cls_event["reasoning"],
+                    }
+                )
 
         severity = self.belief.current_severity
         urgency_map = {
@@ -1045,27 +1060,37 @@ class ChatEngine:
             "green": "Treat at home with follow-up in 5 days",
         }
 
-        events.append({
-            "type": "assessment_complete",
-            "severity": severity,
-            "urgency": urgency_map.get(severity, "Consult a health worker"),
-            "classifications": classifications,
-            "age_months": self.age_months,
-        })
+        events.append(
+            {
+                "type": "assessment_complete",
+                "severity": severity,
+                "urgency": urgency_map.get(severity, "Consult a health worker"),
+                "classifications": classifications,
+                "age_months": self.age_months,
+            }
+        )
 
         # Check for danger alert
         if severity == "red":
             danger_signs = [
-                k for k in ["lethargic", "unconscious", "unable_to_drink",
-                            "vomits_everything", "has_convulsions"]
+                k
+                for k in [
+                    "lethargic",
+                    "unconscious",
+                    "unable_to_drink",
+                    "vomits_everything",
+                    "has_convulsions",
+                ]
                 if self.findings.get(k)
             ]
             if danger_signs:
-                events.append({
-                    "type": "danger_alert",
-                    "message": "URGENT REFERRAL NEEDED. General danger sign detected. This child needs immediate care.",
-                    "signs": danger_signs,
-                })
+                events.append(
+                    {
+                        "type": "danger_alert",
+                        "message": "URGENT REFERRAL NEEDED. General danger sign detected. This child needs immediate care.",
+                        "signs": danger_signs,
+                    }
+                )
 
     # -------------------------------------------------------------------
     # Image Request
@@ -1083,12 +1108,14 @@ class ChatEngine:
             return
 
         req = IMAGE_REQUEST_PROMPTS[self.step]
-        events.append({
-            "type": "image_request",
-            "step": self.step,
-            "skill": req["skill"],
-            "prompt": req["prompt"],
-        })
+        events.append(
+            {
+                "type": "image_request",
+                "step": self.step,
+                "skill": req["skill"],
+                "prompt": req["prompt"],
+            }
+        )
 
     # -------------------------------------------------------------------
     # Classification Context (for final LLM presentation)
@@ -1113,12 +1140,14 @@ class ChatEngine:
             vomits_everything=self.findings["vomits_everything"],
         )
         if ds:
-            results.append({
-                "domain": "Danger Signs",
-                "classification": ds.classification.value,
-                "severity": ds.severity.value,
-                "reasoning": self._danger_sign_reasoning(),
-            })
+            results.append(
+                {
+                    "domain": "Danger Signs",
+                    "classification": ds.classification.value,
+                    "severity": ds.severity.value,
+                    "reasoning": self._danger_sign_reasoning(),
+                }
+            )
 
         age = max(self.age_months, 2)
         br = classify_breathing(
@@ -1129,12 +1158,14 @@ class ChatEngine:
             has_stridor=self.findings["has_stridor"],
             has_wheeze=self.findings["has_wheeze"],
         )
-        results.append({
-            "domain": "Breathing",
-            "classification": br.classification.value,
-            "severity": br.severity.value,
-            "reasoning": self._breathing_reasoning(),
-        })
+        results.append(
+            {
+                "domain": "Breathing",
+                "classification": br.classification.value,
+                "severity": br.severity.value,
+                "reasoning": self._breathing_reasoning(),
+            }
+        )
 
         if self.findings["has_diarrhea"]:
             dd = classify_diarrhea(
@@ -1146,12 +1177,14 @@ class ChatEngine:
                 lethargic=self.findings["lethargic"],
             )
             if dd:
-                results.append({
-                    "domain": "Diarrhea",
-                    "classification": dd.classification.value,
-                    "severity": dd.severity.value,
-                    "reasoning": self._diarrhea_reasoning(),
-                })
+                results.append(
+                    {
+                        "domain": "Diarrhea",
+                        "classification": dd.classification.value,
+                        "severity": dd.severity.value,
+                        "reasoning": self._diarrhea_reasoning(),
+                    }
+                )
 
         if self.findings["has_fever"]:
             fv = classify_fever(
@@ -1161,24 +1194,28 @@ class ChatEngine:
                 malaria_risk=self.findings["malaria_risk"],
             )
             if fv:
-                results.append({
-                    "domain": "Fever",
-                    "classification": fv.classification.value,
-                    "severity": fv.severity.value,
-                    "reasoning": self._fever_reasoning(),
-                })
+                results.append(
+                    {
+                        "domain": "Fever",
+                        "classification": fv.classification.value,
+                        "severity": fv.severity.value,
+                        "reasoning": self._fever_reasoning(),
+                    }
+                )
 
         nt = classify_nutrition(
             visible_wasting=self.findings["visible_wasting"],
             edema=self.findings["edema"],
             muac_mm=self.findings["muac_mm"],
         )
-        results.append({
-            "domain": "Nutrition",
-            "classification": nt.classification.value,
-            "severity": nt.severity.value,
-            "reasoning": self._nutrition_reasoning(),
-        })
+        results.append(
+            {
+                "domain": "Nutrition",
+                "classification": nt.classification.value,
+                "severity": nt.severity.value,
+                "reasoning": self._nutrition_reasoning(),
+            }
+        )
 
         severities = [r["severity"] for r in results]
         if "red" in severities:
@@ -1191,13 +1228,16 @@ class ChatEngine:
             overall = "GREEN"
             urgency = "Treat at home with follow-up in 5 days"
 
-        report_data = json.dumps({
-            "child_age_months": self.age_months,
-            "overall_severity": overall,
-            "urgency": urgency,
-            "findings": results,
-            "observations": self.observations,
-        }, indent=2)
+        report_data = json.dumps(
+            {
+                "child_age_months": self.age_months,
+                "overall_severity": overall,
+                "urgency": urgency,
+                "findings": results,
+                "observations": self.observations,
+            },
+            indent=2,
+        )
 
         return (
             "The assessment is now complete. Present the results to the caregiver.\n\n"
@@ -1273,22 +1313,44 @@ class ChatEngine:
     def _extract_age(text: str) -> int | None:
         """Extract age in months from text, handling both digits and word numbers."""
         _WORD_NUMBERS: dict[str, int] = {
-            "one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
-            "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10,
-            "eleven": 11, "twelve": 12, "thirteen": 13, "fourteen": 14,
-            "fifteen": 15, "sixteen": 16, "seventeen": 17, "eighteen": 18,
-            "nineteen": 19, "twenty": 20, "twenty-one": 21, "twenty-two": 22,
-            "twenty-three": 23, "twenty-four": 24, "thirty": 30, "thirty-six": 36,
-            "forty": 40, "forty-eight": 48, "fifty": 50,
+            "one": 1,
+            "two": 2,
+            "three": 3,
+            "four": 4,
+            "five": 5,
+            "six": 6,
+            "seven": 7,
+            "eight": 8,
+            "nine": 9,
+            "ten": 10,
+            "eleven": 11,
+            "twelve": 12,
+            "thirteen": 13,
+            "fourteen": 14,
+            "fifteen": 15,
+            "sixteen": 16,
+            "seventeen": 17,
+            "eighteen": 18,
+            "nineteen": 19,
+            "twenty": 20,
+            "twenty-one": 21,
+            "twenty-two": 22,
+            "twenty-three": 23,
+            "twenty-four": 24,
+            "thirty": 30,
+            "thirty-six": 36,
+            "forty": 40,
+            "forty-eight": 48,
+            "fifty": 50,
         }
         text_lower = text.lower()
         # Try digit match first
-        match = re.search(r'\b(\d+)\b', text_lower)
+        match = re.search(r"\b(\d+)\b", text_lower)
         if match:
             return int(match.group(1))
         # Try word number match (with word boundaries)
         for word, val in sorted(_WORD_NUMBERS.items(), key=lambda x: -len(x[0])):
-            if re.search(r'\b' + re.escape(word) + r'\b', text_lower):
+            if re.search(r"\b" + re.escape(word) + r"\b", text_lower):
                 return val
         return None
 
@@ -1301,7 +1363,7 @@ class ChatEngine:
     def _count_user_msgs_since_step_start(self) -> int:
         """Count user messages since the current step started."""
         count = 0
-        for msg in self.conversation_history[self._step_start_msg_count:]:
+        for msg in self.conversation_history[self._step_start_msg_count :]:
             if msg.get("role") == "user":
                 content = msg.get("content", "")
                 if content and not content.startswith("["):

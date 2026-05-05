@@ -153,6 +153,7 @@ _STEP_GUIDANCE: dict[IMCIState, str] = {
 # App State Management
 # ---------------------------------------------------------------------------
 
+
 class AppState:
     """Manages the Gradio app state for one assessment session."""
 
@@ -219,7 +220,7 @@ class AppState:
                 f'<div class="{cls}" title="{lbl}">'
                 f'<span class="step-num">{idx}</span>'
                 f'<span class="step-label">{lbl}</span>'
-                f'</div>'
+                f"</div>"
             )
 
         dots_html = "".join(dots)
@@ -229,10 +230,10 @@ class AppState:
             f'<div class="progress-container">'
             f'<div class="progress-bar-track">'
             f'<div class="progress-bar-fill" style="width:{pct}%"></div>'
-            f'</div>'
+            f"</div>"
             f'<div class="step-dots">{dots_html}</div>'
             f'<div class="progress-label">Step {current} of {total}: {label}</div>'
-            f'</div>'
+            f"</div>"
         )
 
     def load_model(self) -> str:
@@ -244,10 +245,7 @@ class AppState:
             self.inference.load_model()
             self.model_loaded = True
             self.model_error = None
-            return (
-                f"Model loaded successfully on {self.inference.device}. "
-                f"Ready for assessment."
-            )
+            return f"Model loaded successfully on {self.inference.device}. Ready for assessment."
         except Exception as exc:
             self.model_error = str(exc)
             self.model_loaded = False
@@ -270,8 +268,10 @@ class AppState:
             from malaika.imci_engine import IMCIEngine
 
             self.engine = IMCIEngine(
-                self.inference, self.config,
-                age_months=age_months, language=language,
+                self.inference,
+                self.config,
+                age_months=age_months,
+                language=language,
             )
             self._step_index = 0
             return f"Assessment started for {age_months}-month-old child (language: {language})."
@@ -298,6 +298,7 @@ class AppState:
 # UI Builder Functions
 # ---------------------------------------------------------------------------
 
+
 def _severity_badge(severity: Severity) -> str:
     """Create an HTML badge for severity level."""
     color = _SEVERITY_COLORS[severity]
@@ -314,11 +315,11 @@ def _severity_badge(severity: Severity) -> str:
     }
     return (
         f'<div style="display:inline-block;background:{bg_light[severity]};'
-        f'border:2px solid {color};border-radius:8px;padding:10px 24px;'
+        f"border:2px solid {color};border-radius:8px;padding:10px 24px;"
         f'text-align:center;margin:8px 0;">'
         f'<span style="color:{text_color[severity]};font-weight:bold;'
         f'font-size:1.3em;letter-spacing:1px;">{label}</span>'
-        f'</div>'
+        f"</div>"
     )
 
 
@@ -326,15 +327,13 @@ def _finding_to_markdown(finding: ClinicalFinding) -> str:
     """Convert a ClinicalFinding to a styled card-like markdown block."""
     state_label = _STATE_LABELS.get(finding.imci_state, finding.imci_state.name)
     status = finding.finding_status.value.replace("_", " ").title()
-    classifications = ", ".join(
-        c.value.replace("_", " ").title() for c in finding.classifications
-    )
+    classifications = ", ".join(c.value.replace("_", " ").title() for c in finding.classifications)
 
     lines: list[str] = []
     lines.append(f"### {state_label}")
     lines.append("")
-    lines.append(f"| Field | Value |")
-    lines.append(f"|-------|-------|")
+    lines.append("| Field | Value |")
+    lines.append("|-------|-------|")
     lines.append(f"| **Status** | {status} |")
     if classifications:
         lines.append(f"| **Classifications** | {classifications} |")
@@ -353,7 +352,9 @@ def _finding_to_markdown(finding: ClinicalFinding) -> str:
 def _build_results_markdown(app_state: AppState) -> str:
     """Build full results markdown from the completed assessment."""
     if app_state.engine is None:
-        return "*No assessment has been run yet. Complete an assessment on the Assessment tab first.*"
+        return (
+            "*No assessment has been run yet. Complete an assessment on the Assessment tab first.*"
+        )
 
     result = app_state.engine.get_result()
 
@@ -380,7 +381,7 @@ def _build_results_markdown(app_state: AppState) -> str:
     lines.append(
         f'<div style="padding:8px 16px;border-left:4px solid {r_color};'
         f'background:#f8f9fa;margin:8px 0;font-weight:600;color:{r_color};">'
-        f'{r_text}</div>\n'
+        f"{r_text}</div>\n"
     )
 
     # Classifications
@@ -415,15 +416,16 @@ def _build_results_markdown(app_state: AppState) -> str:
     # Export note
     lines.append("---")
     lines.append(
-        "*To save this report, use your browser Print function (Ctrl+P / Cmd+P) "
-        "to export as PDF.*"
+        "*To save this report, use your browser Print function (Ctrl+P / Cmd+P) to export as PDF.*"
     )
     lines.append("")
 
     # Metadata
     lines.append("---")
-    lines.append(f"*Age: {result.age_months} months | Language: {result.language} | "
-                 f"Model: {result.model_used}*")
+    lines.append(
+        f"*Age: {result.age_months} months | Language: {result.language} | "
+        f"Model: {result.model_used}*"
+    )
 
     return "\n".join(lines)
 
@@ -431,6 +433,7 @@ def _build_results_markdown(app_state: AppState) -> str:
 # ---------------------------------------------------------------------------
 # Gradio App Factory
 # ---------------------------------------------------------------------------
+
 
 def create_app(config: MalaikaConfig | None = None) -> Any:
     """Create and return the Gradio Blocks app.
@@ -463,7 +466,8 @@ def create_app(config: MalaikaConfig | None = None) -> Any:
         return status, app_state.progress_html()
 
     def on_start_assessment(
-        age_months: int, language: str,
+        age_months: int,
+        language: str,
     ) -> tuple[str, str, str, str]:
         """Start a new assessment."""
         age = max(2, min(59, int(age_months)))
@@ -878,25 +882,22 @@ def create_app(config: MalaikaConfig | None = None) -> Any:
         ),
         css=_custom_css,
     ) as app:
-
         # Header branding
         gr.HTML(
             '<div class="malaika-header">'
-            '<h1>Malaika</h1>'
+            "<h1>Malaika</h1>"
             '<p class="tagline">Angel in Swahili -- '
-            'WHO IMCI Child Survival AI powered by Gemma 4</p>'
+            "WHO IMCI Child Survival AI powered by Gemma 4</p>"
             '<p class="disclaimer">Hackathon demo -- not for clinical use</p>'
-            '</div>'
+            "</div>"
         )
 
         with gr.Tabs():
-
             # ============================================================
             # TAB 1: Assessment
             # ============================================================
 
             with gr.Tab("Assessment"):
-
                 # Model status bar
                 model_status = gr.Textbox(
                     label="Model Status",
@@ -911,7 +912,10 @@ def create_app(config: MalaikaConfig | None = None) -> Any:
                 with gr.Row():
                     with gr.Column(scale=2):
                         age_input = gr.Slider(
-                            minimum=2, maximum=59, value=12, step=1,
+                            minimum=2,
+                            maximum=59,
+                            value=12,
+                            step=1,
                             label="Child's Age (months)",
                             info="WHO IMCI covers ages 2 to 59 months",
                         )
@@ -939,13 +943,14 @@ def create_app(config: MalaikaConfig | None = None) -> Any:
                     value=(
                         '<div class="step-guidance">'
                         + _STEP_GUIDANCE[IMCIState.DANGER_SIGNS]
-                        + '</div>'
+                        + "</div>"
                     ),
                 )
 
                 # Active input group indicator (hidden, used for logic)
                 active_group = gr.Textbox(
-                    value="danger_signs", visible=False,
+                    value="danger_signs",
+                    visible=False,
                 )
 
                 # Status/feedback display
@@ -957,7 +962,8 @@ def create_app(config: MalaikaConfig | None = None) -> Any:
 
                 # DANGER SIGNS inputs
                 with gr.Group(
-                    visible=True, elem_classes=["assess-group"],
+                    visible=True,
+                    elem_classes=["assess-group"],
                 ) as danger_group:
                     gr.Markdown("### Danger Signs Assessment")
                     with gr.Row():
@@ -980,7 +986,8 @@ def create_app(config: MalaikaConfig | None = None) -> Any:
 
                 # BREATHING inputs
                 with gr.Group(
-                    visible=False, elem_classes=["assess-group"],
+                    visible=False,
+                    elem_classes=["assess-group"],
                 ) as breathing_group:
                     gr.Markdown("### Breathing Assessment")
                     with gr.Row():
@@ -999,7 +1006,9 @@ def create_app(config: MalaikaConfig | None = None) -> Any:
                             label="Breath sound spectrogram",
                             type="filepath",
                             sources=["upload"],
-                            value=_SAMPLE_SPECTROGRAM if Path(_SAMPLE_SPECTROGRAM).exists() else None,
+                            value=_SAMPLE_SPECTROGRAM
+                            if Path(_SAMPLE_SPECTROGRAM).exists()
+                            else None,
                         )
                     breathing_audio = gr.Audio(
                         label="Breath sounds recording",
@@ -1018,7 +1027,8 @@ def create_app(config: MalaikaConfig | None = None) -> Any:
 
                 # DIARRHEA inputs
                 with gr.Group(
-                    visible=False, elem_classes=["assess-group"],
+                    visible=False,
+                    elem_classes=["assess-group"],
                 ) as diarrhea_group:
                     gr.Markdown("### Diarrhea / Dehydration Assessment")
                     with gr.Row():
@@ -1030,14 +1040,18 @@ def create_app(config: MalaikaConfig | None = None) -> Any:
                         )
                     with gr.Row():
                         diarrhea_check = gr.Checkbox(
-                            label="Child has diarrhea", value=True,
+                            label="Child has diarrhea",
+                            value=True,
                         )
                         diarrhea_days = gr.Number(
                             label="Duration (days)",
-                            value=3, minimum=0, maximum=60,
+                            value=3,
+                            minimum=0,
+                            maximum=60,
                         )
                         diarrhea_blood = gr.Checkbox(
-                            label="Blood in stool", value=False,
+                            label="Blood in stool",
+                            value=False,
                         )
                     diarrhea_text = gr.Textbox(
                         label="Caregiver response",
@@ -1052,30 +1066,38 @@ def create_app(config: MalaikaConfig | None = None) -> Any:
 
                 # FEVER inputs
                 with gr.Group(
-                    visible=False, elem_classes=["assess-group"],
+                    visible=False,
+                    elem_classes=["assess-group"],
                 ) as fever_group:
                     gr.Markdown("### Fever Assessment")
                     with gr.Row():
                         fever_check = gr.Checkbox(
-                            label="Child has fever", value=True,
+                            label="Child has fever",
+                            value=True,
                         )
                         fever_days = gr.Number(
                             label="Duration (days)",
-                            value=2, minimum=0, maximum=30,
+                            value=2,
+                            minimum=0,
+                            maximum=30,
                         )
                     with gr.Row():
                         fever_stiff_neck = gr.Checkbox(
-                            label="Stiff neck", value=False,
+                            label="Stiff neck",
+                            value=False,
                         )
                         fever_malaria = gr.Checkbox(
-                            label="In malaria risk area", value=True,
+                            label="In malaria risk area",
+                            value=True,
                         )
                     with gr.Row():
                         fever_measles = gr.Checkbox(
-                            label="Recent measles", value=False,
+                            label="Recent measles",
+                            value=False,
                         )
                         fever_measles_comp = gr.Checkbox(
-                            label="Measles complications", value=False,
+                            label="Measles complications",
+                            value=False,
                         )
                     fever_btn = gr.Button(
                         "Assess Fever",
@@ -1085,7 +1107,8 @@ def create_app(config: MalaikaConfig | None = None) -> Any:
 
                 # NUTRITION inputs
                 with gr.Group(
-                    visible=False, elem_classes=["assess-group"],
+                    visible=False,
+                    elem_classes=["assess-group"],
                 ) as nutrition_group:
                     gr.Markdown("### Nutrition Assessment")
                     with gr.Row():
@@ -1097,7 +1120,9 @@ def create_app(config: MalaikaConfig | None = None) -> Any:
                         )
                     nutrition_muac = gr.Number(
                         label="MUAC measurement (mm, 0 = not measured)",
-                        value=125, minimum=0, maximum=250,
+                        value=125,
+                        minimum=0,
+                        maximum=250,
                     )
                     nutrition_btn = gr.Button(
                         "Assess Nutrition",
@@ -1107,7 +1132,8 @@ def create_app(config: MalaikaConfig | None = None) -> Any:
 
                 # HEART inputs
                 with gr.Group(
-                    visible=False, elem_classes=["assess-group"],
+                    visible=False,
+                    elem_classes=["assess-group"],
                 ) as heart_group:
                     gr.Markdown("### Heart Assessment (Optional)")
                     heart_audio = gr.Audio(
@@ -1121,16 +1147,11 @@ def create_app(config: MalaikaConfig | None = None) -> Any:
                         elem_classes=["assess-btn"],
                     )
 
-                gr.HTML(
-                    '<hr style="border:none;border-top:2px solid #e8f4fd;'
-                    'margin:16px 0;">'
-                )
+                gr.HTML('<hr style="border:none;border-top:2px solid #e8f4fd;margin:16px 0;">')
 
                 # Finding display (card-like)
                 finding_display = gr.Markdown(
-                    value=(
-                        "*Assessment results will appear here after each step.*"
-                    ),
+                    value=("*Assessment results will appear here after each step.*"),
                     label="Step Result",
                     elem_classes=["finding-card"],
                 )
@@ -1146,7 +1167,7 @@ def create_app(config: MalaikaConfig | None = None) -> Any:
 
                 # TTS playback
                 with gr.Row():
-                    tts_audio = gr.Audio(
+                    gr.Audio(
                         label="Treatment audio (TTS)",
                         type="filepath",
                         visible=True,
@@ -1161,9 +1182,9 @@ def create_app(config: MalaikaConfig | None = None) -> Any:
                 gr.HTML(
                     '<div style="text-align:center;margin:12px 0 8px;">'
                     '<p style="color:#2c3e50;font-size:1.05em;">'
-                    'Complete an assessment to see the full clinical summary '
-                    'and treatment plan below.</p>'
-                    '</div>'
+                    "Complete an assessment to see the full clinical summary "
+                    "and treatment plan below.</p>"
+                    "</div>"
                 )
                 refresh_results_btn = gr.Button(
                     "Refresh Results",
@@ -1171,21 +1192,19 @@ def create_app(config: MalaikaConfig | None = None) -> Any:
                     size="lg",
                 )
                 results_display = gr.Markdown(
-                    value=(
-                        "*Run an assessment first, then view results here.*"
-                    ),
+                    value=("*Run an assessment first, then view results here.*"),
                     elem_classes=["results-area"],
                 )
 
         # Footer
         gr.HTML(
             '<div class="malaika-footer">'
-            'Malaika -- WHO IMCI Child Survival AI | '
-            'Google Gemma 4 Good Hackathon 2026 | '
-            'Powered by '
+            "Malaika -- WHO IMCI Child Survival AI | "
+            "Google Gemma 4 Good Hackathon 2026 | "
+            "Powered by "
             '<a href="https://ai.google.dev/gemma" target="_blank">Gemma 4</a>'
-            ' | Not for clinical use'
-            '</div>'
+            " | Not for clinical use"
+            "</div>"
         )
 
         # ------------------------------------------------------------------
@@ -1215,15 +1234,24 @@ def create_app(config: MalaikaConfig | None = None) -> Any:
 
         breathing_btn.click(
             fn=on_assess_breathing,
-            inputs=[breathing_video, breathing_image, breathing_spectrogram, breathing_audio, breathing_cough],
+            inputs=[
+                breathing_video,
+                breathing_image,
+                breathing_spectrogram,
+                breathing_audio,
+                breathing_cough,
+            ],
             outputs=[finding_display, status_display],
         )
 
         diarrhea_btn.click(
             fn=on_assess_diarrhea,
             inputs=[
-                diarrhea_image, diarrhea_check, diarrhea_days,
-                diarrhea_blood, diarrhea_text,
+                diarrhea_image,
+                diarrhea_check,
+                diarrhea_days,
+                diarrhea_blood,
+                diarrhea_text,
             ],
             outputs=[finding_display, status_display],
         )
@@ -1231,8 +1259,12 @@ def create_app(config: MalaikaConfig | None = None) -> Any:
         fever_btn.click(
             fn=on_assess_fever,
             inputs=[
-                fever_check, fever_days, fever_stiff_neck,
-                fever_malaria, fever_measles, fever_measles_comp,
+                fever_check,
+                fever_days,
+                fever_stiff_neck,
+                fever_malaria,
+                fever_measles,
+                fever_measles_comp,
             ],
             outputs=[finding_display, status_display],
         )
@@ -1251,8 +1283,16 @@ def create_app(config: MalaikaConfig | None = None) -> Any:
 
         # Next step — advance and toggle input group visibility
         def _advance_and_update() -> tuple[
-            str, str, str, str,
-            Any, Any, Any, Any, Any, Any,
+            str,
+            str,
+            str,
+            str,
+            Any,
+            Any,
+            Any,
+            Any,
+            Any,
+            Any,
             str,
         ]:
             msg, guidance, progress, visibility = on_next_step()
@@ -1266,26 +1306,33 @@ def create_app(config: MalaikaConfig | None = None) -> Any:
             )
 
             return (
-                msg,                                                     # status_display
-                guidance_html,                                           # step_description
-                progress,                                                # progress_display
-                visibility,                                              # active_group
-                gr.Group(visible=(visibility == "danger_signs")),         # danger_group
-                gr.Group(visible=(visibility == "breathing")),            # breathing_group
-                gr.Group(visible=(visibility == "diarrhea")),             # diarrhea_group
-                gr.Group(visible=(visibility == "fever")),                # fever_group
-                gr.Group(visible=(visibility == "nutrition")),            # nutrition_group
-                gr.Group(visible=(visibility == "heart")),                # heart_group
-                finding_text,                                            # finding_display
+                msg,  # status_display
+                guidance_html,  # step_description
+                progress,  # progress_display
+                visibility,  # active_group
+                gr.Group(visible=(visibility == "danger_signs")),  # danger_group
+                gr.Group(visible=(visibility == "breathing")),  # breathing_group
+                gr.Group(visible=(visibility == "diarrhea")),  # diarrhea_group
+                gr.Group(visible=(visibility == "fever")),  # fever_group
+                gr.Group(visible=(visibility == "nutrition")),  # nutrition_group
+                gr.Group(visible=(visibility == "heart")),  # heart_group
+                finding_text,  # finding_display
             )
 
         next_btn.click(
             fn=_advance_and_update,
             inputs=[],
             outputs=[
-                status_display, step_description, progress_display, active_group,
-                danger_group, breathing_group, diarrhea_group,
-                fever_group, nutrition_group, heart_group,
+                status_display,
+                step_description,
+                progress_display,
+                active_group,
+                danger_group,
+                breathing_group,
+                diarrhea_group,
+                fever_group,
+                nutrition_group,
+                heart_group,
                 finding_display,
             ],
         )
@@ -1303,6 +1350,7 @@ def create_app(config: MalaikaConfig | None = None) -> Any:
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
+
 
 def main() -> None:
     """Launch the Malaika Gradio app."""

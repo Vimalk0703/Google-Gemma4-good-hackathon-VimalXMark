@@ -35,7 +35,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
-import io
+import contextlib
 import json
 import struct
 import tempfile
@@ -75,6 +75,7 @@ class EdgeVoiceSessionHandler:
         """Lazy-load Whisper transcriber."""
         if self._whisper is None:
             from malaika.audio import WhisperTranscriber
+
             self._whisper = WhisperTranscriber()
             logger.info("edge_whisper_loaded")
         return self._whisper
@@ -119,10 +120,8 @@ class EdgeVoiceSessionHandler:
             logger.info("edge_voice_session_ended")
         except Exception as e:
             logger.error("edge_voice_session_error", error=str(e))
-            try:
+            with contextlib.suppress(Exception):
                 await self.ws.send_json({"type": "error", "message": str(e)})
-            except Exception:
-                pass
 
     async def _send_state(self, state: str) -> None:
         """Send state change to browser."""
@@ -165,7 +164,9 @@ class EdgeVoiceSessionHandler:
         loop = asyncio.get_event_loop()
         try:
             transcript = await loop.run_in_executor(
-                None, self.whisper.transcribe, wav_path,
+                None,
+                self.whisper.transcribe,
+                wav_path,
             )
         except Exception as e:
             logger.error("edge_whisper_failed", error=str(e))
@@ -182,7 +183,8 @@ class EdgeVoiceSessionHandler:
     @staticmethod
     def _pcm_to_wav_file(pcm_data: bytes, sample_rate: int = 16000) -> Path:
         """Convert raw PCM16 bytes to a WAV file for Whisper."""
-        tmp = Path(tempfile.mktemp(suffix=".wav", prefix="malaika_edge_"))
+        with tempfile.NamedTemporaryFile(suffix=".wav", prefix="malaika_edge_", delete=False) as _f:
+            tmp = Path(_f.name)
         num_channels = 1
         bits_per_sample = 16
         byte_rate = sample_rate * num_channels * bits_per_sample // 8
@@ -197,7 +199,7 @@ class EdgeVoiceSessionHandler:
             # fmt chunk
             f.write(b"fmt ")
             f.write(struct.pack("<I", 16))  # chunk size
-            f.write(struct.pack("<H", 1))   # PCM format
+            f.write(struct.pack("<H", 1))  # PCM format
             f.write(struct.pack("<H", num_channels))
             f.write(struct.pack("<I", sample_rate))
             f.write(struct.pack("<I", byte_rate))
@@ -223,7 +225,10 @@ class EdgeVoiceSessionHandler:
         # Run Gemma 4 inference (blocking)
         loop = asyncio.get_event_loop()
         result = await loop.run_in_executor(
-            None, self.engine.process, text, None,
+            None,
+            self.engine.process,
+            text,
+            None,
         )
 
         response_text = result["text"]
@@ -243,14 +248,18 @@ class EdgeVoiceSessionHandler:
     async def _process_image(self, base64_data: str) -> None:
         """Process uploaded image through ChatEngine."""
         image_bytes = base64.b64decode(base64_data)
-        tmp = Path(tempfile.mktemp(suffix=".jpg", prefix="malaika_edge_"))
+        with tempfile.NamedTemporaryFile(suffix=".jpg", prefix="malaika_edge_", delete=False) as _f:
+            tmp = Path(_f.name)
         tmp.write_bytes(image_bytes)
 
         await self._send_state("thinking")
 
         loop = asyncio.get_event_loop()
         result = await loop.run_in_executor(
-            None, self.engine.process, "", str(tmp),
+            None,
+            self.engine.process,
+            "",
+            str(tmp),
         )
 
         response_text = result["text"]
@@ -290,7 +299,10 @@ class EdgeVoiceSessionHandler:
         # Generate WAV with Piper (blocking)
         loop = asyncio.get_event_loop()
         wav_path = await loop.run_in_executor(
-            None, self.tts.speak, clean, "en",
+            None,
+            self.tts.speak,
+            clean,
+            "en",
         )
 
         if wav_path and wav_path.exists():

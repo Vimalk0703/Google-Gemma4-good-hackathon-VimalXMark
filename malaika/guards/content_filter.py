@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import re
 
-
 # Maximum text input length (characters)
 MAX_TEXT_INPUT_LENGTH: int = 2000
 

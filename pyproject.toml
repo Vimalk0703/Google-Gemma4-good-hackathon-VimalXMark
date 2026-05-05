@@ -29,7 +29,22 @@ select = [
     "PTH",  # pathlib
 ]
 ignore = [
-    "S101",  # assert used in tests is fine
+    "S101",    # assert used in tests is fine
+    "E501",    # line-too-long: enforced by `ruff format`, not lint
+    "B008",    # function-call-as-default-arg: legitimate for dataclass `field()`
+    "S104",    # bind-to-0.0.0.0: legitimate for the Colab/clinic FastAPI server
+    "S110",    # try-except-pass: legitimate for cleanup paths (atexit, finalizers)
+    "S311",    # non-crypto random: legitimate for filler-audio paths and session IDs
+    "N806",    # uppercase var in function: legitimate for in-function lookup tables
+    # The rules below are stylistic preferences; we accept them for now and
+    # plan to migrate the codebase in a focused follow-up. Tracked: TODO.
+    "RUF012",  # mutable-class-default: would require dataclass field() refactor
+    "RUF006",  # asyncio-dangling-task: needs explicit task tracking refactor
+    "RUF059",  # unused-unpacked-var: rename to `_` in a follow-up
+    "SIM102",  # nested-if: collapse on follow-up
+    "SIM105",  # use-contextlib-suppress: stylistic, follow-up
+    "SIM115",  # use-context-manager: needs case-by-case audit
+    "PTH123",  # builtin-open vs Path.open: cosmetic
 ]
 
 [tool.ruff.lint.isort]

@@ -9,11 +9,13 @@ from __future__ import annotations
 import hashlib
 import json
 import uuid
-from datetime import datetime, timezone
-from pathlib import Path
-from typing import Any
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING, Any
 
 from malaika.types import AssessmentTrace, IMCIState, StepTrace
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 class Tracer:
@@ -130,7 +132,7 @@ class Tracer:
         if self._current_trace is None:
             raise RuntimeError("No tracing session active.")
 
-        self._current_trace.completed_at = datetime.now(tz=timezone.utc)
+        self._current_trace.completed_at = datetime.now(tz=UTC)
         trace = self._current_trace
         self._current_trace = None
         return trace

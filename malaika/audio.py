@@ -18,13 +18,11 @@ This module MUST NOT contain clinical logic or thresholds.
 from __future__ import annotations
 
 import hashlib
-from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import structlog
 
 from malaika.config import load_config
-from malaika.inference import MalaikaInference
 from malaika.prompts import PromptRegistry
 from malaika.spectrogram import audio_to_spectrogram
 from malaika.types import (
@@ -35,12 +33,18 @@ from malaika.types import (
     ValidatedOutput,
 )
 
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from malaika.inference import MalaikaInference
+
 logger = structlog.get_logger()
 
 
 # ---------------------------------------------------------------------------
 # Whisper Transcriber
 # ---------------------------------------------------------------------------
+
 
 class WhisperTranscriber:
     """Lazy-loaded Whisper model for audio-to-text transcription.
@@ -84,9 +88,7 @@ class WhisperTranscriber:
             logger.info("whisper_loaded", model_name=self._model_name)
         except Exception as e:
             logger.error("whisper_load_failed", error=str(e))
-            raise RuntimeError(
-                f"Failed to load Whisper model '{self._model_name}': {e}"
-            ) from e
+            raise RuntimeError(f"Failed to load Whisper model '{self._model_name}': {e}") from e
 
     def transcribe(self, audio_path: Path) -> str:
         """Transcribe an audio file to text using Whisper.
@@ -134,6 +136,7 @@ class WhisperTranscriber:
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _file_hash(path: Path) -> str:
     """Compute a short SHA-256 hash of a file for cache keying."""
     h = hashlib.sha256()
@@ -167,6 +170,7 @@ def _description_from_parsed(parsed: dict) -> str:
 # ---------------------------------------------------------------------------
 # Audio Functions — Whisper transcription → Gemma 4 text reasoning
 # ---------------------------------------------------------------------------
+
 
 def classify_breath_sounds_from_spectrogram(
     audio_path: Path,
@@ -204,8 +208,10 @@ def classify_breath_sounds_from_spectrogram(
         else:
             prompt = PromptRegistry.get("breathing.classify_breath_sounds_from_spectrogram")
 
-        raw_output, validated, retries = inference.analyze_image(
-            spec_path, prompt, input_hash=input_hash,
+        raw_output, validated, _retries = inference.analyze_image(
+            spec_path,
+            prompt,
+            input_hash=input_hash,
         )
     except RuntimeError:
         # librosa not installed — fall through to caller
@@ -255,8 +261,10 @@ def classify_breath_sounds_from_spectrogram_image(
         else:
             prompt = PromptRegistry.get("breathing.classify_breath_sounds_from_spectrogram")
 
-        raw_output, validated, retries = inference.analyze_image(
-            spectrogram_path, prompt, input_hash=input_hash,
+        raw_output, validated, _retries = inference.analyze_image(
+            spectrogram_path,
+            prompt,
+            input_hash=input_hash,
         )
     except Exception as e:
         logger.error("spectrogram_image_analysis_failed", error=str(e))
@@ -312,8 +320,9 @@ def classify_breath_sounds(
             transcription = "(no speech or sounds detected in audio)"
 
         prompt = PromptRegistry.get("breathing.classify_breath_sounds_from_text")
-        raw_output, validated, retries = inference.reason(
-            prompt, input_hash=input_hash,
+        raw_output, validated, _retries = inference.reason(
+            prompt,
+            input_hash=input_hash,
             transcription=transcription,
         )
     except Exception as e:
@@ -421,8 +430,9 @@ def understand_speech(
 
         # Step 2: Use Gemma 4 text reasoning on the transcription
         prompt = PromptRegistry.get("speech.understand_response_from_text")
-        raw_output, validated, retries = inference.reason(
-            prompt, input_hash=input_hash,
+        raw_output, validated, _retries = inference.reason(
+            prompt,
+            input_hash=input_hash,
             question_asked=clinical_question,
             transcription=transcription,
         )
@@ -486,8 +496,9 @@ def analyze_heart_sounds(
 
         # Step 2: Use Gemma 4 text reasoning on the transcription
         prompt = PromptRegistry.get("heart.analyze_sounds_from_text")
-        raw_output, validated, retries = inference.reason(
-            prompt, input_hash=input_hash,
+        raw_output, validated, _retries = inference.reason(
+            prompt,
+            input_hash=input_hash,
             duration_seconds=duration_seconds,
             transcription=transcription,
         )
@@ -505,10 +516,7 @@ def analyze_heart_sounds(
     confidence = _confidence_from_parsed(parsed)
 
     estimated_bpm = parsed.get("estimated_bpm")
-    if isinstance(estimated_bpm, (int, float)):
-        estimated_bpm = int(estimated_bpm)
-    else:
-        estimated_bpm = None
+    estimated_bpm = int(estimated_bpm) if isinstance(estimated_bpm, (int, float)) else None
 
     murmur = bool(parsed.get("murmur_detected", False))
     gallop = bool(parsed.get("gallop_detected", False))

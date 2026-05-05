@@ -32,8 +32,7 @@ class PromptRegistry:
         """
         if prompt.name in cls._prompts:
             raise ValueError(
-                f"Duplicate prompt name: '{prompt.name}'. "
-                f"Each prompt must have a unique name."
+                f"Duplicate prompt name: '{prompt.name}'. Each prompt must have a unique name."
             )
         cls._prompts[prompt.name] = prompt
         return prompt
@@ -53,10 +52,7 @@ class PromptRegistry:
         """
         if name not in cls._prompts:
             available = sorted(cls._prompts.keys())
-            raise KeyError(
-                f"Prompt not found: '{name}'. "
-                f"Available prompts: {available}"
-            )
+            raise KeyError(f"Prompt not found: '{name}'. Available prompts: {available}")
         return cls._prompts[name]
 
     @classmethod
@@ -71,7 +67,8 @@ class PromptRegistry:
 
 
 # Import all prompt modules so they register on startup
-from malaika.prompts import (  # noqa: F401
+# (intentionally below the registry definition above to avoid circular imports)
+from malaika.prompts import (  # noqa: F401, E402
     breathing,
     danger_signs,
     diarrhea,

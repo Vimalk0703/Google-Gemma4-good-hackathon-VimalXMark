@@ -13,4 +13,4 @@ from malaika.observability.cost_tracker import CostTracker
 from malaika.observability.feedback import FeedbackCollector
 from malaika.observability.tracer import Tracer
 
-__all__ = ["Tracer", "CostTracker", "FeedbackCollector"]
+__all__ = ["CostTracker", "FeedbackCollector", "Tracer"]

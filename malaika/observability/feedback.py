@@ -11,9 +11,11 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from pathlib import Path
-from typing import Any
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 @dataclass(frozen=True)
@@ -21,17 +23,17 @@ class Correction:
     """A correction linking a wrong result to what was actually correct."""
 
     session_id: str
-    step_index: int               # Index into AssessmentTrace.steps
-    prompt_name: str              # Which prompt produced the wrong result
+    step_index: int  # Index into AssessmentTrace.steps
+    prompt_name: str  # Which prompt produced the wrong result
     prompt_version: str
 
-    original_output: str          # What the model said (truncated)
-    original_parsed: str          # How it was parsed
+    original_output: str  # What the model said (truncated)
+    original_parsed: str  # How it was parsed
 
-    corrected_value: str          # What it should have been
-    correction_reason: str        # Why it was wrong
+    corrected_value: str  # What it should have been
+    correction_reason: str  # Why it was wrong
 
-    timestamp: datetime = field(default_factory=lambda: datetime.now(tz=timezone.utc))
+    timestamp: datetime = field(default_factory=lambda: datetime.now(tz=UTC))
 
 
 class FeedbackCollector:

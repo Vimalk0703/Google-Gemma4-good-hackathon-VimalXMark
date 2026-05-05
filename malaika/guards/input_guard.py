@@ -6,11 +6,14 @@ within size limits, no path traversal.
 
 from __future__ import annotations
 
-import struct
-from pathlib import Path
+from typing import TYPE_CHECKING
 
-from malaika.config import GuardConfig
 from malaika.types import ValidatedInput
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from malaika.config import GuardConfig
 
 
 class InputValidationError(Exception):
@@ -29,7 +32,7 @@ _MAGIC_SIGNATURES: dict[str, list[tuple[bytes, int]]] = {
     # Audio
     "WAV": [(b"RIFF", 0), (b"WAVE", 8)],
     "MP3": [(b"\xff\xfb", 0)],  # MPEG frame sync
-    "MP3_ID3": [(b"ID3", 0)],    # ID3 tagged MP3
+    "MP3_ID3": [(b"ID3", 0)],  # ID3 tagged MP3
     "OGG": [(b"OggS", 0)],
     "FLAC": [(b"fLaC", 0)],
     # Video
@@ -158,8 +161,7 @@ def validate_file(
     allowed = _ALLOWED_FORMATS[media_type]
     if detected_format not in allowed:
         raise InputValidationError(
-            f"Format '{detected_format}' is not allowed for {media_type}. "
-            f"Allowed: {allowed}"
+            f"Format '{detected_format}' is not allowed for {media_type}. Allowed: {allowed}"
         )
 
     return ValidatedInput(

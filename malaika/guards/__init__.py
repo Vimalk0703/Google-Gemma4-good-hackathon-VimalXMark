@@ -10,14 +10,18 @@ Usage:
 
 from __future__ import annotations
 
-from pathlib import Path
+from typing import TYPE_CHECKING
 
-from malaika.config import GuardConfig
 from malaika.guards.content_filter import sanitize_text, wrap_safe_prompt
 from malaika.guards.input_guard import validate_file
 from malaika.guards.output_validator import validate_output
-from malaika.prompts.base import PromptTemplate
-from malaika.types import ValidatedInput, ValidatedOutput
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from malaika.config import GuardConfig
+    from malaika.prompts.base import PromptTemplate
+    from malaika.types import ValidatedInput, ValidatedOutput
 
 
 def run_input_pipeline(
@@ -63,7 +67,7 @@ __all__ = [
     "run_input_pipeline",
     "run_output_pipeline",
     "sanitize_text",
-    "wrap_safe_prompt",
     "validate_file",
     "validate_output",
+    "wrap_safe_prompt",
 ]

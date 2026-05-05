@@ -23,7 +23,7 @@ dependencies:
   flutter_tts: ^4.2.0
 
   # Camera and image handling
-  image_picker: ^1.1.2
+  image_picker: ^1.2.2
   camera: ^0.11.0+2
 
   # Pure-Dart image resize/re-encode (Flutter's built-in only outputs PNG;

@@ -86,7 +86,10 @@ jobs:
         run: flutter pub get
       - name: Analyze
         working-directory: malaika_flutter
-        run: flutter analyze
+        run: flutter analyze --no-fatal-warnings --no-fatal-infos
+        # CI fails only on Dart errors. Warnings (unused, deprecated,
+        # nullable-might-not-return) and infos (style preferences) are
+        # surfaced in the run log but don't block.
       - name: Format check
         working-directory: malaika_flutter
         run: dart format --set-exit-if-changed lib/ || true

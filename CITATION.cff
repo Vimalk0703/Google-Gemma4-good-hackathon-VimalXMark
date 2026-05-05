@@ -1,0 +1,52 @@
+# YAML 1.2 — Citation File Format 1.2.0
+# https://citation-file-format.github.io/
+cff-version: 1.2.0
+title: "Malaika — WHO IMCI Child Survival AI on Gemma 4"
+message: "If you use Malaika in research, clinical evaluation, or derivative work, please cite it as below."
+type: software
+abstract: >
+  Malaika is an offline-first, on-device implementation of the World Health Organization's
+  Integrated Management of Childhood Illness (IMCI) protocol, powered by Google's Gemma 4
+  open-weights model. Tier 0 runs entirely on a $60 Android phone (Gemma 4 E2B, ~2.6 GB,
+  no internet). Tier 1 runs in a village clinic on a single GPU (Gemma 4 E4B with fine-tuned
+  LoRA adapters and a breath-sound classifier). The system pairs Gemma 4's multimodal
+  understanding (text, vision, audio) with deterministic WHO IMCI threshold logic to produce
+  classifications and treatment plans without ever sending a child's data off-device.
+authors:
+  - given-names: Vimal
+    family-names: Kumar
+    email: vimalkumar.parthasarathy@gmail.com
+  - given-names: Mark D.
+    family-names: Hei Long
+keywords:
+  - global health
+  - child survival
+  - WHO IMCI
+  - integrated management of childhood illness
+  - on-device AI
+  - offline AI
+  - Gemma
+  - Gemma 4
+  - LiteRT-LM
+  - clinical decision support
+  - pneumonia
+  - low-resource healthcare
+  - Android
+  - Flutter
+license: Apache-2.0
+repository-code: "https://github.com/klickgenai/deepmind-hackathon"
+url: "https://github.com/klickgenai/deepmind-hackathon"
+version: 0.1.0
+date-released: "2026-05-18"
+references:
+  - type: article
+    title: "Integrated Management of Childhood Illness chart booklet"
+    authors:
+      - name: World Health Organization
+    year: 2014
+    url: "https://www.who.int/publications/i/item/9789241506823"
+  - type: article
+    title: "Gemma 4: A family of open multimodal language models"
+    authors:
+      - name: Google DeepMind
+    year: 2026

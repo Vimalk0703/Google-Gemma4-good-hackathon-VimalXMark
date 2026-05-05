@@ -299,10 +299,12 @@ This boundary is sacred. Never blur it.
 
 ## Related Planning Documents
 
+Archived in [`docs/history/`](docs/history/) — kept for the historical record, not for day-to-day development. The current source of truth is the `README.md`, `CLAUDE.md` (this file), `AGENTS.md`, and the documents under `docs/`.
+
 | Document | Purpose |
 |----------|---------|
-| [MASTERPLAN.md](MASTERPLAN.md) | Full execution plan with sprint details |
-| [MALAIKA_PROPOSAL.md](MALAIKA_PROPOSAL.md) | Idea proposal, video script, why-it-wins |
-| [RESEARCH.md](RESEARCH.md) | Competition analysis and research data |
-| [DECISION_JOURNEY.md](DECISION_JOURNEY.md) | How we arrived at this idea |
-| [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) | Detailed implementation steps |
+| [docs/history/MASTERPLAN.md](docs/history/MASTERPLAN.md) | Full execution plan with sprint details |
+| [docs/history/MALAIKA_PROPOSAL.md](docs/history/MALAIKA_PROPOSAL.md) | Idea proposal, video script, why-it-wins |
+| [docs/history/RESEARCH.md](docs/history/RESEARCH.md) | Competition analysis and research data |
+| [docs/history/DECISION_JOURNEY.md](docs/history/DECISION_JOURNEY.md) | How we arrived at this idea |
+| [docs/history/IMPLEMENTATION_PLAN.md](docs/history/IMPLEMENTATION_PLAN.md) | Detailed implementation steps |

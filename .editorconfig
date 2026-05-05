@@ -1,0 +1,42 @@
+# https://editorconfig.org/
+# Top-most EditorConfig file
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 2
+
+# Python — PEP 8, 4-space indent, ruff enforces 100-char line length.
+[*.{py,pyi}]
+indent_size = 4
+max_line_length = 100
+
+# Dart / Flutter — 2-space indent, 80-char line length.
+[*.dart]
+indent_size = 2
+max_line_length = 80
+
+# JS / TS / JSX / TSX — 2-space indent.
+[*.{js,jsx,ts,tsx,mjs,cjs}]
+indent_size = 2
+max_line_length = 100
+
+# YAML / JSON — 2-space indent, no tabs ever.
+[*.{yaml,yml,json,jsonc}]
+indent_size = 2
+
+# Makefiles require literal tabs.
+[Makefile]
+indent_style = tab
+
+# Markdown — preserve trailing whitespace (it's significant for hard wraps).
+[*.md]
+trim_trailing_whitespace = false
+
+# Go — tabs for indentation (gofmt convention) — included for completeness.
+[*.go]
+indent_style = tab

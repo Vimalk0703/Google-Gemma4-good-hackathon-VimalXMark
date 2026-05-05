@@ -1,5 +1,15 @@
 # Malaika
 
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](pyproject.toml)
+[![Flutter 3.24+](https://img.shields.io/badge/flutter-3.24%2B-02569B.svg?logo=flutter)](malaika_flutter/pubspec.yaml)
+[![Next.js 16](https://img.shields.io/badge/next.js-16-black.svg?logo=nextdotjs)](web/package.json)
+[![Powered by Gemma 4](https://img.shields.io/badge/powered%20by-Gemma%204-4285F4.svg?logo=google)](https://deepmind.google/technologies/gemma/)
+[![Tier 0: offline](https://img.shields.io/badge/Tier%200-offline%20on%20device-success.svg)](malaika_flutter/README.md)
+[![Tests: 104+](https://img.shields.io/badge/tests-104%2B%20passing-success.svg)](tests/)
+[![Code style: ruff](https://img.shields.io/badge/code%20style-ruff-261230.svg)](pyproject.toml)
+[![Type check: mypy strict](https://img.shields.io/badge/type%20check-mypy%20strict-2A6DB2.svg)](pyproject.toml)
+
 > *"Angel" in Swahili.*
 > A two-tier, open-source WHO IMCI assistant for children — powered end-to-end by **Google Gemma 4**.
 

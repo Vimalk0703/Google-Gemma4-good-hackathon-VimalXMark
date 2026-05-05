@@ -260,7 +260,7 @@ changes
 | Config files | `configs/` | YAML feature flags, model configs |
 | Datasets | `data/` | Gitignored, downloaded via scripts |
 | Documentation | `docs/` | Engineering docs |
-| Planning docs | Project root | MASTERPLAN.md, PROPOSAL.md, etc. |
+| Planning docs | `docs/history/` | MASTERPLAN.md, PROPOSAL.md, etc. (archived; see `docs/history/README.md`) |
 
 ### Naming Rules
 
@@ -369,9 +369,10 @@ Even in a hackathon, review your own code before committing:
 - Comment the WHY, not the WHAT
 
 ### Project Documentation
-- Update MASTERPLAN.md when sprint plans change
-- Update ARCHITECTURE.md when module structure changes
-- Keep README.md current for judges and reviewers
+- Update `docs/history/MASTERPLAN.md` when sprint plans change (kept as the active plan-of-record even though it lives under `history/`)
+- Update `docs/ARCHITECTURE.md` when module structure changes
+- Keep `README.md` current for judges and reviewers
+- Add an entry to `CHANGELOG.md` for any user-visible change
 - Record test results and benchmarks with dates
 
 ---

@@ -97,7 +97,7 @@ If you change a number in the script, change it here. If you can't change it her
 | **Gemma 4 E2B: ~2 billion active parameters, ~2.58 GB on disk.** | Google AI for Developers — Gemma 4 model card. | https://ai.google.dev/gemma | Model card spec sheet. |
 | **Per-layer embeddings (PLE) — Gemma 4 has memory footprint of 2B model with capability of larger model.** | Google Developers Blog — Gemma 4 launch post. | https://developers.googleblog.com/bring-state-of-the-art-agentic-skills-to-the-edge-with-gemma-4/ | "Through Per-Layer Embeddings (PLE), it has the memory footprint of 2B and 4B models." |
 | **Gemma 4 has 1,200% improvement in agentic tool use vs Gemma 3.** | Google Developers Blog — Gemma 4 launch post. | (same as above) | Performance benchmark in announcement. |
-| **Apache 2.0 license.** | Google's Gemma model card. | https://ai.google.dev/gemma/terms | Open weights, Apache 2.0 (with prohibited use policy). |
+| **Apache 2.0 license.** | Google's Gemma model card. | https://ai.google.dev/gemma/terms | Open source, Apache 2.0 (with prohibited use policy). |
 | **~50 tokens/sec on Mali-G68 GPU (Samsung A53).** | Project-internal benchmark (Vimal + Mark, A53 device). | `CLAUDE.md` and on-device benchmark logs in repo | Reproducible by anyone with an A53 — instructions in `malaika_flutter/README.md`. |
 | **12 clinical skills in SkillRegistry.** | Project codebase. | `malaika/skills.py` (this repo) | Source of truth — count the `@skill` decorators. |
 | **21/21 WHO IMCI golden scenarios passing.** | Project test suite. | `tests/test_imci_protocol.py` | Run `pytest tests/ -v` to verify. |

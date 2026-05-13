@@ -88,7 +88,7 @@ Kaggle explicitly highlights "multimodal power and native function calling" as t
 | **Multilingual (140+ languages)** | Caregiver speaks Swahili, Hausa, Hindi, Bengali; Gemma understands her | Same model, no translation pipeline, no English bottleneck |
 | **Function-calling / tool use (12× over Gemma 3)** | 12-skill SkillRegistry, structured event emission, belief state reasoning | The agentic layer is what makes IMCI orchestration work on a phone |
 | **Per-layer embeddings (E2B effective architecture)** | E2B fits text + vision + multilingual in 2.58 GB on a $60 phone | The only model in the world that does this — see benchmark in README |
-| **Open weights (Apache 2.0)** | Apache 2.0 license carries through to Malaika; deployable in any country | "The AI that decides whether a child lives must not belong to a company" |
+| **Open source (Apache 2.0)** | Apache 2.0 license carries through to Malaika; deployable in any country | "The AI that decides whether a child lives must not belong to a company" |
 
 ---
 

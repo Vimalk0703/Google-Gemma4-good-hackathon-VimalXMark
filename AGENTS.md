@@ -9,7 +9,7 @@ If you are an AI agent (Claude Code, Cursor, Codex, GitHub Copilot Chat, an auto
 
 ## What this project is
 
-Malaika ("Angel" in Swahili) is a fully-offline, on-device implementation of the World Health Organization's [Integrated Management of Childhood Illness (IMCI)](https://www.who.int/publications/i/item/9789241506823) protocol, powered by Google's **Gemma 4** open-weights model.
+Malaika ("Angel" in Swahili) is a fully-offline, on-device implementation of the World Health Organization's [Integrated Management of Childhood Illness (IMCI)](https://www.who.int/publications/i/item/9789241506823) protocol, powered by Google's **Gemma 4** open-source model.
 
 - **Tier 0 — phone**: Flutter Android app, Gemma 4 E2B (~2.6 GB), runs on a $60 phone with no internet.
 - **Tier 1 — village clinic**: Gemma 4 E4B with fine-tuned LoRA adapters, plus a breath-sound classifier, on a single GPU.

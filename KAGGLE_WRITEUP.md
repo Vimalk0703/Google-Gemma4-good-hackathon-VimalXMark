@@ -131,7 +131,7 @@ Every capability below is unique to Gemma 4 and could not be substituted on this
 - **Native multimodal vision (SigLIP).** Six on-phone vision skills *and* mel-spectrogram classification on the clinic server — **one model sees a photo of a child and a spectrogram of breath sounds.**
 - **Native multilingual (140+ languages).** Swahili, Hausa, Hindi, Bengali — Gemma understands her. **No translation pipeline.**
 - **Agentic tool use.** A 12-skill `SkillRegistry`, structured event emission, typed `BeliefState`. Gemma 4's native function-calling makes IMCI orchestration work on a phone.
-- **Apache 2.0 open weights.** Phone and clinic both hold the weights. **No vendor API.**
+- **Apache 2.0 open source.** Phone and clinic both hold the weights. **No vendor API.**
 
 ## Two tiers of care. One architecture.
 
@@ -155,7 +155,7 @@ Every WHO IMCI classification — *severe pneumonia*, *some dehydration*, *moder
 
 Backed by **104+ passing tests, 21/21 WHO IMCI golden scenarios**, three-layer security guards, 31 versioned prompts, per-step observability. We do not claim video breathing-rate (GPU constraints), real-time monitoring, or FDA clearance — every honest limit is in [`REASONS_WE_WILL_FAIL.md`](https://github.com/Vimalk0703/Google-Gemma4-good-hackathon-VimalXMark/blob/main/REASONS_WE_WILL_FAIL.md). Every number is cited in [`SOURCES.md`](https://github.com/Vimalk0703/Google-Gemma4-good-hackathon-VimalXMark/blob/main/SOURCES.md). **We came with receipts.**
 
-## Why open weights
+## Why open source
 
 We could have built this for agriculture, education, climate, finance. **We chose children** — because we don't know which of those 4.9 million lost every year would have become the next **Sundar Pichai**, the boy from a two-room home in Tamil Nadu who today runs the company that built the model in this app; the next **Wangari Maathai**, the village girl from Kenya who won the Nobel Peace Prize; the next **Yusuf Hamied**, the Indian chemist whose generic medicines reached the African continent that branded pricing never would. **Everyone deserves a place in this world.**
 

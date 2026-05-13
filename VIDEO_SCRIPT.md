@@ -202,7 +202,7 @@ That is how you run AI this smart, on a phone this small.
 
 (pause)
 
-This entire app exists because Google chose to release Gemma **open-weights** — not behind an API, not behind a paywall. The weights themselves. On the device. In the mother's pocket.
+This entire app exists because Google chose to release Gemma **open-source** — not behind an API, not behind a paywall. The weights themselves. On the device. In the mother's pocket.
 
 ---
 
@@ -250,7 +250,7 @@ The answer changes by modality.
 
 Sixty steps of QLoRA. The **ICBHI 2017** respiratory dataset — nine hundred and twenty real recordings, held out by *patient*, not by sample. Eighty-two megabytes of LoRA weights on top of a model that already speaks the mother's language and already understands her child's photo.
 
-**The same brain that runs the IMCI assessment is the brain that hears the wheeze.** One model. One deployment. One open-weights story.
+**The same brain that runs the IMCI assessment is the brain that hears the wheeze.** One model. One deployment. One open-source story.
 
 On held-out patients, **eighty-five percent crackle detection.** That is a real number. It is also hackathon-grade — not FDA-cleared. The seed, the split, and the eval cell are in notebook six. We also publish a *base-versus-fine-tuned comparison notebook* — same data, same task, two models — so you can see *exactly* what the LoRA adds. Plan is in `docs/NOTEBOOK_13_BASE_VS_FINETUNED_PLAN.md`.
 
@@ -330,7 +330,7 @@ This is the **clinical portal.** Passcode-gated, browser-based, runs on any lapt
 
 No app to install. No SDK. No cloud. The audio file goes from the nurse's browser to the clinic's own server, and back.
 
-**Same Gemma family. Same open-weights story.** Same on-device privacy — the clinic server is the clinic's own hardware.
+**Same Gemma family. Same open-source story.** Same on-device privacy — the clinic server is the clinic's own hardware.
 
 The mother's phone in the village. The nurse's laptop in the clinic. Two apps, two users, **one architecture**, scaled across two tiers of care.
 
@@ -392,7 +392,7 @@ And that is just two diseases. That is just the deaths we counted.
 
 Malaika is open source. Free. Forever. Apache 2.0.
 
-We built it on Gemma — Google's open-weights model — because the AI that decides whether a child lives must not belong to a company.
+We built it on Gemma — Google's open-source model — because the AI that decides whether a child lives must not belong to a company.
 
 **It has to belong to everyone.**
 
@@ -402,7 +402,7 @@ Here is what we believe, as engineers.
 
 Technology is not just for business optimisation and growth. **It is for communities.** It is for enhancing and impacting human lives — in every possible way that the people building it can imagine.
 
-AI is the most powerful lever any of us will hold in our careers. **Open weights are how that lever gets out of the data centre and into the hands of people.** Google's Gemma 4 is — right now, today — the clearest path the industry has chosen to put cognition into anyone's hands. Not as customers of an API. As citizens of a model.
+AI is the most powerful lever any of us will hold in our careers. **Open source are how that lever gets out of the data centre and into the hands of people.** Google's Gemma 4 is — right now, today — the clearest path the industry has chosen to put cognition into anyone's hands. Not as customers of an API. As citizens of a model.
 
 That is what *decentralising access to technology* means. Not a slogan. **A file you can read, modify, and ship.**
 

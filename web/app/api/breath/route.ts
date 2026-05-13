@@ -1,17 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import { cookies } from "next/headers";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
 
-const COOKIE_NAME = "malaika_portal_session";
-
 export async function POST(request: NextRequest) {
-  const jar = await cookies();
-  if (jar.get(COOKIE_NAME)?.value !== "1") {
-    return NextResponse.json({ error: "Not authenticated." }, { status: 401 });
-  }
-
   const endpoint = process.env.BREATH_API_URL;
   if (!endpoint) {
     return NextResponse.json(
@@ -48,6 +40,7 @@ export async function POST(request: NextRequest) {
   try {
     upstream = await fetch(`${endpoint.replace(/\/$/, "")}/breath`, {
       method: "POST",
+      headers: { "ngrok-skip-browser-warning": "1" },
       body: upstreamForm,
       signal: AbortSignal.timeout(115_000),
     });

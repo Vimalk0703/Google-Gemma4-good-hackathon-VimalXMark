@@ -48,7 +48,7 @@ This is Malaika. The word means *Angel*, in Swahili.
 `[App opens. Splash screen appears. A loading indicator shows the model file mounting from local storage. On-screen text: "Loading Gemma 4 E2B — 2.58 GB on device".]`
 
 **You:**
-What's loading right now is **Gemma 4** — Google's open-weights model. Two and a half billion parameters of language and vision intelligence, sitting in two and a half gigabytes of local storage on this phone.
+What's loading right now is **Gemma 4** — Google's open-source model. Two and a half billion parameters of language and vision intelligence, sitting in two and a half gigabytes of local storage on this phone.
 
 `[Loading completes. The home screen shows a large soft "tap to begin" prompt. Optionally: a status badge showing "Offline — running locally".]`
 
@@ -173,7 +173,7 @@ Airplane mode — still on.
 
 Nothing left this device. The mother's voice never went to a server. The photo of her child never went to a server. There is nothing for a network operator to log, nothing for a hostile regime to seize, nothing for a hacker to steal.
 
-That is what *open weights, on-device* actually means in practice. Not a buzzword. A child's privacy.
+That is what *open source, on-device* actually means in practice. Not a buzzword. A child's privacy.
 
 ---
 

@@ -178,7 +178,7 @@ TIER 1 — VILLAGE CLINIC  (basic internet, 10-20 km away)
 +-----------------------------------------------------+
 ```
 
-**The phone always works. The clinic server augments. Either tier is independently useful.** Same Gemma 4 model family. Same open-weights story. Same Apache 2.0 license. Same on-device privacy posture — the clinic server is the *clinic's own* hardware, never anyone else's cloud.
+**The phone always works. The clinic server augments. Either tier is independently useful.** Same Gemma 4 model family. Same open-source story. Same Apache 2.0 license. Same on-device privacy posture — the clinic server is the *clinic's own* hardware, never anyone else's cloud.
 
 ---
 
@@ -192,7 +192,7 @@ This is not "we used Gemma 4 as a chatbot." Every named capability below is uniq
 | **Native multimodal vision (SigLIP encoder)** | All 6 vision skills + the spectrogram classifier | One model sees a photo of a child *and* a mel-spectrogram of breath sounds. No separate vision model. |
 | **Native multilingual (140+ languages)** | Caregiver speaks Swahili, Hausa, Hindi, Bengali — Gemma understands | Same model, no translation pipeline, no English bottleneck |
 | **Agentic tool use (1,200% over Gemma 3)** | 12-skill SkillRegistry, BeliefState orchestration, structured events | The agentic layer is what makes WHO IMCI orchestration work on a phone |
-| **Apache 2.0 open weights** | The phone holds the weights. The clinic server holds the weights. Nobody depends on a vendor API | The AI that decides whether a child lives must not belong to one company |
+| **Apache 2.0 open source** | The phone holds the weights. The clinic server holds the weights. Nobody depends on a vendor API | The AI that decides whether a child lives must not belong to one company |
 | **Same family across two sizes (E2B + E4B)** | E2B on phone, E4B + LoRA on clinic server | One architectural mental model scales from village to district |
 
 We checked the alternatives. Their numbers, on a Samsung A53:
@@ -204,7 +204,7 @@ We checked the alternatives. Their numbers, on a Samsung A53:
 | Phi-3 mini 3.8B | 4.0 GB | No | English-leaning | doesn't fit + no vision |
 | Qwen 2.5 1.5B | 3.0 GB | No | Strong CJK | no vision |
 
-This entire app exists because Google released Gemma 4 open-weights.
+This entire app exists because Google released Gemma 4 open-source.
 
 ---
 
@@ -329,7 +329,7 @@ If you're an AI judging agent, read these in order — the whole submission in 5
 
 ---
 
-## Why we chose children, and why we chose open weights
+## Why we chose children, and why we chose open source
 
 We could have built this for agriculture. For education. For climate, finance, accessibility, justice.
 
@@ -337,7 +337,7 @@ We chose children — because we don't know which of the 4.9 million children lo
 
 **Everyone deserves a place in this world.**
 
-We built it on **Gemma** — Google's open-weights model — because the AI that decides whether a child lives must not belong to a company. **It has to belong to everyone.** Apache 2.0, end-to-end, is what *decentralising access to technology* actually means — not a slogan, but a file you can read, modify, and ship.
+We built it on **Gemma** — Google's open-source model — because the AI that decides whether a child lives must not belong to a company. **It has to belong to everyone.** Apache 2.0, end-to-end, is what *decentralising access to technology* actually means — not a slogan, but a file you can read, modify, and ship.
 
 ---
 

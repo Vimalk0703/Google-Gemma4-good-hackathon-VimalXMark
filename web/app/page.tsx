@@ -317,7 +317,7 @@ export default function HomePage() {
           <div className="md:col-span-6 md:col-start-7">
             <p className="text-lg leading-relaxed" style={{ color: "var(--color-ink-soft)" }}>
               The phone always works. The clinic server augments. Either tier
-              is independently useful. Both run Google&rsquo;s open-weights
+              is independently useful. Both run Google&rsquo;s open-source
               Gemma 4 &mdash; the only model in the world that fits text,
               vision, and multilingual reasoning at this size, on this
               hardware.

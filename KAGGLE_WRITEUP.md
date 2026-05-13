@@ -69,7 +69,6 @@ Attach in this order:
 |---|---|
 | **Live demo (landing + clinical portal)** | https://malaika-delta.vercel.app/ |
 | **Public code repository** | https://github.com/Vimalk0703/Google-Gemma4-good-hackathon-VimalXMark |
-| **Android APK download** | https://malaika-delta.vercel.app/malaika.apk |
 | **Fine-tuned model on Hugging Face** | https://huggingface.co/Vimal0703/malaika-breath-sounds-E4B-merged |
 | **Full storytelling video (12 min, must-watch)** | https://youtu.be/2p932LTc_wE |
 | **Full app demo video (Samsung A53)** | https://youtu.be/yV8jBH6-_I0 |

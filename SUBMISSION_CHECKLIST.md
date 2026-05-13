@@ -156,7 +156,7 @@ If you only have time for two files: **`README.md`** and **`VIDEO_SCRIPT.md`** a
 - [x] **Sources doc** (`SOURCES.md`) — every numerical claim cited with verifiable URL
 - [x] **README refresh** — leads with two-tier architecture, model benchmark table, judge-traversal order
 - [x] **Apache 2.0 license** end-to-end
-- [x] **APK download wired** — `web/public/malaika.apk` symlink to Flutter build, `download` attribute on CTAs
+- [x] **APK install demonstrated in the videos** — full app walkthrough on Samsung A53 (`https://youtu.be/yV8jBH6-_I0`); APK builds locally from `malaika_flutter/` (`flutter build apk --debug`). No web-served APK download to avoid 360 MB-on-Vercel and stale-binary issues.
 
 ### In flight (May 4 – May 17)
 - [ ] Record final 8:30 video, two-presenter cut (script ready)

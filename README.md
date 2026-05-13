@@ -69,8 +69,8 @@ A real Flutter Android app running **Gemma 4 E2B (2.58 GB) fully offline** on a 
 A FastAPI service that loads our **fine-tuned Gemma 4 E4B + LoRA on the ICBHI 2017 respiratory sound dataset** (`Vimal0703/malaika-breath-sounds-E4B-merged`), exposes a `/breath` endpoint, and returns a classification *plus* a Gemma-4-generated **clinical reasoning note** in a senior-nurse voice. Deployed on a Kaggle T4; in production, runs on the clinic's own hardware.
 
 ### 3. **The Web Portal** (`web/`)
-A hand-crafted Next.js 16 + IBM Plex landing page and a passcode-gated **Clinical Portal** for clinicians:
-- Upload a recording **or record live in the browser** (browser-native MediaRecorder + WAV encoder)
+A hand-crafted Next.js 16 + IBM Plex landing page and an open **Clinical Portal** for clinicians (open for the Kaggle submission window — no login required):
+- Upload a recording, **record live in the browser** (MediaRecorder + WAV encoder), or **click *Load sample audio*** to fire the bundled ICBHI sample
 - Live connection-health banner to the clinic server
 - Multi-stage progress (upload → spectrogram → inference)
 - Result card led by the AI clinical note, followed by WHO IMCI context
@@ -123,7 +123,7 @@ TIER 1 — VILLAGE CLINIC  (basic internet, 10-20 km away)
                        v
 +-----------------------------------------------------+
 |  Web Clinical Portal (Next.js 16, IBM Plex)          |
-|  malaika.health/portal — passcode-gated             |
+|  malaika-delta.vercel.app/portal — open for judges  |
 |  -- Upload audio  OR  record live in browser         |
 |  -- Live connection-health banner                    |
 |  -- Multi-stage progress visualization               |
@@ -210,13 +210,12 @@ App downloads Gemma 4 E2B (~2.6 GB) on first launch, then runs in airplane mode 
 ```bash
 cd web
 cp .env.example .env.local
-# Edit .env.local — paste the ngrok URL into BREATH_API_URL,
-# set PORTAL_PASSCODE=malaika
+# Edit .env.local — paste the ngrok URL into BREATH_API_URL
 npm install
 npm run build && npm start
 ```
 
-Open `http://localhost:3000` for the landing page, `/portal` for the clinical portal. Sign in with `malaika`. Drop or record audio. See the classification + Clinical Note land in ~7 seconds.
+Open `http://localhost:3000` for the landing page, `/portal` for the clinical portal (no login). Click *Load sample audio* to fire the bundled ICBHI clip, or drop/record your own. See the classification + Clinical Note land in ~7 seconds.
 
 ---
 

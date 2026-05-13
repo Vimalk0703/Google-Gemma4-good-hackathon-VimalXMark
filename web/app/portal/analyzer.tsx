@@ -4,6 +4,8 @@ import { useEffect, useRef, useState } from "react";
 
 const MAX_RECORDING_SECONDS = 60;
 const TARGET_SAMPLE_RATE = 22050; // matches notebook 06 / 12 librosa pipeline
+const SAMPLE_AUDIO_URL = "/samples/icbhi-104-breath-sound.wav";
+const SAMPLE_AUDIO_FILENAME = "icbhi-104-breath-sound.wav";
 
 type RecorderState =
   | { state: "idle" }
@@ -95,6 +97,32 @@ export function Analyzer() {
     setFile(f);
     setResult(null);
     setStage("idle");
+  }
+
+  const [sampleLoading, setSampleLoading] = useState(false);
+  const [sampleError, setSampleError] = useState<string | null>(null);
+
+  async function loadSampleAudio() {
+    setSampleError(null);
+    setSampleLoading(true);
+    try {
+      const res = await fetch(SAMPLE_AUDIO_URL);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const blob = await res.blob();
+      const sampleFile = new File([blob], SAMPLE_AUDIO_FILENAME, {
+        type: blob.type || "audio/wav",
+      });
+      setInputMode("upload");
+      handleFile(sampleFile);
+    } catch (err) {
+      setSampleError(
+        err instanceof Error
+          ? `Could not load the sample (${err.message}).`
+          : "Could not load the sample.",
+      );
+    } finally {
+      setSampleLoading(false);
+    }
   }
 
   function clearFile() {
@@ -352,7 +380,13 @@ export function Analyzer() {
           </div>
         ) : null}
 
-        {!file ? <SampleHint /> : null}
+        {!file ? (
+          <SampleHint
+            loading={sampleLoading}
+            error={sampleError}
+            onLoadSample={loadSampleAudio}
+          />
+        ) : null}
       </section>
 
       {/* Analyze action */}
@@ -942,7 +976,15 @@ function bufferToWav(buffer: AudioBuffer): Blob {
   return new Blob([ab], { type: "audio/wav" });
 }
 
-function SampleHint() {
+function SampleHint({
+  loading,
+  error,
+  onLoadSample,
+}: {
+  loading: boolean;
+  error: string | null;
+  onLoadSample: () => void;
+}) {
   return (
     <div
       className="mt-5 p-5 text-sm leading-relaxed"
@@ -957,8 +999,7 @@ function SampleHint() {
         Need a sample to test with?
       </p>
       <p>
-        Use any 10-30 second recording of a child&rsquo;s breathing. For
-        reproducible benchmarking, the model was trained on the{" "}
+        One click loads a bundled clip from the{" "}
         <a
           href="https://bhichallenge.med.auth.gr/ICBHI_2017_Challenge"
           target="_blank"
@@ -967,10 +1008,42 @@ function SampleHint() {
           style={{ color: "var(--color-amber-deep)" }}
         >
           ICBHI 2017 respiratory sound dataset
-        </a>
-        . Notebook 06 in the repository documents the patient-level held-out
-        split &mdash; any of those WAV files will work end-to-end here.
+        </a>{" "}
+        (patient 104, anterior-left auscultation, Littmann 3200). Or upload any
+        10&ndash;30 second recording of your own.
       </p>
+
+      <div className="mt-4 flex flex-wrap items-center gap-3">
+        <button
+          type="button"
+          onClick={onLoadSample}
+          disabled={loading}
+          className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium"
+          style={{
+            background: "var(--color-amber-deep)",
+            color: "var(--color-paper)",
+            borderRadius: "var(--radius-button)",
+            cursor: loading ? "wait" : "pointer",
+            opacity: loading ? 0.7 : 1,
+          }}
+        >
+          {loading ? "Loading sample…" : "Load sample audio"}
+        </button>
+        <a
+          href={SAMPLE_AUDIO_URL}
+          download={SAMPLE_AUDIO_FILENAME}
+          className="link-underline text-xs"
+          style={{ color: "var(--color-muted)" }}
+        >
+          Download .wav directly
+        </a>
+      </div>
+
+      {error ? (
+        <p role="alert" className="mt-3 text-xs" style={{ color: "var(--color-severe)" }}>
+          {error}
+        </p>
+      ) : null}
     </div>
   );
 }

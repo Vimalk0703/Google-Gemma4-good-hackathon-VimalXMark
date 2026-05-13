@@ -139,7 +139,7 @@ If you only have time for two files: **`README.md`** and **`VIDEO_SCRIPT.md`** a
 ### Done (as of 2026-05-03)
 - [x] **Phone app (Tier 0)** — Flutter Android APK with Gemma 4 E2B fully offline on Samsung A53
 - [x] **Village clinic server (Tier 1)** — `notebooks/12_village_clinic_finetuned.ipynb` running Gemma 4 E4B + LoRA via FastAPI/ngrok
-- [x] **Web clinical portal** — Next.js 16 landing page + passcode-gated portal (`web/`)
+- [x] **Web clinical portal** — Next.js 16 landing page + open clinical portal with bundled ICBHI sample audio (`web/`)
 - [x] **AI Clinical Note** — second-pass Gemma 4 inference producing senior-nurse-voice clinical reasoning
 - [x] **Browser audio recording** — MediaRecorder + in-browser WAV encoder (PCM 16-bit, 22050 Hz)
 - [x] **Live connection-health probe** — `/api/health` server-side proxy with green/yellow/red banner
@@ -173,7 +173,7 @@ If you only have time for two files: **`README.md`** and **`VIDEO_SCRIPT.md`** a
 - iOS app (focus stays on Android — that's where the phones-in-villages story lives)
 - Live camera preview on phone (Mali GPU constraint, see `REASONS_WE_WILL_FAIL.md` §6)
 - Audio/breath analysis on phone (deferred to Tier 1 clinic server by design)
-- Real per-clinician auth (single shared passcode is right for hackathon, indefensible for real patient data — documented as future work in `web/README.md`)
+- Real per-clinician authentication (the portal is open for the Kaggle submission window so judges have zero-friction access; indefensible for real patient data — documented as future work in `web/README.md`)
 
 ---
 

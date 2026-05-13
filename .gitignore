@@ -30,6 +30,8 @@ adapters/
 *.mp4
 *.avi
 *.webm
+# …except the bundled clinical-portal demo sample (ICBHI 2017, public dataset).
+!web/public/samples/*.wav
 
 # OS
 .DS_Store

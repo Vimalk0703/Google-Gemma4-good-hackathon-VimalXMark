@@ -26,12 +26,14 @@ Malaika competes in two tracks: **Health** (primary) and **Digital Equity** (sec
 | 1 | Kaggle account with identity verification | TODO | Vimal + Mark, before May 17 |
 | 2 | **Working prototype** | DONE | Three first-party surfaces: phone app (`malaika_flutter/`), village-clinic server (`notebooks/12_village_clinic_finetuned.ipynb`), web clinical portal (`web/`) |
 | 3 | **Public code repository** | DONE | `github.com/Vimalk0703/Google-Gemma4-good-hackathon-VimalXMark` (this repo) |
-| 4 | **Public demo** | DONE | APK download link in landing page; live clinical portal at `localhost:3000/portal` (or deployed URL) |
-| 5 | **Public video demonstration** | IN PROGRESS | `VIDEO_SCRIPT.md` (8:30 two-presenter cut, Vimal+Mark), `DEMO_WALKTHROUGH.md` (3:30 standalone phone demo) |
-| 6 | **Technical write-up** | DONE | Refreshed `README.md` (lead with two-tier architecture + AI Clinical Note) + `docs/ARCHITECTURE.md` + this checklist |
+| 4 | **Public live demo** | DONE | **[malaika-delta.vercel.app](https://malaika-delta.vercel.app/)** — landing page + clinical portal, no login required for landing |
+| 5a | **Public video — Kaggle submission (≤3 min)** | DONE | **[youtu.be/Gf415IgJr0s](https://youtu.be/Gf415IgJr0s)** — short pitch + walkthrough · ⚠️ **VERIFY ≤3:00 before attaching** |
+| 5b | **Public video — full storytelling cut** | DONE | **[youtu.be/2p932LTc_wE](https://youtu.be/2p932LTc_wE)** — 12-minute long-form film (linked in writeup as "must-watch for full picture") |
+| 5c | **Public video — full app demo** | DONE | **[youtu.be/yV8jBH6-_I0](https://youtu.be/yV8jBH6-_I0)** — every screen on Samsung A53 |
+| 6 | **Technical write-up (≤1,500 words on Kaggle)** | DONE | [`KAGGLE_WRITEUP.md`](KAGGLE_WRITEUP.md) — paste-ready for the Kaggle Writeup textbox |
 | 7 | **Apache 2.0 license** | DONE | `LICENSE` — covers model fine-tune, app, server, web portal |
-| 8 | **Cover image / media gallery** | TODO | Brief in §"Cover Image Design Brief" below |
-| 9 | **Project write-up on Kaggle** | IN PROGRESS | Will mirror this README, lightly adapted for Kaggle's textbox |
+| 8 | **Cover image / media gallery** | TODO | Brief in §"Cover Image Design Brief" below — 1280×720, JPG ≤ 1 MB |
+| 9 | **Track selection (one required)** | DECIDED | **Impact Track → Health & Sciences** (primary). Auto-eligible for Main Track + Special Tech: Unsloth (we fine-tuned with Unsloth) + LiteRT (phone runs LiteRT-LM) |
 | 10 | **Submission form completion** | TODO | Final step, May 17 |
 
 ---
@@ -137,7 +139,7 @@ If you only have time for two files: **`README.md`** and **`VIDEO_SCRIPT.md`** a
 ### Done (as of 2026-05-03)
 - [x] **Phone app (Tier 0)** — Flutter Android APK with Gemma 4 E2B fully offline on Samsung A53
 - [x] **Village clinic server (Tier 1)** — `notebooks/12_village_clinic_finetuned.ipynb` running Gemma 4 E4B + LoRA via FastAPI/ngrok
-- [x] **Web clinical portal** — Next.js 16 landing page + passcode-gated portal (`web/`)
+- [x] **Web clinical portal** — Next.js 16 landing page + open clinical portal with bundled ICBHI sample audio (`web/`)
 - [x] **AI Clinical Note** — second-pass Gemma 4 inference producing senior-nurse-voice clinical reasoning
 - [x] **Browser audio recording** — MediaRecorder + in-browser WAV encoder (PCM 16-bit, 22050 Hz)
 - [x] **Live connection-health probe** — `/api/health` server-side proxy with green/yellow/red banner
@@ -171,7 +173,7 @@ If you only have time for two files: **`README.md`** and **`VIDEO_SCRIPT.md`** a
 - iOS app (focus stays on Android — that's where the phones-in-villages story lives)
 - Live camera preview on phone (Mali GPU constraint, see `REASONS_WE_WILL_FAIL.md` §6)
 - Audio/breath analysis on phone (deferred to Tier 1 clinic server by design)
-- Real per-clinician auth (single shared passcode is right for hackathon, indefensible for real patient data — documented as future work in `web/README.md`)
+- Real per-clinician authentication (the portal is open for the Kaggle submission window so judges have zero-friction access; indefensible for real patient data — documented as future work in `web/README.md`)
 
 ---
 

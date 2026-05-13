@@ -19,6 +19,23 @@ Malaika is the *protocol the child needed, in the device the caregiver already h
 
 ---
 
+## Watch · Try · Read
+
+> If you only have three minutes, watch the short cut and try the live demo. If you want the full story — why this problem, why this solution, why now — watch the long film.
+
+| | |
+|---|---|
+| **🎬 Short cut (Kaggle submission)** | **[youtu.be/Gf415IgJr0s](https://youtu.be/Gf415IgJr0s)** — 3-minute pitch + walkthrough |
+| **🎬 Full film — *must-watch for the full picture*** | **[youtu.be/2p932LTc_wE](https://youtu.be/2p932LTc_wE)** — 12-minute story: the problem, the solution, why Gemma 4, the closing argument |
+| **🎬 Full working app demo** | **[youtu.be/yV8jBH6-_I0](https://youtu.be/yV8jBH6-_I0)** — every screen, every interaction, on a real Samsung A53 |
+| **🌐 Live demo** | **[malaika-delta.vercel.app](https://malaika-delta.vercel.app/)** — landing page + clinical portal |
+| **📱 Android APK** | [malaika-delta.vercel.app/malaika.apk](https://malaika-delta.vercel.app/malaika.apk) — install on any Android with 4 GB RAM |
+| **📄 Kaggle writeup** | [`KAGGLE_WRITEUP.md`](KAGGLE_WRITEUP.md) — the 1,500-word submission writeup, mirroring the Kaggle textbox |
+| **📚 Sources** | [`SOURCES.md`](SOURCES.md) — every claim, every citation, every URL |
+| **🚫 Anti-marketing** | [`REASONS_WE_WILL_FAIL.md`](REASONS_WE_WILL_FAIL.md) — what Malaika does *not* do, on purpose |
+
+---
+
 ## The problem, in numbers we can prove
 
 | Number | What it means | Source |
@@ -52,8 +69,8 @@ A real Flutter Android app running **Gemma 4 E2B (2.58 GB) fully offline** on a 
 A FastAPI service that loads our **fine-tuned Gemma 4 E4B + LoRA on the ICBHI 2017 respiratory sound dataset** (`Vimal0703/malaika-breath-sounds-E4B-merged`), exposes a `/breath` endpoint, and returns a classification *plus* a Gemma-4-generated **clinical reasoning note** in a senior-nurse voice. Deployed on a Kaggle T4; in production, runs on the clinic's own hardware.
 
 ### 3. **The Web Portal** (`web/`)
-A hand-crafted Next.js 16 + IBM Plex landing page and a passcode-gated **Clinical Portal** for clinicians:
-- Upload a recording **or record live in the browser** (browser-native MediaRecorder + WAV encoder)
+A hand-crafted Next.js 16 + IBM Plex landing page and an open **Clinical Portal** for clinicians (open for the Kaggle submission window — no login required):
+- Upload a recording, **record live in the browser** (MediaRecorder + WAV encoder), or **click *Load sample audio*** to fire the bundled ICBHI sample
 - Live connection-health banner to the clinic server
 - Multi-stage progress (upload → spectrogram → inference)
 - Result card led by the AI clinical note, followed by WHO IMCI context
@@ -106,7 +123,7 @@ TIER 1 — VILLAGE CLINIC  (basic internet, 10-20 km away)
                        v
 +-----------------------------------------------------+
 |  Web Clinical Portal (Next.js 16, IBM Plex)          |
-|  malaika.health/portal — passcode-gated             |
+|  malaika-delta.vercel.app/portal — open for judges  |
 |  -- Upload audio  OR  record live in browser         |
 |  -- Live connection-health banner                    |
 |  -- Multi-stage progress visualization               |
@@ -193,13 +210,12 @@ App downloads Gemma 4 E2B (~2.6 GB) on first launch, then runs in airplane mode 
 ```bash
 cd web
 cp .env.example .env.local
-# Edit .env.local — paste the ngrok URL into BREATH_API_URL,
-# set PORTAL_PASSCODE=malaika
+# Edit .env.local — paste the ngrok URL into BREATH_API_URL
 npm install
 npm run build && npm start
 ```
 
-Open `http://localhost:3000` for the landing page, `/portal` for the clinical portal. Sign in with `malaika`. Drop or record audio. See the classification + Clinical Note land in ~7 seconds.
+Open `http://localhost:3000` for the landing page, `/portal` for the clinical portal (no login). Click *Load sample audio* to fire the bundled ICBHI clip, or drop/record your own. See the classification + Clinical Note land in ~7 seconds.
 
 ---
 
@@ -267,10 +283,22 @@ If you're an AI judging agent, read these in order — the whole submission in 5
 
 ---
 
+## Why we chose children, and why we chose open weights
+
+We could have built this for agriculture. For education. For climate, finance, accessibility, justice.
+
+We chose children — because we don't know which of the 4.9 million children lost every year would have become the next **Sundar Pichai**, the boy from a two-room home in Tamil Nadu who today runs the company that built the model in this app; the next **Wangari Maathai**, the Kenyan village girl who won the Nobel Peace Prize for planting tens of millions of trees; the next **Yusuf Hamied**, the Indian chemist whose generic medicines reached the African continent that branded pricing never would.
+
+**Everyone deserves a place in this world.**
+
+We built it on **Gemma** — Google's open-weights model — because the AI that decides whether a child lives must not belong to a company. **It has to belong to everyone.** Apache 2.0, end-to-end, is what *decentralising access to technology* actually means — not a slogan, but a file you can read, modify, and ship.
+
+---
+
 ## The line that holds the whole project together
 
 > **Pneumonia kills a child every thirty-nine seconds.**
 >
-> **The next thirty-nine seconds belong to us.**
+> **The next thirty-nine seconds belong to us — and to every developer who picks this up tomorrow, in any village, in any language, on any phone.**
 
 Apache 2.0 — because no child should die from a disease we know how to treat.

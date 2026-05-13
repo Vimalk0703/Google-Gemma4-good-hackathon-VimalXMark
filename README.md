@@ -1,11 +1,13 @@
 # Malaika
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
+[![Powered by Gemma 4](https://img.shields.io/badge/powered%20by-Gemma%204-4285F4.svg?logo=google)](https://deepmind.google/technologies/gemma/)
+[![Fine-tuned with Unsloth](https://img.shields.io/badge/fine--tuned%20with-Unsloth-ff6f00.svg)](notebooks/06_unsloth_binary_phase1.ipynb)
+[![Model on Hugging Face](https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-malaika--breath--sounds--E4B--merged-yellow.svg)](https://huggingface.co/Vimal0703/malaika-breath-sounds-E4B-merged)
+[![Tier 0: offline](https://img.shields.io/badge/Tier%200-offline%20on%20device-success.svg)](malaika_flutter/README.md)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](pyproject.toml)
 [![Flutter 3.24+](https://img.shields.io/badge/flutter-3.24%2B-02569B.svg?logo=flutter)](malaika_flutter/pubspec.yaml)
 [![Next.js 16](https://img.shields.io/badge/next.js-16-black.svg?logo=nextdotjs)](web/package.json)
-[![Powered by Gemma 4](https://img.shields.io/badge/powered%20by-Gemma%204-4285F4.svg?logo=google)](https://deepmind.google/technologies/gemma/)
-[![Tier 0: offline](https://img.shields.io/badge/Tier%200-offline%20on%20device-success.svg)](malaika_flutter/README.md)
 [![Tests: 104+](https://img.shields.io/badge/tests-104%2B%20passing-success.svg)](tests/)
 [![Code style: ruff](https://img.shields.io/badge/code%20style-ruff-261230.svg)](pyproject.toml)
 [![Type check: mypy strict](https://img.shields.io/badge/type%20check-mypy%20strict-2A6DB2.svg)](pyproject.toml)
@@ -36,6 +38,31 @@ Malaika is the *protocol the child needed, in the device the caregiver already h
 
 ---
 
+## Evidence at a glance
+
+> An honest map of every load-bearing claim in this submission, with the file path where it can be verified. Scan top-to-bottom and you have the project in five minutes.
+
+| What we claim | Where to verify it |
+|---|---|
+| Pneumonia kills a child every 39 seconds; 1.17M die yearly from pneumonia + diarrhea; full IMCI implementation reduces under-5 mortality by 15% (Cochrane) | The sourced numbers table below, [`SOURCES.md`](SOURCES.md) |
+| A peer-reviewed Umlazi case-series documents infants dying en route home from hospital | [`SOURCES.md` §3](SOURCES.md), Nsibande et al. 2013 |
+| Honest impact projection: ≈175,000 children/year if Malaika reaches the Cochrane 15% number — **a projection, not a measurement** | [`KAGGLE_WRITEUP.md` §"The next thirty-nine seconds"](KAGGLE_WRITEUP.md), [`REASONS_WE_WILL_FAIL.md`](REASONS_WE_WILL_FAIL.md) |
+| 3-minute Kaggle video, 12-minute long-form film, full app demo on Samsung A53 | "Watch · Try · Read" above |
+| Live, public, no-login demo with a one-click ICBHI sample | [`malaika-delta.vercel.app/portal`](https://malaika-delta.vercel.app/portal) · [`web/`](web/) |
+| **Gemma 4 E2B running fully offline on a $60 Samsung A53** with text + vision + multilingual + voice + agentic orchestration | [`malaika_flutter/`](malaika_flutter/) · app demo video [`youtu.be/yV8jBH6-_I0`](https://youtu.be/yV8jBH6-_I0) |
+| **Fine-tuned with Unsloth**: QLoRA on Gemma 4 E4B on ICBHI 2017, patient-level held-out split, 85% crackle detection | [`notebooks/06_unsloth_binary_phase1.ipynb`](notebooks/06_unsloth_binary_phase1.ipynb) |
+| **Published model artefact (merged adapter)** | [`🤗 Vimal0703/malaika-breath-sounds-E4B-merged`](https://huggingface.co/Vimal0703/malaika-breath-sounds-E4B-merged) |
+| **Base vs fine-tuned receipt** — same audio set, same prompts, both models, diff printed and CSV-saved | [`docs/NOTEBOOK_13_BASE_VS_FINETUNED_PLAN.md`](docs/NOTEBOOK_13_BASE_VS_FINETUNED_PLAN.md) |
+| AI Clinical Note — same Gemma 4 model writes a chart-grade reasoning paragraph after classification | [`notebooks/12_village_clinic_finetuned.ipynb`](notebooks/12_village_clinic_finetuned.ipynb) · [`web/app/portal/analyzer.tsx`](web/app/portal/analyzer.tsx) |
+| Why no other small open model meets all four constraints (size, vision, multilingual, on-device speed) on the same A53 | "How Gemma 4 powers every layer" below · model table |
+| 12-skill agentic architecture with typed `BeliefState` and structured events | [`malaika/skills.py`](malaika/skills.py) · [`malaika/chat_engine.py`](malaika/chat_engine.py) |
+| Multilingual: caregiver speaks Swahili, Hausa, Hindi, Bengali; same model, no translation pipeline | [`malaika/inference.py`](malaika/inference.py) · video [`youtu.be/yV8jBH6-_I0`](https://youtu.be/yV8jBH6-_I0) |
+| 104+ passing tests, 21/21 WHO IMCI golden scenarios, 31 versioned prompt templates, three-layer security guards | [`tests/`](tests/) · [`malaika/prompts/`](malaika/prompts/) · [`malaika/guards/`](malaika/guards/) |
+| Anti-marketing — every honest limit, on the record | [`REASONS_WE_WILL_FAIL.md`](REASONS_WE_WILL_FAIL.md) |
+| Apache 2.0 end-to-end — model weights, Python service, Flutter app, clinic server, web portal | [`LICENSE`](LICENSE) |
+
+---
+
 ## The problem, in numbers we can prove
 
 | Number | What it means | Source |
@@ -54,6 +81,8 @@ The medicine exists. The science is settled. **The protocol that could save more
 
 That is not a medical problem. It is a **distribution problem.** Every line of Malaika exists to solve that problem.
 
+**Honest impact projection.** If Malaika reaches anywhere close to the Cochrane 15% mortality reduction on pneumonia and diarrhea, that is **≈175,000 children every year — 480 every day — still in their mothers' arms.** That number is a projection from human-delivered IMCI, not a measurement of Malaika in the field. We say it that way until we have measured it. The anti-marketing record is in [`REASONS_WE_WILL_FAIL.md`](REASONS_WE_WILL_FAIL.md).
+
 Every claim above is independently verifiable in [`SOURCES.md`](SOURCES.md).
 
 ---
@@ -63,7 +92,9 @@ Every claim above is independently verifiable in [`SOURCES.md`](SOURCES.md).
 A working, end-to-end system across two physical tiers and three first-party surfaces.
 
 ### 1. **Tier 0 — The Phone** (`malaika_flutter/`)
-A real Flutter Android app running **Gemma 4 E2B (2.58 GB) fully offline** on a $60 Samsung A53. Twelve clinical skills. Voice in any language. Photo-based vision analysis. Deterministic WHO IMCI classification. Works in airplane mode forever.
+A real Flutter Android app running **Gemma 4 E2B (2.58 GB) fully offline** on a **$60 Samsung A53** with a Mali-G68 GPU. Twelve clinical skills. Voice in any language (offline STT + TTS on Android-native CPU engines). In-app camera capture → on-device vision analysis. Deterministic WHO IMCI classification — *hard-coded thresholds, not LLM output.* Works in airplane mode forever.
+
+This is the technical proof at the heart of the submission: Gemma 4 E2B's **Per-Layer Embeddings** architecture fits text + vision + multilingual reasoning in 2.58 GB on the phone the village mother already owns. No other open small model — Llama 3.2, Phi-3.5-Vision, Qwen 2.5-VL — meets all four constraints (size, vision, multilingual including Sub-Saharan African languages, on-device speed) on the same hardware. We benchmarked. The table is below.
 
 ### 2. **Tier 1 — The Village Clinic Server** (`notebooks/12_village_clinic_finetuned.ipynb`)
 A FastAPI service that loads our **fine-tuned Gemma 4 E4B + LoRA on the ICBHI 2017 respiratory sound dataset** (`Vimal0703/malaika-breath-sounds-E4B-merged`), exposes a `/breath` endpoint, and returns a classification *plus* a Gemma-4-generated **clinical reasoning note** in a senior-nurse voice. Deployed on a Kaggle T4; in production, runs on the clinic's own hardware.
@@ -75,8 +106,24 @@ A hand-crafted Next.js 16 + IBM Plex landing page and an open **Clinical Portal*
 - Multi-stage progress (upload → spectrogram → inference)
 - Result card led by the AI clinical note, followed by WHO IMCI context
 
-### 4. **The fine-tuned model** ([`Vimal0703/malaika-breath-sounds-E4B-merged`](https://huggingface.co/Vimal0703/malaika-breath-sounds-E4B-merged))
-Unsloth QLoRA on Gemma 4 E4B, trained on ICBHI 2017 audio → mel-spectrogram → vision pipeline. **85% crackle detection** on a held-out patient cohort the model never saw. Reproducible from `notebooks/06_unsloth_binary_phase1.ipynb`.
+### 4. **The fine-tuned model** ([`🤗 Vimal0703/malaika-breath-sounds-E4B-merged`](https://huggingface.co/Vimal0703/malaika-breath-sounds-E4B-merged))
+
+Trained with **[Unsloth](https://github.com/unslothai/unsloth)** — QLoRA on **Gemma 4 E4B**, on the **ICBHI 2017 Respiratory Sound Database** (920 recordings, 126 patients, 6,898 cycles) re-framed as an audio → mel-spectrogram → vision-encoder pipeline.
+
+| | |
+|---|---|
+| **Base model** | `google/gemma-4-E4B-it` |
+| **Training framework** | [Unsloth](https://github.com/unslothai/unsloth) — `FastModel`, QLoRA, 4-bit |
+| **Adapter** | r=8, 60 steps, seed 3407, anti-overfit configuration |
+| **Dataset** | [ICBHI 2017](https://bhichallenge.med.auth.gr/ICBHI_2017_Challenge) — 920 recordings, 126 patients |
+| **Held-out split** | **Patient-level** (not segment-level — no leakage), 80/20 |
+| **Headline metric** | **85% crackle detection on patients the model never saw** |
+| **Published artefact** | [`🤗 Vimal0703/malaika-breath-sounds-E4B-merged`](https://huggingface.co/Vimal0703/malaika-breath-sounds-E4B-merged) — merged weights, ready to load |
+| **Reproducible from** | [`notebooks/06_unsloth_binary_phase1.ipynb`](notebooks/06_unsloth_binary_phase1.ipynb) |
+| **Side-by-side vs base** | [`docs/NOTEBOOK_13_BASE_VS_FINETUNED_PLAN.md`](docs/NOTEBOOK_13_BASE_VS_FINETUNED_PLAN.md) — same audio, both models, diff saved as CSV |
+| **Honest framing** | Hackathon-grade, **not FDA-cleared.** Used as decision support inside the WHO IMCI flow, never as a standalone diagnosis. See [`REASONS_WE_WILL_FAIL.md`](REASONS_WE_WILL_FAIL.md). |
+
+The fine-tune is what turns *"the model sees blue regions and vertical lines on a mel-spectrogram"* into *"crackles, consistent with bronchopneumonia."* The base model can describe the image; only the fine-tune reads it as clinical signal. This is the specific, impactful task Unsloth made possible on a $300 mini-PC in a village clinic.
 
 ---
 
@@ -225,7 +272,7 @@ Open `http://localhost:3000` for the landing page, `/portal` for the clinical po
 | **Architecture** | Single-model wrapper | **Two-tier** — phone offline + clinic server with fine-tuned model |
 | **Modalities** | Text only | Text + vision + voice + audio (spectrograms) |
 | **Models used** | One Gemma size | **Two Gemma sizes (E2B on phone, E4B + LoRA on server)** with shared family architecture |
-| **Fine-tuning** | Off-the-shelf | **Real LoRA fine-tune** on ICBHI 2017, 85% crackle detection on held-out patients |
+| **Fine-tuning** | Off-the-shelf | **Unsloth QLoRA fine-tune** on ICBHI 2017, patient-level held-out split, 85% crackle detection — [model on Hugging Face](https://huggingface.co/Vimal0703/malaika-breath-sounds-E4B-merged) |
 | **AI in the loop** | "Classify this image" | **AI Clinical Note** — second-pass reasoning in a senior-nurse voice |
 | **Classification safety** | LLM opinion | **Hard-coded WHO IMCI thresholds** in deterministic code |
 | **On-device proof** | "It could run" | **Gemma 4 E2B running on a $60 phone in airplane mode** |

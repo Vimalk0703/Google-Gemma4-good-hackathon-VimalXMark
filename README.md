@@ -168,7 +168,7 @@ We do not claim capabilities the hardware cannot deliver. The full anti-marketin
 | Feature | Status | Where |
 |---------|--------|-------|
 | Text-based IMCI Q&A on phone | **Works** | Flutter app, A53 |
-| Photo-from-gallery vision analysis | **Works** | Flutter app — alertness, eyes, ribs, edema |
+| **In-app camera capture → vision analysis** | **Works** | Flutter app — alertness, eyes, ribs, edema |
 | Q&A vs vision reconciliation | **Works** | Flutter app — flags conflicts |
 | Deterministic WHO IMCI classification | **Works** | Both tiers — `imci_protocol.dart` / `.py` |
 | Treatment plan + caregiver instructions | **Works** | Both tiers, multilingual |
@@ -178,7 +178,6 @@ We do not claim capabilities the hardware cannot deliver. The full anti-marketin
 | **AI Clinical Note** | **Works** | Clinic tier — Gemma 4 second pass |
 | **Browser audio recording → WAV → analyze** | **Works** | Web portal — MediaRecorder + WAV encoder |
 | **Live connection health probe** | **Works** | Web portal — `/api/health` |
-| In-app camera preview on phone | Not implemented | GPU can't hold model + camera surface (documented) |
 | Real-time monitoring | Not implemented | Single-encounter assessment by design |
 
 ---

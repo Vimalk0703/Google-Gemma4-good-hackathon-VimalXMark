@@ -65,15 +65,17 @@ Attach in this order:
 
 ## 6. Project Links  *(form field — Attachments → Project Links)*
 
-| Label | URL |
-|---|---|
-| **Live demo (landing + clinical portal)** | https://malaika-delta.vercel.app/ |
-| **Public code repository** | https://github.com/Vimalk0703/Google-Gemma4-good-hackathon-VimalXMark |
-| **Fine-tuned model on Hugging Face** | https://huggingface.co/Vimal0703/malaika-breath-sounds-E4B-merged |
-| **Full storytelling video (12 min, must-watch)** | https://youtu.be/2p932LTc_wE |
-| **Full app demo video (Samsung A53)** | https://youtu.be/yV8jBH6-_I0 |
-| **Sources & citations** | https://github.com/Vimalk0703/Google-Gemma4-good-hackathon-VimalXMark/blob/main/SOURCES.md |
-| **Reasons We Will Fail (anti-marketing)** | https://github.com/Vimalk0703/Google-Gemma4-good-hackathon-VimalXMark/blob/main/REASONS_WE_WILL_FAIL.md |
+Each row below maps to one Kaggle *Project Link* entry. Add them in this order — the first three are the load-bearing artefacts a judge should touch first. If the form accepts a description per link, paste the *Description* column. If it only accepts label + URL, fold the description into the label.
+
+| Label | URL | Description |
+|---|---|---|
+| **Live demo · open clinical portal** | https://malaika-delta.vercel.app/ | The Tier-1 clinical portal — open, no login. Click *Load sample audio* to fire the bundled ICBHI 2017 clip and see the full pipeline (mel-spectrogram → fine-tuned Gemma 4 classification → AI Clinical Note) in ~7 seconds. The cleanest five-minute proof of the submission. |
+| **Public code repository · GitHub** | https://github.com/Vimalk0703/Google-Gemma4-good-hackathon-VimalXMark | Apache 2.0 end-to-end — Flutter app, Python service, fine-tuning notebooks, clinic server, web portal. Start with `README.md` → "Evidence at a glance" for the verification trail. |
+| **Fine-tuned model · Hugging Face** | https://huggingface.co/Vimal0703/malaika-breath-sounds-E4B-merged | The Unsloth award submission. Merged Gemma 4 E4B + QLoRA adapter, fine-tuned on ICBHI 2017 with a patient-level held-out split (no segment-level leakage). 85% crackle detection on patients the model never saw. Reproducible from `notebooks/06_unsloth_binary_phase1.ipynb`. |
+| **Full storytelling film · 12 min · must-watch** | https://youtu.be/2p932LTc_wE | Long-form video for the full picture: the problem, the Umlazi mother, why pneumonia, why only Gemma 4 fits the constraints, the closing argument. Every claim cited; pairs with `SOURCES.md`. |
+| **Full app demo · Samsung A53** | https://youtu.be/yV8jBH6-_I0 | Unedited walkthrough of the Flutter app on a real $60 Samsung A53 in airplane mode — Gemma 4 E2B running fully offline. Every screen, every interaction, no cuts. |
+| **Sources & citations · SOURCES.md** | https://github.com/Vimalk0703/Google-Gemma4-good-hackathon-VimalXMark/blob/main/SOURCES.md | Primary-source URL for every numerical and clinical claim in the videos and the writeup — UNICEF, WHO, the Cochrane Review, peer-reviewed journals, and the original ICBHI 2017 paper. |
+| **Anti-marketing · REASONS_WE_WILL_FAIL.md** | https://github.com/Vimalk0703/Google-Gemma4-good-hackathon-VimalXMark/blob/main/REASONS_WE_WILL_FAIL.md | The list of capabilities Malaika deliberately does *not* claim — phone GPU constraints, hackathon-grade vs FDA-cleared, single-encounter (not real-time), and the honest "projection, not measurement" caveat on the 175,000-children/year impact line. |
 
 ---
 

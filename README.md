@@ -28,8 +28,8 @@ Malaika is the *protocol the child needed, in the device the caregiver already h
 | **🎬 Short cut (Kaggle submission)** | **[youtu.be/Gf415IgJr0s](https://youtu.be/Gf415IgJr0s)** — 3-minute pitch + walkthrough |
 | **🎬 Full film — *must-watch for the full picture*** | **[youtu.be/2p932LTc_wE](https://youtu.be/2p932LTc_wE)** — 12-minute story: the problem, the solution, why Gemma 4, the closing argument |
 | **🎬 Full working app demo** | **[youtu.be/yV8jBH6-_I0](https://youtu.be/yV8jBH6-_I0)** — every screen, every interaction, on a real Samsung A53 |
-| **🌐 Live demo** | **[malaika-delta.vercel.app](https://malaika-delta.vercel.app/)** — landing page + clinical portal |
-| **📱 Android APK** | [malaika-delta.vercel.app/malaika.apk](https://malaika-delta.vercel.app/malaika.apk) — install on any Android with 4 GB RAM |
+| **🌐 Live demo** | **[malaika-delta.vercel.app](https://malaika-delta.vercel.app/)** — landing page + open clinical portal (no login) |
+| **📱 Android APK** | Walked through end-to-end in the demo videos above. Build from source with `cd malaika_flutter && flutter build apk --debug`. |
 | **📄 Kaggle writeup** | [`KAGGLE_WRITEUP.md`](KAGGLE_WRITEUP.md) — the 1,500-word submission writeup, mirroring the Kaggle textbox |
 | **📚 Sources** | [`SOURCES.md`](SOURCES.md) — every claim, every citation, every URL |
 | **🚫 Anti-marketing** | [`REASONS_WE_WILL_FAIL.md`](REASONS_WE_WILL_FAIL.md) — what Malaika does *not* do, on purpose |

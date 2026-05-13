@@ -42,8 +42,9 @@ export default function HomePage() {
 
             <div className="mt-12 flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-5">
               <a
-                href={process.env.NEXT_PUBLIC_APK_URL || "/malaika.apk"}
-                download="malaika.apk"
+                href="https://youtu.be/Gf415IgJr0s"
+                target="_blank"
+                rel="noreferrer"
                 className="inline-flex items-center justify-center gap-3 px-6 py-4 text-base font-medium transition-colors"
                 style={{
                   background: "var(--color-ink)",
@@ -51,9 +52,9 @@ export default function HomePage() {
                   borderRadius: "var(--radius-button)",
                 }}
               >
-                Download for Android
+                Watch the demo
                 <span aria-hidden="true" style={{ fontSize: "0.95em", opacity: 0.7 }}>
-                  · Apache 2.0 · ~360 MB
+                  · 3 min
                 </span>
               </a>
               <Link
@@ -599,8 +600,9 @@ export default function HomePage() {
           <div className="md:col-span-5 md:pl-12">
             <div className="flex flex-col gap-3">
               <a
-                href={process.env.NEXT_PUBLIC_APK_URL || "/malaika.apk"}
-                download="malaika.apk"
+                href="https://youtu.be/Gf415IgJr0s"
+                target="_blank"
+                rel="noreferrer"
                 className="flex items-center justify-between gap-3 px-6 py-4 text-base font-medium transition-colors"
                 style={{
                   background: "var(--color-ink)",
@@ -608,8 +610,8 @@ export default function HomePage() {
                   borderRadius: "var(--radius-button)",
                 }}
               >
-                <span>Download for Android</span>
-                <span aria-hidden="true">↓</span>
+                <span>Watch the demo · 3 min</span>
+                <span aria-hidden="true">↗</span>
               </a>
               <Link
                 href="/portal"
@@ -624,7 +626,7 @@ export default function HomePage() {
                 <span aria-hidden="true">→</span>
               </Link>
               <Link
-                href="https://github.com/malaika-ai/malaika"
+                href="https://github.com/Vimalk0703/Google-Gemma4-good-hackathon-VimalXMark"
                 target="_blank"
                 rel="noreferrer"
                 className="flex items-center justify-between gap-3 px-6 py-4 text-base font-medium"
@@ -635,7 +637,7 @@ export default function HomePage() {
                 }}
               >
                 <span>View source on GitHub</span>
-                <span aria-hidden="true">→</span>
+                <span aria-hidden="true">↗</span>
               </Link>
             </div>
           </div>

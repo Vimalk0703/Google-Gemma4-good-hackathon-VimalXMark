@@ -3,7 +3,7 @@
 > The public-facing landing page and the clinical portal.
 >
 > **Two surfaces, one repository:**
-> - `/` — the marketing-grade story of Malaika, with download CTAs for the Android APK.
+> - `/` — the marketing-grade story of Malaika, with CTAs to the demo video, the clinical portal, and the GitHub source.
 > - `/portal` — a clinical tool where the nurse uploads, records, or loads a sample breathing recording and gets back a Gemma-4-fine-tuned classification served by the village-clinic notebook.
 
 For the Kaggle submission window the portal is **open** — no auth — so judges can land on the page and click *Load sample audio* without friction. The portal is `noindex,nofollow` and the only way to reach the model is via the same-origin proxy, which keeps `BREATH_API_URL` server-side.
@@ -32,7 +32,6 @@ The first paint of `/` should be near-instant — the page is a server component
 | Var | Where read | What it is |
 |-----|------------|------------|
 | `BREATH_API_URL` | Server only (`/api/breath`) | The base URL of `notebooks/12_village_clinic_finetuned.ipynb`'s ngrok tunnel. Update each session — ngrok URLs are ephemeral. |
-| `NEXT_PUBLIC_APK_URL` | Client | The download link for the Android APK release on GitHub. Defaults to the latest-release URL if unset. |
 
 Never put `BREATH_API_URL` behind a `NEXT_PUBLIC_` prefix — it would leak to every browser.
 

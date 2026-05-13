@@ -26,12 +26,14 @@ Malaika competes in two tracks: **Health** (primary) and **Digital Equity** (sec
 | 1 | Kaggle account with identity verification | TODO | Vimal + Mark, before May 17 |
 | 2 | **Working prototype** | DONE | Three first-party surfaces: phone app (`malaika_flutter/`), village-clinic server (`notebooks/12_village_clinic_finetuned.ipynb`), web clinical portal (`web/`) |
 | 3 | **Public code repository** | DONE | `github.com/Vimalk0703/Google-Gemma4-good-hackathon-VimalXMark` (this repo) |
-| 4 | **Public demo** | DONE | APK download link in landing page; live clinical portal at `localhost:3000/portal` (or deployed URL) |
-| 5 | **Public video demonstration** | IN PROGRESS | `VIDEO_SCRIPT.md` (8:30 two-presenter cut, Vimal+Mark), `DEMO_WALKTHROUGH.md` (3:30 standalone phone demo) |
-| 6 | **Technical write-up** | DONE | Refreshed `README.md` (lead with two-tier architecture + AI Clinical Note) + `docs/ARCHITECTURE.md` + this checklist |
+| 4 | **Public live demo** | DONE | **[malaika-delta.vercel.app](https://malaika-delta.vercel.app/)** — landing page + clinical portal, no login required for landing |
+| 5a | **Public video — Kaggle submission (≤3 min)** | DONE | **[youtu.be/Gf415IgJr0s](https://youtu.be/Gf415IgJr0s)** — short pitch + walkthrough · ⚠️ **VERIFY ≤3:00 before attaching** |
+| 5b | **Public video — full storytelling cut** | DONE | **[youtu.be/2p932LTc_wE](https://youtu.be/2p932LTc_wE)** — 12-minute long-form film (linked in writeup as "must-watch for full picture") |
+| 5c | **Public video — full app demo** | DONE | **[youtu.be/yV8jBH6-_I0](https://youtu.be/yV8jBH6-_I0)** — every screen on Samsung A53 |
+| 6 | **Technical write-up (≤1,500 words on Kaggle)** | DONE | [`KAGGLE_WRITEUP.md`](KAGGLE_WRITEUP.md) — paste-ready for the Kaggle Writeup textbox |
 | 7 | **Apache 2.0 license** | DONE | `LICENSE` — covers model fine-tune, app, server, web portal |
-| 8 | **Cover image / media gallery** | TODO | Brief in §"Cover Image Design Brief" below |
-| 9 | **Project write-up on Kaggle** | IN PROGRESS | Will mirror this README, lightly adapted for Kaggle's textbox |
+| 8 | **Cover image / media gallery** | TODO | Brief in §"Cover Image Design Brief" below — 1280×720, JPG ≤ 1 MB |
+| 9 | **Track selection (one required)** | DECIDED | **Impact Track → Health & Sciences** (primary). Auto-eligible for Main Track + Special Tech: Unsloth (we fine-tuned with Unsloth) + LiteRT (phone runs LiteRT-LM) |
 | 10 | **Submission form completion** | TODO | Final step, May 17 |
 
 ---

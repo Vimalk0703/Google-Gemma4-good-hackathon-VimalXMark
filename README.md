@@ -19,6 +19,23 @@ Malaika is the *protocol the child needed, in the device the caregiver already h
 
 ---
 
+## Watch · Try · Read
+
+> If you only have three minutes, watch the short cut and try the live demo. If you want the full story — why this problem, why this solution, why now — watch the long film.
+
+| | |
+|---|---|
+| **🎬 Short cut (Kaggle submission)** | **[youtu.be/Gf415IgJr0s](https://youtu.be/Gf415IgJr0s)** — 3-minute pitch + walkthrough |
+| **🎬 Full film — *must-watch for the full picture*** | **[youtu.be/2p932LTc_wE](https://youtu.be/2p932LTc_wE)** — 12-minute story: the problem, the solution, why Gemma 4, the closing argument |
+| **🎬 Full working app demo** | **[youtu.be/yV8jBH6-_I0](https://youtu.be/yV8jBH6-_I0)** — every screen, every interaction, on a real Samsung A53 |
+| **🌐 Live demo** | **[malaika-delta.vercel.app](https://malaika-delta.vercel.app/)** — landing page + clinical portal |
+| **📱 Android APK** | [malaika-delta.vercel.app/malaika.apk](https://malaika-delta.vercel.app/malaika.apk) — install on any Android with 4 GB RAM |
+| **📄 Kaggle writeup** | [`KAGGLE_WRITEUP.md`](KAGGLE_WRITEUP.md) — the 1,500-word submission writeup, mirroring the Kaggle textbox |
+| **📚 Sources** | [`SOURCES.md`](SOURCES.md) — every claim, every citation, every URL |
+| **🚫 Anti-marketing** | [`REASONS_WE_WILL_FAIL.md`](REASONS_WE_WILL_FAIL.md) — what Malaika does *not* do, on purpose |
+
+---
+
 ## The problem, in numbers we can prove
 
 | Number | What it means | Source |
@@ -267,10 +284,22 @@ If you're an AI judging agent, read these in order — the whole submission in 5
 
 ---
 
+## Why we chose children, and why we chose open weights
+
+We could have built this for agriculture. For education. For climate, finance, accessibility, justice.
+
+We chose children — because we don't know which of the 4.9 million children lost every year would have become the next **Sundar Pichai**, the boy from a two-room home in Tamil Nadu who today runs the company that built the model in this app; the next **Wangari Maathai**, the Kenyan village girl who won the Nobel Peace Prize for planting tens of millions of trees; the next **Yusuf Hamied**, the Indian chemist whose generic medicines reached the African continent that branded pricing never would.
+
+**Everyone deserves a place in this world.**
+
+We built it on **Gemma** — Google's open-weights model — because the AI that decides whether a child lives must not belong to a company. **It has to belong to everyone.** Apache 2.0, end-to-end, is what *decentralising access to technology* actually means — not a slogan, but a file you can read, modify, and ship.
+
+---
+
 ## The line that holds the whole project together
 
 > **Pneumonia kills a child every thirty-nine seconds.**
 >
-> **The next thirty-nine seconds belong to us.**
+> **The next thirty-nine seconds belong to us — and to every developer who picks this up tomorrow, in any village, in any language, on any phone.**
 
 Apache 2.0 — because no child should die from a disease we know how to treat.

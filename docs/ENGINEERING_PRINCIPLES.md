@@ -20,7 +20,7 @@ Every feature, every dependency, every interaction must work with zero internet 
 
 ### P2: Gemma 4 is the Intelligence — Code is the Logic
 
-Gemma 4 handles perception (seeing, hearing, understanding language). Code handles decisions (WHO thresholds, state transitions, classifications). This boundary is absolute.
+Gemma 4<sup>[18](../REFERENCES.md#ref-18)</sup> handles perception (seeing, hearing, understanding language). Code handles decisions (WHO thresholds, state transitions, classifications).<sup>[5](../REFERENCES.md#ref-5)</sup> This boundary is absolute.
 
 **In practice:**
 - Never ask Gemma 4 to make a clinical classification — that's deterministic code
@@ -281,3 +281,13 @@ if rate >= 50:
 - Audio/video parameters: `config.py`
 
 Never duplicate a constant. Import it.
+
+---
+
+## References
+
+External standards cited in this document resolve to the canonical AMA-style reference list at the repository root: [`REFERENCES.md`](../REFERENCES.md). Most relevant entries:
+
+- WHO IMCI clinical protocol — [#5](../REFERENCES.md#ref-5)
+- Gemma 4 model family — [#18](../REFERENCES.md#ref-18), [#19](../REFERENCES.md#ref-19)
+- Gemma terms of use (Apache 2.0) — [#20](../REFERENCES.md#ref-20)

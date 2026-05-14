@@ -15,9 +15,9 @@
 > *"Angel" in Swahili.*
 > A two-tier, open-source WHO IMCI assistant for children — powered end-to-end by **Google Gemma 4**.
 
-**A child dies from pneumonia every thirty-nine seconds.** Almost always preventable. Almost always far from a clinic.
+**A child dies from pneumonia every thirty-nine seconds.**<sup>[3](REFERENCES.md#ref-3)</sup> Almost always preventable. Almost always far from a clinic.
 
-Malaika is the *protocol the child needed, in the device the caregiver already has.* It runs the WHO's [Integrated Management of Childhood Illness](https://www.who.int/teams/maternal-newborn-child-adolescent-health-and-ageing/child-health/integrated-management-of-childhood-illness/) protocol on a sixty-dollar Android in the remotest village (Tier 0 — fully offline), and on a clinic-server with a fine-tuned breath-sound classifier in the village health post twenty kilometres away (Tier 1 — basic internet). Same Gemma 4 family across both tiers. Apache 2.0 from the model weights to the landing page. Built for the [Gemma 4 Good Hackathon](https://www.kaggle.com/competitions/gemma-4-good-hackathon).
+Malaika is the *protocol the child needed, in the device the caregiver already has.* It runs the WHO Integrated Management of Childhood Illness protocol<sup>[5](REFERENCES.md#ref-5)</sup> on a sixty-dollar Android in the remotest village (Tier 0 — fully offline), and on a clinic-server with a fine-tuned breath-sound classifier in the village health post twenty kilometres away (Tier 1 — basic internet). Same Gemma 4 family across both tiers. Apache 2.0 from the model weights to the landing page. Built for the [Gemma 4 Good Hackathon](https://www.kaggle.com/competitions/gemma-4-good-hackathon).
 
 ---
 
@@ -65,23 +65,25 @@ Malaika is the *protocol the child needed, in the device the caregiver already h
 
 ## The problem, in numbers we can prove
 
+> All citations resolve to the canonical AMA-style entry in [`REFERENCES.md`](REFERENCES.md). Numbers below match the numbered superscripts in that file.
+
 | Number | What it means | Source |
 |-------:|---------------|--------|
-| **4.9M** | Children under 5 who died in 2024 | [UN IGME / UNICEF / WHO 2024](https://data.unicef.org/topic/child-survival/under-five-mortality/) |
-| **1.17M** | Killed by pneumonia + diarrhea alone | [UNICEF Pneumonia Statistics 2024](https://data.unicef.org/topic/child-health/pneumonia/) |
-| **39 sec** | One child dies of pneumonia, every | [UNICEF / Save the Children](https://www.unicef.org/press-releases/one-child-dies-pneumonia-every-39-seconds-agencies-warn) |
-| **58%** | Of under-5 deaths in Sub-Saharan Africa | UN IGME 2024 |
-| **15%** | Mortality reduction with full IMCI coverage | [Cochrane Review, Gera et al, 2016](https://www.cochranelibrary.com/cdsr/doi/10.1002/14651858.CD010123.pub2/full) — RR 0.85, n=65,570 |
-| **2 days** | Median rural-Uganda mother delays seeking pneumonia care | [Källander et al, BMJ 2008](https://pmc.ncbi.nlm.nih.gov/articles/PMC2647445/) |
-| **6.1M** | Projected health-worker shortage in Africa by 2030 | [WHO Africa, 2022](https://www.afro.who.int/news/chronic-staff-shortfalls-stifle-africas-health-systems-who-study) |
-| **489M** | Mobile subscribers in Sub-Saharan Africa today | [GSMA Mobile Economy 2024](https://www.gsmaintelligence.com/research/the-mobile-economy-sub-saharan-africa-2024) |
-| **$60** | Working Android phone in target deployment markets | GSMA Smartphone Affordability Index |
+| **4.9M** | Children under 5 who died in 2024 | UN IGME 2024<sup>[1](REFERENCES.md#ref-1)</sup> |
+| **1.17M** | Killed by pneumonia + diarrhea alone | UNICEF 2024<sup>[2](REFERENCES.md#ref-2)</sup> |
+| **39 sec** | One child dies of pneumonia, every | UNICEF / Save the Children<sup>[3](REFERENCES.md#ref-3)</sup> |
+| **58%** | Of under-5 deaths in Sub-Saharan Africa | UN IGME 2024<sup>[1](REFERENCES.md#ref-1)</sup> |
+| **15%** | Mortality reduction with full IMCI coverage (RR 0.85, n=65,570) | Gera et al, *Cochrane*, 2016<sup>[6](REFERENCES.md#ref-6)</sup> |
+| **2 days** | Median rural-Uganda mother delays seeking pneumonia care | Källander et al, *Bull WHO*, 2008<sup>[8](REFERENCES.md#ref-8)</sup> |
+| **6.1M** | Projected health-worker shortage in Africa by 2030 | WHO AFRO, 2022<sup>[13](REFERENCES.md#ref-13)</sup> |
+| **489M** | Mobile subscribers in Sub-Saharan Africa today | GSMA, 2024<sup>[14](REFERENCES.md#ref-14)</sup> |
+| **$60** | Working Android phone in target deployment markets | GSMA Smartphone Affordability Index<sup>[16](REFERENCES.md#ref-16)</sup> |
 
 The medicine exists. The science is settled. **The protocol that could save more than a million children a year is sitting in a manual, in a drawer, in a clinic, in a town that most caregivers will never reach.**
 
 That is not a medical problem. It is a **distribution problem.** Every line of Malaika exists to solve that problem.
 
-**Honest impact projection.** If Malaika reaches anywhere close to the Cochrane 15% mortality reduction on pneumonia and diarrhea, that is **≈175,000 children every year — 480 every day — still in their mothers' arms.** That number is a projection from human-delivered IMCI, not a measurement of Malaika in the field. We say it that way until we have measured it. The anti-marketing record is in [`HONEST_LIMITS.md`](HONEST_LIMITS.md).
+**Honest impact projection.** If Malaika reaches anywhere close to the Cochrane 15% mortality reduction on pneumonia and diarrhea,<sup>[6](REFERENCES.md#ref-6)</sup> that is **≈175,000 children every year — 480 every day — still in their mothers' arms.** That number is a projection from human-delivered IMCI, not a measurement of Malaika in the field. We say it that way until we have measured it. The anti-marketing record is in [`HONEST_LIMITS.md`](HONEST_LIMITS.md).
 
 Every claim above is independently verifiable in [`SOURCES.md`](SOURCES.md).
 
@@ -108,7 +110,7 @@ A hand-crafted Next.js 16 + IBM Plex landing page and an open **Clinical Portal*
 
 ### 4. **The fine-tuned model** ([`🤗 Vimal0703/malaika-breath-sounds-E4B-merged`](https://huggingface.co/Vimal0703/malaika-breath-sounds-E4B-merged))
 
-Trained with **[Unsloth](https://github.com/unslothai/unsloth)** — QLoRA on **Gemma 4 E4B**, on the **ICBHI 2017 Respiratory Sound Database** (920 recordings, 126 patients, 6,898 cycles) re-framed as an audio → mel-spectrogram → vision-encoder pipeline.
+Trained with **[Unsloth](https://github.com/unslothai/unsloth)**<sup>[25](REFERENCES.md#ref-25)</sup> — QLoRA on **Gemma 4 E4B**,<sup>[19](REFERENCES.md#ref-19)</sup> on the **ICBHI 2017 Respiratory Sound Database**<sup>[21](REFERENCES.md#ref-21)</sup> (920 recordings, 126 patients, 6,898 cycles) re-framed as an audio → mel-spectrogram → vision-encoder pipeline.
 
 | | |
 |---|---|
@@ -188,11 +190,11 @@ This is not "we used Gemma 4 as a chatbot." Every named capability below is uniq
 
 | Gemma 4 capability | Where Malaika uses it | Why it matters |
 |---|---|---|
-| **Per-Layer Embeddings (E2B effective architecture)** | The phone fits text + vision + multilingual reasoning in 2.58 GB | First model in the world to do this on a $60 Android. Llama 3.2 1B has no vision. Phi-3 mini doesn't fit. Qwen 2.5 has no vision. We benchmarked. |
+| **Per-Layer Embeddings (E2B effective architecture)**<sup>[18](REFERENCES.md#ref-18)</sup> | The phone fits text + vision + multilingual reasoning in 2.58 GB | First model in the world to do this on a $60 Android. Llama 3.2 1B has no vision. Phi-3 mini doesn't fit. Qwen 2.5 has no vision. We benchmarked. |
 | **Native multimodal vision (SigLIP encoder)** | All 6 vision skills + the spectrogram classifier | One model sees a photo of a child *and* a mel-spectrogram of breath sounds. No separate vision model. |
 | **Native multilingual (140+ languages)** | Caregiver speaks Swahili, Hausa, Hindi, Bengali — Gemma understands | Same model, no translation pipeline, no English bottleneck |
-| **Agentic tool use (1,200% over Gemma 3)** | 12-skill SkillRegistry, BeliefState orchestration, structured events | The agentic layer is what makes WHO IMCI orchestration work on a phone |
-| **Apache 2.0 open source** | The phone holds the weights. The clinic server holds the weights. Nobody depends on a vendor API | The AI that decides whether a child lives must not belong to one company |
+| **Agentic tool use (1,200% over Gemma 3)**<sup>[18](REFERENCES.md#ref-18)</sup> | 12-skill SkillRegistry, BeliefState orchestration, structured events | The agentic layer is what makes WHO IMCI orchestration work on a phone |
+| **Apache 2.0 open source**<sup>[20](REFERENCES.md#ref-20)</sup> | The phone holds the weights. The clinic server holds the weights. Nobody depends on a vendor API | The AI that decides whether a child lives must not belong to one company |
 | **Same family across two sizes (E2B + E4B)** | E2B on phone, E4B + LoRA on clinic server | One architectural mental model scales from village to district |
 
 ### Agentic tool use, in plain language
@@ -205,16 +207,16 @@ Malaika does this same dance. The brain is Gemma 4, running on the caregiver's p
 
 How it works:
 
-- We give Gemma 4 access to **twelve specific clinical skills** — *assess danger signs*, *count breathing*, *check for chest indrawing*, *assess dehydration*, *generate treatment plan*, and so on. Each one corresponds to a step in the WHO Integrated Management of Childhood Illness (IMCI) protocol.<sup>[1](#ref-1)</sup>
+- We give Gemma 4 access to **twelve specific clinical skills** — *assess danger signs*, *count breathing*, *check for chest indrawing*, *assess dehydration*, *generate treatment plan*, and so on. Each one corresponds to a step in the WHO Integrated Management of Childhood Illness (IMCI) protocol.<sup>[5](REFERENCES.md#ref-5)</sup>
 - As the assessment unfolds, Gemma 4 **picks the next skill** based on what is already known about this child. Cough but no fever? Skip the malaria branch. Lethargic? Run the danger-sign check first.
 - After each step, the model's working understanding of the child — call it the **belief state** — is updated: what is confirmed, what is uncertain, what still needs checking.
 - When confidence crosses the threshold the WHO sets for a given pathway, deterministic code — not the language model — emits the classification. That separation (model for reasoning, code for the verdict) is what keeps the medical decision safe.
 
 Three things make this load-bearing:
 
-1. **It is how clinicians actually work.** IMCI is sequential and adaptive by design.<sup>[1](#ref-1)</sup> Modelling assessment as a sequence of tool calls — rather than one giant prompt — is what makes Malaika clinically faithful, not just clinically themed.
-2. **It runs on a $60 Android.** Most language models that can do multi-step orchestration are too big to fit offline on a low-end phone. Gemma 4 E2B does function-calling, vision, multilingual speech, and 12-tool orchestration in 2.58 GB.<sup>[2](#ref-2)</sup>
-3. **The benchmark is real.** Google reports Gemma 4 is approximately twelve times better than Gemma 3 at agentic tool use.<sup>[2](#ref-2)</sup> In our own 21 WHO IMCI golden test scenarios (see [`tests/test_imci_protocol.py`](tests/test_imci_protocol.py)), Gemma 4 routed the conversation correctly across all twelve skills; Gemma 3 stalled or off-ramped in seven of them.
+1. **It is how clinicians actually work.** IMCI is sequential and adaptive by design.<sup>[5](REFERENCES.md#ref-5)</sup> Modelling assessment as a sequence of tool calls — rather than one giant prompt — is what makes Malaika clinically faithful, not just clinically themed.
+2. **It runs on a $60 Android.** Most language models that can do multi-step orchestration are too big to fit offline on a low-end phone. Gemma 4 E2B does function-calling, vision, multilingual speech, and 12-tool orchestration in 2.58 GB.<sup>[18](REFERENCES.md#ref-18)</sup>
+3. **The benchmark is real.** Google reports Gemma 4 is approximately twelve times better than Gemma 3 at agentic tool use.<sup>[18](REFERENCES.md#ref-18)</sup> In our own 21 WHO IMCI golden test scenarios (see [`tests/test_imci_protocol.py`](tests/test_imci_protocol.py)), Gemma 4 routed the conversation correctly across all twelve skills; Gemma 3 stalled or off-ramped in seven of them.
 
 If you remember nothing else, remember this: **the WHO IMCI protocol is not a form to fill in. It is a conversation to have.** Malaika is the first time that conversation can happen — with the right next question every time, in the village, on the phone, in the caregiver's own language, with no internet.
 
@@ -366,8 +368,14 @@ We built it on **Gemma** — Google's open-source model — because the AI that 
 
 ## The line that holds the whole project together
 
-> **Pneumonia kills a child every thirty-nine seconds.**
+> **Pneumonia kills a child every thirty-nine seconds.**<sup>[3](REFERENCES.md#ref-3)</sup>
 >
 > **The next thirty-nine seconds belong to us — and to every developer who picks this up tomorrow, in any village, in any language, on any phone.**
 
 Apache 2.0 — because no child should die from a disease we know how to treat.
+
+---
+
+## References
+
+All numbered citations in this document resolve to the canonical reference list in [`REFERENCES.md`](REFERENCES.md), in American Medical Association (AMA) Manual of Style format. The reference list complements [`SOURCES.md`](SOURCES.md), which provides the same evidence in claim-first conversational form for fact-checkers and journalists.

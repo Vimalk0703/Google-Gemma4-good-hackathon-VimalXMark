@@ -141,6 +141,18 @@ Primary-source URL for every claim — UNICEF, WHO, Cochrane, GSMA, peer-reviewe
 
 ---
 
+### Link 6b · Academic references · REFERENCES.md
+
+**URL:** https://github.com/Vimalk0703/Google-Gemma4-good-hackathon-VimalXMark/blob/main/REFERENCES.md
+
+**Description** *(≤200 chars):*
+
+```
+Canonical numbered reference list in AMA citation style (the format used by JAMA, NEJM, BMJ, Lancet). Every numbered superscript across the writeup resolves here.
+```
+
+---
+
 ### Link 7 · Anti-marketing · HONEST_LIMITS.md
 
 **URL:** https://github.com/Vimalk0703/Google-Gemma4-good-hackathon-VimalXMark/blob/main/HONEST_LIMITS.md

@@ -6,7 +6,7 @@
 
 ## 1. System Overview
 
-Malaika is an offline-first, multimodal child health assessment system built on Gemma 4. It implements the WHO IMCI (Integrated Management of Childhood Illness) protocol as a deterministic state machine, using Gemma 4 for all perception (vision, audio, language understanding) and code for all clinical logic (thresholds, classifications, treatment selection).
+Malaika is an offline-first, multimodal child health assessment system built on Gemma 4.<sup>[18](../REFERENCES.md#ref-18)</sup> It implements the WHO IMCI (Integrated Management of Childhood Illness) protocol<sup>[5](../REFERENCES.md#ref-5)</sup> as a deterministic state machine, using Gemma 4 for all perception (vision, audio, language understanding) and code for all clinical logic (thresholds, classifications, treatment selection).
 
 The system exposes two interfaces sharing the same medical safety boundary (`imci_protocol.py`):
 
@@ -769,3 +769,15 @@ audio call and can be unloaded independently of Gemma 4.
 | Gradio cold start | < 60s | Model loading dominates |
 | TTS generation | < 3s | Near-real-time spoken feedback |
 | Total disk (model + app) | < 10 GB | Reasonable download |
+
+---
+
+## 10. References
+
+External standards and tooling cited in this document resolve to the canonical AMA-style reference list at the repository root: [`REFERENCES.md`](../REFERENCES.md). Most relevant entries:
+
+- WHO IMCI clinical protocol — [#5](../REFERENCES.md#ref-5)
+- Gemma 4 model family — [#18](../REFERENCES.md#ref-18), [#19](../REFERENCES.md#ref-19)
+- Unsloth fine-tuning toolkit — [#25](../REFERENCES.md#ref-25)
+- ICBHI 2017 Respiratory Sound Database — [#21](../REFERENCES.md#ref-21)
+- LiteRT-LM on-device runtime — [#26](../REFERENCES.md#ref-26)

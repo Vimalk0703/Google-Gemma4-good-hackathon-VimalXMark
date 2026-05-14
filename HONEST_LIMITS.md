@@ -12,9 +12,9 @@ These are not "current limitations." These are **deliberate, permanent boundarie
 
 ### 1. Malaika will never diagnose.
 
-Malaika does not output diagnoses. It outputs **WHO IMCI classifications** — the same output a WHO-trained nurse would produce after walking the protocol, no more and no less.
+Malaika does not output diagnoses. It outputs **WHO IMCI classifications**<sup>[5](REFERENCES.md#ref-5)</sup> — the same output a WHO-trained nurse would produce after walking the protocol, no more and no less.
 
-- The classification engine (`imci_protocol.py` / `imci_protocol.dart`) is **deterministic Dart and Python code**. The thresholds are hard-coded from the WHO IMCI chart booklet, with page citations.
+- The classification engine (`imci_protocol.py` / `imci_protocol.dart`) is **deterministic Dart and Python code**. The thresholds are hard-coded from the WHO IMCI chart booklet,<sup>[5](REFERENCES.md#ref-5)</sup> with page citations.
 - The LLM does **perception** (extracting findings from speech, photos). It never decides severity.
 - If a future contributor proposes "let the LLM classify directly," the PR is rejected. Full stop.
 
@@ -88,11 +88,11 @@ Possible if the model misreports findings to the deterministic classifier. The c
 
 ### Failure 4 — The fine-tuned breath-sound model is wrong
 
-We achieved 40% overall, 85% crackle detection on held-out patients from the ICBHI 2017 dataset (notebook 06). That is a real number. It is not a clinical-grade number.
+We achieved 40% overall, 85% crackle detection on held-out patients from the ICBHI 2017 Respiratory Sound Database<sup>[21](REFERENCES.md#ref-21)</sup> (notebook 06). That is a real number. It is not a clinical-grade number.
 
 **Defence:** *Tiered confidence.* The phone never makes a decision based on breath-sound alone — it's one signal of many. The clinic server adds it as supplementary evidence to a nurse's existing assessment. The nurse is the decision-maker. Malaika is a colleague, not a replacement.
 
-**What still slips through:** edge cases the ICBHI 2017 dataset doesn't cover well — small children under 1 year (the dataset skews older). We say this in the model card.
+**What still slips through:** edge cases the ICBHI 2017 dataset<sup>[21](REFERENCES.md#ref-21)</sup> doesn't cover well — small children under 1 year (the dataset skews older). We say this in the model card.
 
 ### Failure 5 — The phone's GPU OOMs mid-session
 
@@ -126,9 +126,9 @@ If Malaika is deployed to a hundred thousand caregivers and every assumption abo
 
 - **Some caregivers will get a wrong assessment.** Some children will be sent to a clinic who didn't need to go (false RED). Some children will be told to monitor at home who needed to go (false GREEN). Both happen with WHO-trained nurses, too. Both happen now, without Malaika.
 
-- **The honest comparison is not "perfect software vs the status quo."** The honest comparison is *"imperfect software in every village, vs perfect software in zero villages."* The Cochrane review on IMCI showed a fifteen-percent mortality reduction with imperfect human implementation. The bar isn't perfection. The bar is **better than no protocol at all.**
+- **The honest comparison is not "perfect software vs the status quo."** The honest comparison is *"imperfect software in every village, vs perfect software in zero villages."* The Cochrane review on IMCI showed a fifteen-percent mortality reduction with imperfect human implementation.<sup>[6](REFERENCES.md#ref-6)</sup> The bar isn't perfection. The bar is **better than no protocol at all.**
 
-- **Pneumonia kills a child every thirty-nine seconds.** If Malaika is deployed and reduces that to forty, we have changed the world. If it changes nothing, we have at least shipped open source so that someone better than us can pick up where we left off.
+- **Pneumonia kills a child every thirty-nine seconds.**<sup>[3](REFERENCES.md#ref-3)</sup> If Malaika is deployed and reduces that to forty, we have changed the world. If it changes nothing, we have at least shipped open source so that someone better than us can pick up where we left off.
 
 ---
 
@@ -158,3 +158,5 @@ Three reasons we wrote this:
 ---
 
 *Last updated: 2026-04-30. Authored by the Malaika team.*
+
+*Numbered superscripts above (e.g., <sup>[5](REFERENCES.md#ref-5)</sup>) resolve to the AMA-style canonical reference list in [`REFERENCES.md`](REFERENCES.md). Companion claim-first index: [`SOURCES.md`](SOURCES.md).*

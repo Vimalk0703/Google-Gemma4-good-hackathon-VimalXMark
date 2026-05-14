@@ -1,6 +1,6 @@
 # Malaika — putting the WHO's child-survival protocol in a sixty-dollar phone
 
-> **A child dies of pneumonia every thirty-nine seconds.** The medicine costs five cents. The protocol is thirty years old. *It still isn't reaching her.* Malaika puts it in her hand.
+> **A child dies of pneumonia every thirty-nine seconds.**<sup>[3](REFERENCES.md#ref-3)</sup> The medicine costs five cents. The protocol is thirty years old. *It still isn't reaching her.* Malaika puts it in her hand.
 
 *👉 If you have twelve minutes, please watch the [full storytelling film](https://youtu.be/2p932LTc_wE) — it is a must for the full picture. The [3-minute pitch](https://youtu.be/Gf415IgJr0s) is in the media gallery.*
 
@@ -8,11 +8,11 @@
 
 ## The problem isn't medicine. It's distribution.
 
-In 2024, **4.9 million children** under five did not see their fifth birthday (UN IGME / UNICEF / WHO, 2025). Fifty-eight percent in Sub-Saharan Africa. Of those, **1.17 million** were killed by two diseases — pneumonia and diarrhea (WHO Guideline, 2024).
+In 2024, **4.9 million children** under five did not see their fifth birthday.<sup>[1](REFERENCES.md#ref-1)</sup> Fifty-eight percent in Sub-Saharan Africa. Of those, **1.17 million** were killed by two diseases — pneumonia and diarrhea.<sup>[2](REFERENCES.md#ref-2)</sup>
 
-The numbers persist not because the medicine fails, but because the medicine never arrives. The WHO wrote a protocol for these conditions — **Integrated Management of Childhood Illness (IMCI)** — in the mid-1990s. A Cochrane review (Gera et al., 2016) found that fully implemented IMCI cuts under-five mortality by **15%**.
+The numbers persist not because the medicine fails, but because the medicine never arrives. The WHO wrote a protocol for these conditions — **Integrated Management of Childhood Illness (IMCI)** — in the mid-1990s.<sup>[5](REFERENCES.md#ref-5)</sup> A Cochrane review found that fully implemented IMCI cuts under-five mortality by **15%** (RR 0.85; 95% CI 0.78–0.93; n=65,570).<sup>[6](REFERENCES.md#ref-6)</sup>
 
-But to learn IMCI a nurse trains for eleven days. Africa has **1.5 health workers** per thousand people; the WHO minimum is 4.45. By 2030 the shortage will exceed **6 million** (WHO Africa, 2024). The median rural-Uganda mother waits **two days** before seeking pneumonia care (Källander et al., Bull WHO, 2008). For pneumonia, two days is the entire window between life and death.
+But to learn IMCI a nurse trains for eleven days.<sup>[7](REFERENCES.md#ref-7)</sup> Africa has **1.5 health workers** per thousand people; the WHO minimum is 4.45.<sup>[12](REFERENCES.md#ref-12)</sup> By 2030 the shortage will exceed **6 million**.<sup>[13](REFERENCES.md#ref-13)</sup> The median rural-Uganda mother waits **two days** before seeking pneumonia care.<sup>[8](REFERENCES.md#ref-8)</sup> For pneumonia, two days is the entire window between life and death.
 
 The protocol that could save a million children a year is sitting in a manual, in a drawer, in a clinic she will never reach. That is not a medical problem. **It is a distribution problem.**
 
@@ -20,7 +20,7 @@ The protocol that could save a million children a year is sitting in a manual, i
 
 ## Umlazi
 
-A peer-reviewed case-series from a township outside Durban (Nsibande et al., 2013) documents **five infants who died en route home from hospital**. A young mother is discharged with her newborn. Halfway home on the bus, the baby starts breathing too fast. She knows something is wrong. What she doesn't know is *how* wrong — whether tonight is *get off this bus* or *see how he sleeps*.
+A peer-reviewed case-series from a township outside Durban documents **five infants who died en route home from hospital**.<sup>[10](REFERENCES.md#ref-10)</sup> A young mother is discharged with her newborn. Halfway home on the bus, the baby starts breathing too fast. She knows something is wrong. What she doesn't know is *how* wrong — whether tonight is *get off this bus* or *see how he sleeps*.
 
 That second kind of knowing has a name: **the WHO IMCI protocol**. That night, it was sitting in a manual, in a drawer, in a clinic she couldn't afford to ride to. She has no bus fare. She holds her child. She prays. By the time she steps off, the baby has died.
 
@@ -30,7 +30,7 @@ What was missing was never only the medicine. It was the **certainty** of knowin
 
 ## The paradox
 
-**The phone got to the village before the doctor did.** **489 million** unique mobile subscribers in Sub-Saharan Africa (GSMA, 2023). Entry-level Android handsets at **~$60**. The hardware is in her pocket. The protocol is in a drawer.
+**The phone got to the village before the doctor did.** **489 million** unique mobile subscribers in Sub-Saharan Africa.<sup>[14](REFERENCES.md#ref-14)</sup> Entry-level Android handsets at **~$60**.<sup>[16](REFERENCES.md#ref-16)</sup> The hardware is in her pocket. The protocol is in a drawer.
 
 *What if the phone could **be** the doctor?*
 
@@ -58,11 +58,11 @@ Next.js 16, browser-native audio capture, live connection-health probe, the **AI
 
 Every capability below is unique to Gemma 4 and could not be substituted on this hardware.
 
-- **Per-Layer Embeddings (E2B).** Fits text + vision + multilingual reasoning in 2.58 GB on a $60 Android. Benchmarked on the same A53: Llama 3.2 1B/3B has no vision; 11B-Vision (~8 GB) doesn't fit; Phi-3.5-Vision is English-leaning; Qwen 2.5-VL lacks African coverage. **Only Gemma 4 E2B meets all four constraints — size, vision, multilingual, on-device speed.**
+- **Per-Layer Embeddings (E2B).**<sup>[18](REFERENCES.md#ref-18)</sup> Fits text + vision + multilingual reasoning in 2.58 GB on a $60 Android. Benchmarked on the same A53: Llama 3.2 1B/3B has no vision; 11B-Vision (~8 GB) doesn't fit; Phi-3.5-Vision is English-leaning; Qwen 2.5-VL lacks African coverage. **Only Gemma 4 E2B meets all four constraints — size, vision, multilingual, on-device speed.**
 - **Native multimodal vision (SigLIP).** Six on-phone vision skills *and* mel-spectrogram classification on the clinic server — **one model sees a photo of a child and a spectrogram of breath sounds.**
 - **Native multilingual (140+ languages).** Swahili, Hausa, Hindi, Bengali — Gemma understands her. **No translation pipeline.**
-- **Agentic tool use.** A 12-skill `SkillRegistry`, structured event emission, typed `BeliefState`. Gemma 4's native function-calling makes IMCI orchestration work on a phone.
-- **Apache 2.0 open source.** Phone and clinic both hold the weights. **No vendor API.**
+- **Agentic tool use** (~12× improvement over Gemma 3).<sup>[18](REFERENCES.md#ref-18)</sup> A 12-skill `SkillRegistry`, structured event emission, typed `BeliefState`. Gemma 4's native function-calling makes IMCI orchestration work on a phone. *In plain terms:* the model picks the next clinical question based on what is already known about the child — exactly how an experienced nurse works through an IMCI assessment.
+- **Apache 2.0 open source.**<sup>[20](REFERENCES.md#ref-20)</sup> Phone and clinic both hold the weights. **No vendor API.**
 
 ---
 
@@ -84,7 +84,7 @@ One model. One session. **A chart-grade reasoning artifact**, not just a probabi
 
 ## Fine-tuning that means something
 
-**Unsloth QLoRA on Gemma 4 E4B**, trained on ICBHI 2017 audio → mel-spectrogram → vision pipeline. **85% crackle detection on a held-out patient cohort** the model never saw. Adapter: [`Vimal0703/malaika-breath-sounds-E4B-merged`](https://huggingface.co/Vimal0703/malaika-breath-sounds-E4B-merged). Reproducible from `notebooks/06_unsloth_binary_phase1.ipynb`. **Hackathon-grade, not FDA-cleared.**
+**Unsloth QLoRA**<sup>[25](REFERENCES.md#ref-25)</sup> **on Gemma 4 E4B**, trained on the ICBHI 2017 Respiratory Sound Database<sup>[21](REFERENCES.md#ref-21)</sup> audio → mel-spectrogram → vision pipeline. **85% crackle detection on a held-out patient cohort** the model never saw. Adapter: [`Vimal0703/malaika-breath-sounds-E4B-merged`](https://huggingface.co/Vimal0703/malaika-breath-sounds-E4B-merged). Reproducible from `notebooks/06_unsloth_binary_phase1.ipynb`. **Hackathon-grade, not FDA-cleared.**
 
 ---
 
@@ -106,8 +106,12 @@ We built it on **Gemma** because the AI that decides whether a child lives must 
 
 ## The next thirty-nine seconds
 
-Anywhere close to the 15% IMCI number on pneumonia and diarrhea is **~175,000 children a year — 480 every day — still in their mothers' arms**. A projection from human-delivered IMCI, not a measurement. We say it that way until we have measured it.
+Anywhere close to the 15% IMCI number<sup>[6](REFERENCES.md#ref-6)</sup> on pneumonia and diarrhea is **~175,000 children a year — 480 every day — still in their mothers' arms**. A projection from human-delivered IMCI, not a measurement. We say it that way until we have measured it.
 
-**Pneumonia kills a child every thirty-nine seconds. The next thirty-nine seconds belong to us — and to every developer who picks this up tomorrow, in any village, in any language, on any phone.**
+**Pneumonia kills a child every thirty-nine seconds.<sup>[3](REFERENCES.md#ref-3)</sup> The next thirty-nine seconds belong to us — and to every developer who picks this up tomorrow, in any village, in any language, on any phone.**
 
 — *Vimal & Mark, May 2026. Apache 2.0.*
+
+---
+
+*Every numbered superscript above resolves to the canonical AMA-style reference in [`REFERENCES.md`](REFERENCES.md). Companion claim-first index: [`SOURCES.md`](SOURCES.md).*

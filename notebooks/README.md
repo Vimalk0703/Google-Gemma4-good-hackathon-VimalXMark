@@ -72,7 +72,7 @@ Two reasons.
 
 **One — reproducibility.** A fine-tune is the sum of every decision that came before it. Notebook 02's overfit failure is *why* notebook 06 has anti-overfit settings. Notebook `06_finetune_audio_features` is *why* the spectrogram path was chosen over the audio-features-as-text path. Deleting them deletes the *why*.
 
-**Two — anti-marketing.** `REASONS_WE_WILL_FAIL.md` says we don't hide the failure modes. The superseded notebooks are the same principle applied to engineering history: we tried things, they didn't work, here's what we kept and what we replaced. Anyone forking this repo can see the path, not just the destination.
+**Two — anti-marketing.** `HONEST_LIMITS.md` says we don't hide the failure modes. The superseded notebooks are the same principle applied to engineering history: we tried things, they didn't work, here's what we kept and what we replaced. Anyone forking this repo can see the path, not just the destination.
 
 If you are reproducing the fine-tune, **only** run `06_unsloth_binary_phase1.ipynb`. The others are not part of the pipeline.
 

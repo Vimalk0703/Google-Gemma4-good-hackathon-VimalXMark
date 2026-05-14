@@ -92,7 +92,7 @@ One model. One session. **A chart-grade reasoning artifact**, not just a probabi
 
 Every WHO IMCI classification — *severe pneumonia*, *some dehydration*, *moderate wasting* — is a **hard-coded threshold** in deterministic code, never a probability from the model. If WHO updates a threshold, we change one line. *We do not let an AI decide whether a child lives or dies.* The AI's job is the human part — listening, looking, translating. The medicine belongs to the World Health Organization.
 
-Backed by **104+ passing tests, 21/21 WHO IMCI golden scenarios**, three-layer security guards, 31 versioned prompts, per-step observability. We do not claim video breathing-rate (GPU constraints), real-time monitoring, or FDA clearance — every honest limit is in [`REASONS_WE_WILL_FAIL.md`](https://github.com/Vimalk0703/Google-Gemma4-good-hackathon-VimalXMark/blob/main/REASONS_WE_WILL_FAIL.md). Every number is cited in [`SOURCES.md`](https://github.com/Vimalk0703/Google-Gemma4-good-hackathon-VimalXMark/blob/main/SOURCES.md). **We came with receipts.**
+Backed by **104+ passing tests, 21/21 WHO IMCI golden scenarios**, three-layer security guards, 31 versioned prompts, per-step observability. We do not claim video breathing-rate (GPU constraints), real-time monitoring, or FDA clearance — every honest limit is in [`HONEST_LIMITS.md`](https://github.com/Vimalk0703/Google-Gemma4-good-hackathon-VimalXMark/blob/main/HONEST_LIMITS.md). Every number is cited in [`SOURCES.md`](https://github.com/Vimalk0703/Google-Gemma4-good-hackathon-VimalXMark/blob/main/SOURCES.md). **We came with receipts.**
 
 ---
 

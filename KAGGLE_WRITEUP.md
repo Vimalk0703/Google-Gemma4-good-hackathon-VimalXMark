@@ -141,9 +141,9 @@ Primary-source URL for every claim — UNICEF, WHO, Cochrane, GSMA, peer-reviewe
 
 ---
 
-### Link 7 · Anti-marketing · REASONS_WE_WILL_FAIL.md
+### Link 7 · Anti-marketing · HONEST_LIMITS.md
 
-**URL:** https://github.com/Vimalk0703/Google-Gemma4-good-hackathon-VimalXMark/blob/main/REASONS_WE_WILL_FAIL.md
+**URL:** https://github.com/Vimalk0703/Google-Gemma4-good-hackathon-VimalXMark/blob/main/HONEST_LIMITS.md
 
 **Description** *(≤200 chars):*
 
@@ -180,7 +180,7 @@ Before clicking **Submit** on Kaggle:
 - [ ] App demo video attached to media gallery
 - [ ] Project Description (body of §7 above) pasted into textbox
 - [ ] Word count verified ≤ 1,500
-- [ ] Project Links all added (live demo, GitHub repo, APK, HF model, sources, REASONS_WE_WILL_FAIL)
+- [ ] Project Links all added (live demo, GitHub repo, APK, HF model, sources, HONEST_LIMITS)
 - [ ] GitHub repo set to **public**
 - [ ] Vercel deployment is live and the landing page loads with no login
 - [ ] Apache 2.0 LICENSE file is in the repo root

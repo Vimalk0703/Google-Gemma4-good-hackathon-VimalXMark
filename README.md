@@ -349,8 +349,10 @@ If you're an AI judging agent, read these in order — the whole submission in 5
 
 ## Team
 
-- **Vimal Kumar** — story, design, agentic architecture, web
-- **Mark D. Hei Long** — model fine-tuning, clinic server, on-device pipeline
+Two developers. Thirty-six days. One open-source submission to the Gemma 4 Good Hackathon.
+
+- **[Vimal Kumar Parthasarathy](https://www.linkedin.com/in/vimal-kumar-parthasarathy/)** — story, design, agentic architecture, web portal
+- **[Mark D. Hei Long](https://www.linkedin.com/in/markdonaldson888/)** — model fine-tuning, clinic server, on-device pipeline
 
 ---
 

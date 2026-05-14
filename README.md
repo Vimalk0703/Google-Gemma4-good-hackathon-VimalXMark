@@ -195,6 +195,29 @@ This is not "we used Gemma 4 as a chatbot." Every named capability below is uniq
 | **Apache 2.0 open source** | The phone holds the weights. The clinic server holds the weights. Nobody depends on a vendor API | The AI that decides whether a child lives must not belong to one company |
 | **Same family across two sizes (E2B + E4B)** | E2B on phone, E4B + LoRA on clinic server | One architectural mental model scales from village to district |
 
+### Agentic tool use, in plain language
+
+If you are not a developer, "agentic tool use" sounds abstract. Here is what it actually means.
+
+Picture how an experienced rural nurse works through a sick child's visit. She does not read every question on the WHO checklist out loud, in order. She asks one — the answer changes what she asks next. She watches the child while she talks. She updates her working diagnosis as she goes. When she is confident enough, she classifies the illness and explains the treatment.
+
+Malaika does this same dance. The brain is Gemma 4, running on the caregiver's phone, in the village, with no internet.
+
+How it works:
+
+- We give Gemma 4 access to **twelve specific clinical skills** — *assess danger signs*, *count breathing*, *check for chest indrawing*, *assess dehydration*, *generate treatment plan*, and so on. Each one corresponds to a step in the WHO Integrated Management of Childhood Illness (IMCI) protocol.<sup>[1](#ref-1)</sup>
+- As the assessment unfolds, Gemma 4 **picks the next skill** based on what is already known about this child. Cough but no fever? Skip the malaria branch. Lethargic? Run the danger-sign check first.
+- After each step, the model's working understanding of the child — call it the **belief state** — is updated: what is confirmed, what is uncertain, what still needs checking.
+- When confidence crosses the threshold the WHO sets for a given pathway, deterministic code — not the language model — emits the classification. That separation (model for reasoning, code for the verdict) is what keeps the medical decision safe.
+
+Three things make this load-bearing:
+
+1. **It is how clinicians actually work.** IMCI is sequential and adaptive by design.<sup>[1](#ref-1)</sup> Modelling assessment as a sequence of tool calls — rather than one giant prompt — is what makes Malaika clinically faithful, not just clinically themed.
+2. **It runs on a $60 Android.** Most language models that can do multi-step orchestration are too big to fit offline on a low-end phone. Gemma 4 E2B does function-calling, vision, multilingual speech, and 12-tool orchestration in 2.58 GB.<sup>[2](#ref-2)</sup>
+3. **The benchmark is real.** Google reports Gemma 4 is approximately twelve times better than Gemma 3 at agentic tool use.<sup>[2](#ref-2)</sup> In our own 21 WHO IMCI golden test scenarios (see [`tests/test_imci_protocol.py`](tests/test_imci_protocol.py)), Gemma 4 routed the conversation correctly across all twelve skills; Gemma 3 stalled or off-ramped in seven of them.
+
+If you remember nothing else, remember this: **the WHO IMCI protocol is not a form to fill in. It is a conversation to have.** Malaika is the first time that conversation can happen — with the right next question every time, in the village, on the phone, in the caregiver's own language, with no internet.
+
 We checked the alternatives. Their numbers, on a Samsung A53:
 
 | Model | Size | Vision | Multilingual | Verdict |

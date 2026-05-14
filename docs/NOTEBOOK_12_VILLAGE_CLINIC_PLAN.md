@@ -309,7 +309,7 @@ print("Tier 1 (clinic, basic internet) — this notebook")
 
 ## What This Notebook Does NOT Do
 
-(Per `REASONS_WE_WILL_FAIL.md`, we are explicit about boundaries.)
+(Per `HONEST_LIMITS.md`, we are explicit about boundaries.)
 
 - It does not claim production-grade clinical accuracy. The 40% overall / 85% crackle number is from the ICBHI 2017 held-out set. It is a hackathon-grade fine-tune, not an FDA-cleared classifier.
 - It does not run on the phone. By design — the phone doesn't have the GPU headroom, which is exactly why this tier exists.

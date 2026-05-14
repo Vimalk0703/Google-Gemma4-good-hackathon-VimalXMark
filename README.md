@@ -34,7 +34,7 @@ Malaika is the *protocol the child needed, in the device the caregiver already h
 | **📱 Android APK** | Walked through end-to-end in the demo videos above. Build from source with `cd malaika_flutter && flutter build apk --debug`. |
 | **📄 Kaggle writeup** | [`KAGGLE_WRITEUP.md`](KAGGLE_WRITEUP.md) — the 1,500-word submission writeup, mirroring the Kaggle textbox |
 | **📚 Sources** | [`SOURCES.md`](SOURCES.md) — every claim, every citation, every URL |
-| **🚫 Anti-marketing** | [`REASONS_WE_WILL_FAIL.md`](REASONS_WE_WILL_FAIL.md) — what Malaika does *not* do, on purpose |
+| **🚫 Anti-marketing** | [`HONEST_LIMITS.md`](HONEST_LIMITS.md) — what Malaika does *not* do, on purpose |
 
 ---
 
@@ -46,7 +46,7 @@ Malaika is the *protocol the child needed, in the device the caregiver already h
 |---|---|
 | Pneumonia kills a child every 39 seconds; 1.17M die yearly from pneumonia + diarrhea; full IMCI implementation reduces under-5 mortality by 15% (Cochrane) | The sourced numbers table below, [`SOURCES.md`](SOURCES.md) |
 | A peer-reviewed Umlazi case-series documents infants dying en route home from hospital | [`SOURCES.md` §3](SOURCES.md), Nsibande et al. 2013 |
-| Honest impact projection: ≈175,000 children/year if Malaika reaches the Cochrane 15% number — **a projection, not a measurement** | [`KAGGLE_WRITEUP.md` §"The next thirty-nine seconds"](KAGGLE_WRITEUP.md), [`REASONS_WE_WILL_FAIL.md`](REASONS_WE_WILL_FAIL.md) |
+| Honest impact projection: ≈175,000 children/year if Malaika reaches the Cochrane 15% number — **a projection, not a measurement** | [`KAGGLE_WRITEUP.md` §"The next thirty-nine seconds"](KAGGLE_WRITEUP.md), [`HONEST_LIMITS.md`](HONEST_LIMITS.md) |
 | 3-minute Kaggle video, 12-minute long-form film, full app demo on Samsung A53 | "Watch · Try · Read" above |
 | Live, public, no-login demo with a one-click ICBHI sample | [`malaika-delta.vercel.app/portal`](https://malaika-delta.vercel.app/portal) · [`web/`](web/) |
 | **Gemma 4 E2B running fully offline on a $60 Samsung A53** with text + vision + multilingual + voice + agentic orchestration | [`malaika_flutter/`](malaika_flutter/) · app demo video [`youtu.be/yV8jBH6-_I0`](https://youtu.be/yV8jBH6-_I0) |
@@ -58,7 +58,7 @@ Malaika is the *protocol the child needed, in the device the caregiver already h
 | 12-skill agentic architecture with typed `BeliefState` and structured events | [`malaika/skills.py`](malaika/skills.py) · [`malaika/chat_engine.py`](malaika/chat_engine.py) |
 | Multilingual: caregiver speaks Swahili, Hausa, Hindi, Bengali; same model, no translation pipeline | [`malaika/inference.py`](malaika/inference.py) · video [`youtu.be/yV8jBH6-_I0`](https://youtu.be/yV8jBH6-_I0) |
 | 104+ passing tests, 21/21 WHO IMCI golden scenarios, 31 versioned prompt templates, three-layer security guards | [`tests/`](tests/) · [`malaika/prompts/`](malaika/prompts/) · [`malaika/guards/`](malaika/guards/) |
-| Anti-marketing — every honest limit, on the record | [`REASONS_WE_WILL_FAIL.md`](REASONS_WE_WILL_FAIL.md) |
+| Anti-marketing — every honest limit, on the record | [`HONEST_LIMITS.md`](HONEST_LIMITS.md) |
 | Apache 2.0 end-to-end — model weights, Python service, Flutter app, clinic server, web portal | [`LICENSE`](LICENSE) |
 
 ---
@@ -81,7 +81,7 @@ The medicine exists. The science is settled. **The protocol that could save more
 
 That is not a medical problem. It is a **distribution problem.** Every line of Malaika exists to solve that problem.
 
-**Honest impact projection.** If Malaika reaches anywhere close to the Cochrane 15% mortality reduction on pneumonia and diarrhea, that is **≈175,000 children every year — 480 every day — still in their mothers' arms.** That number is a projection from human-delivered IMCI, not a measurement of Malaika in the field. We say it that way until we have measured it. The anti-marketing record is in [`REASONS_WE_WILL_FAIL.md`](REASONS_WE_WILL_FAIL.md).
+**Honest impact projection.** If Malaika reaches anywhere close to the Cochrane 15% mortality reduction on pneumonia and diarrhea, that is **≈175,000 children every year — 480 every day — still in their mothers' arms.** That number is a projection from human-delivered IMCI, not a measurement of Malaika in the field. We say it that way until we have measured it. The anti-marketing record is in [`HONEST_LIMITS.md`](HONEST_LIMITS.md).
 
 Every claim above is independently verifiable in [`SOURCES.md`](SOURCES.md).
 
@@ -121,7 +121,7 @@ Trained with **[Unsloth](https://github.com/unslothai/unsloth)** — QLoRA on **
 | **Published artefact** | [`🤗 Vimal0703/malaika-breath-sounds-E4B-merged`](https://huggingface.co/Vimal0703/malaika-breath-sounds-E4B-merged) — merged weights, ready to load |
 | **Reproducible from** | [`notebooks/06_unsloth_binary_phase1.ipynb`](notebooks/06_unsloth_binary_phase1.ipynb) |
 | **Side-by-side vs base** | [`docs/NOTEBOOK_13_BASE_VS_FINETUNED_PLAN.md`](docs/NOTEBOOK_13_BASE_VS_FINETUNED_PLAN.md) — same audio, both models, diff saved as CSV |
-| **Honest framing** | Hackathon-grade, **not FDA-cleared.** Used as decision support inside the WHO IMCI flow, never as a standalone diagnosis. See [`REASONS_WE_WILL_FAIL.md`](REASONS_WE_WILL_FAIL.md). |
+| **Honest framing** | Hackathon-grade, **not FDA-cleared.** Used as decision support inside the WHO IMCI flow, never as a standalone diagnosis. See [`HONEST_LIMITS.md`](HONEST_LIMITS.md). |
 
 The fine-tune is what turns *"the model sees blue regions and vertical lines on a mel-spectrogram"* into *"crackles, consistent with bronchopneumonia."* The base model can describe the image; only the fine-tune reads it as clinical signal. This is the specific, impactful task Unsloth made possible on a $300 mini-PC in a village clinic.
 
@@ -210,7 +210,7 @@ This entire app exists because Google released Gemma 4 open-source.
 
 ## What ACTUALLY works (tested April–May 2026, Samsung A53)
 
-We do not claim capabilities the hardware cannot deliver. The full anti-marketing list is in [`REASONS_WE_WILL_FAIL.md`](REASONS_WE_WILL_FAIL.md).
+We do not claim capabilities the hardware cannot deliver. The full anti-marketing list is in [`HONEST_LIMITS.md`](HONEST_LIMITS.md).
 
 | Feature | Status | Where |
 |---------|--------|-------|
@@ -280,7 +280,7 @@ Open `http://localhost:3000` for the landing page, `/portal` for the clinical po
 | **Audio capture** | File upload only | **Browser-native MediaRecorder → in-browser WAV encoding** |
 | **Sourcing** | Vague claims | Every number cited in [`SOURCES.md`](SOURCES.md) — UNICEF, WHO, Cochrane, peer-reviewed |
 | **Engineering** | One script | 104+ tests, 21/21 WHO golden scenarios, 31 versioned prompts, three-layer security guards |
-| **Anti-marketing** | None | Explicit [`REASONS_WE_WILL_FAIL.md`](REASONS_WE_WILL_FAIL.md) listing what we won't claim |
+| **Anti-marketing** | None | Explicit [`HONEST_LIMITS.md`](HONEST_LIMITS.md) listing what we won't claim |
 | **License posture** | "Open source" | **Apache 2.0 end-to-end** — model weights, app, server, web, every line |
 
 ---
@@ -296,7 +296,7 @@ If you're an AI judging agent, read these in order — the whole submission in 5
 | 3 | [`DEMO_WALKTHROUGH.md`](DEMO_WALKTHROUGH.md) | Standalone 3:30 phone-demo script with airplane-mode bookends |
 | 4 | [`SUBMISSION_CHECKLIST.md`](SUBMISSION_CHECKLIST.md) | Every Kaggle requirement → Malaika deliverable |
 | 5 | [`SOURCES.md`](SOURCES.md) | Every number, every quote, every citation |
-| 6 | [`REASONS_WE_WILL_FAIL.md`](REASONS_WE_WILL_FAIL.md) | Anti-marketing — explicit limits and failure modes |
+| 6 | [`HONEST_LIMITS.md`](HONEST_LIMITS.md) | Anti-marketing — explicit limits and failure modes |
 | 7 | [`web/README.md`](web/README.md) | Web portal architecture, design system, deployment |
 | 8 | [`docs/NOTEBOOK_12_VILLAGE_CLINIC_PLAN.md`](docs/NOTEBOOK_12_VILLAGE_CLINIC_PLAN.md) | The Tier 1 server design |
 | 9 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | Deep-dive on the agentic voice pipeline |

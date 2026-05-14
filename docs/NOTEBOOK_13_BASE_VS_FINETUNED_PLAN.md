@@ -30,7 +30,7 @@ The notebook proves four things:
 
 ### Cell 0 — Markdown header
 
-Mission statement, link back to `VIDEO_SCRIPT.md` §9 and `REASONS_WE_WILL_FAIL.md` §4 (where we say the 85% is hackathon-grade, not FDA-cleared).
+Mission statement, link back to `VIDEO_SCRIPT.md` §9 and `HONEST_LIMITS.md` §4 (where we say the 85% is hackathon-grade, not FDA-cleared).
 
 ### Cell 1 — Install
 
@@ -264,7 +264,7 @@ print("This is the receipt for VIDEO_SCRIPT.md §9.")
 
 ## What This Notebook Does NOT Do
 
-(Per `REASONS_WE_WILL_FAIL.md`, we are explicit about boundaries.)
+(Per `HONEST_LIMITS.md`, we are explicit about boundaries.)
 
 - It does not claim that 85% crackle detection is clinical-grade. It is the held-out number on ICBHI 2017. We restate the limit.
 - It does not extend to children under one year — ICBHI 2017's age distribution skews older. The model card says so. The README repeats it.

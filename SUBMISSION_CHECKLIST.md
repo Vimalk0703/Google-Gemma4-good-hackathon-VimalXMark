@@ -73,7 +73,7 @@ The hackathon emphasises three dimensions: **Impact & Vision · Video Pitch & St
 | **Two-tier architecture** (offline phone + village clinic with internet) | E2B on phone + E4B + LoRA on clinic server | `notebooks/12_village_clinic_finetuned.ipynb` (planned, see `docs/NOTEBOOK_12_VILLAGE_CLINIC_PLAN.md`) |
 | End-to-end workflow | Voice → vision → reconciliation → WHO classification → treatment plan | `README.md` flow diagram |
 | Reproducibility | 104+ tests, 21/21 golden scenarios, mypy strict, ruff lint | `tests/`, `docs/TESTING_STRATEGY.md` |
-| Safety engineering | Three-layer guards, deterministic classification, anti-marketing limits page | `malaika/guards/`, `REASONS_WE_WILL_FAIL.md` |
+| Safety engineering | Three-layer guards, deterministic classification, anti-marketing limits page | `malaika/guards/`, `HONEST_LIMITS.md` |
 
 ---
 
@@ -120,7 +120,7 @@ If you're an LLM-based judging agent reading this repo, here is the optimal trav
 2. **`VIDEO_SCRIPT.md`** — the two-presenter video script. The narrative version of everything in the README.
 3. **`DEMO_WALKTHROUGH.md`** — the standalone 3:30 phone demo script. Proves the offline claims.
 4. **`SUBMISSION_CHECKLIST.md`** *(this file)* — maps competition requirements to deliverables.
-5. **`REASONS_WE_WILL_FAIL.md`** — the anti-marketing document. What Malaika won't do, and where it can fail. Read this if you suspect we're overclaiming.
+5. **`HONEST_LIMITS.md`** — the anti-marketing document. What Malaika won't do, and where it can fail. Read this if you suspect we're overclaiming.
 6. **`CLAUDE.md`** — internal project rules. Reads like a coding charter.
 7. **`docs/ARCHITECTURE.md`** — the deep dive on the agentic voice pipeline.
 8. **`docs/FINETUNING_ROADMAP.md`** — what we fine-tuned, what we plan to fine-tune, the metrics we hit.
@@ -152,7 +152,7 @@ If you only have time for two files: **`README.md`** and **`VIDEO_SCRIPT.md`** a
 - [x] **31 versioned prompt templates** in `malaika/prompts/`
 - [x] **Two-presenter video script** (`VIDEO_SCRIPT.md`) — Vimal carries story, Mark carries engineering
 - [x] **Standalone demo walkthrough** (`DEMO_WALKTHROUGH.md`) — 3:30 phone demo with airplane-mode bookends
-- [x] **Anti-marketing document** (`REASONS_WE_WILL_FAIL.md`) — explicit "never claim" boundaries
+- [x] **Anti-marketing document** (`HONEST_LIMITS.md`) — explicit "never claim" boundaries
 - [x] **Sources doc** (`SOURCES.md`) — every numerical claim cited with verifiable URL
 - [x] **README refresh** — leads with two-tier architecture, model benchmark table, judge-traversal order
 - [x] **Apache 2.0 license** end-to-end
@@ -163,7 +163,7 @@ If you only have time for two files: **`README.md`** and **`VIDEO_SCRIPT.md`** a
 - [ ] Build hero cover image for Kaggle thumbnail (1280×720) — brief below
 - [ ] Side-by-side benchmark notebook against Llama / Phi / Qwen (table is in README; reproducible script TBD)
 - [ ] One real clinical voice on record (target: pediatric resident or MSF doctor — backup: Miriam Alia / Dr. Loice Mutai quotes already cited in `SOURCES.md`)
-- [ ] Build a release APK (current is debug; release build hits a Flutter/Gradle compatibility issue documented in `REASONS_WE_WILL_FAIL.md`)
+- [ ] Build a release APK (current is debug; release build hits a Flutter/Gradle compatibility issue documented in `HONEST_LIMITS.md`)
 - [ ] Vercel deploy of the web portal so judges have a stable demo URL
 - [ ] Kaggle submission form filled, identity verified
 - [ ] Mirror project write-up on Kaggle's submission textbox
@@ -171,7 +171,7 @@ If you only have time for two files: **`README.md`** and **`VIDEO_SCRIPT.md`** a
 ### Explicitly out of scope (for hackathon submission)
 - Real clinical trial data (requires IRB, partnership, months — not 36 days)
 - iOS app (focus stays on Android — that's where the phones-in-villages story lives)
-- Live camera preview on phone (Mali GPU constraint, see `REASONS_WE_WILL_FAIL.md` §6)
+- Live camera preview on phone (Mali GPU constraint, see `HONEST_LIMITS.md` §6)
 - Audio/breath analysis on phone (deferred to Tier 1 clinic server by design)
 - Real per-clinician authentication (the portal is open for the Kaggle submission window so judges have zero-friction access; indefensible for real patient data — documented as future work in `web/README.md`)
 

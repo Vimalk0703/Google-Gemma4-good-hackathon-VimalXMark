@@ -34,7 +34,7 @@ dependencies:
   path_provider: ^2.1.5
 
   # Permissions
-  permission_handler: ^11.3.1
+  permission_handler: ^12.0.1
 
   # HTTP for model download
   http: ^1.2.0
